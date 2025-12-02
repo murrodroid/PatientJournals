@@ -3,12 +3,14 @@ from tools import render_columns
 
 cfg = dict(
     columns = dict(
-        name = "The name of the patient.",
-        age = "The age of the patient",
-        diagnosesObs = "",
-        serum = "This may not appear",
+        name = "type:str, The name of the patient.",
+        age = "type:int>0, The age of the patient.",
+        diagnosesObs = "type:str, The diagnosis as written by the physician.",
+        dateOfAdmission = "type:datetime, The day the patient was admitted to the hospital.",
+        physician = "type:str, The physician who did the survey.",
     ),
-    model = 'gemini-3-pro-preview',
+    model = 'gemini-2.5-flash-preview-09-2025',
+    verification_model = '',
 )
 
 image_settings = dict(
