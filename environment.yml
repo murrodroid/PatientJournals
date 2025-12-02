@@ -1,0 +1,13 @@
+name: PatientJournals
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - numpy
+  - pandas
+  - scikit-image
+  - opencv
+  - pillow
+  - pip
+  - pip:
+    - google-genai
