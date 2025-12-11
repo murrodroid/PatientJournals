@@ -2,10 +2,9 @@
 from tools import render_columns
 
 cfg = dict(
-    model = 'gemini-2.5-flash-preview-09-2025',
+    model = 'gemini-3-pro-preview',
     verification_model = '',
 )
-
 
 image_settings = dict(
     max_dim = 3000,
@@ -32,6 +31,8 @@ prompts = dict(
     You are given a scanned page from a Danish hospital patient journal from the late 1800s.
     Your task is to extract data from the content on the page.
 
+    The typical order of basic information is: name, age, occupation, address.
+
     Objective:
     Fill each column with the information found in the image.
     If a column cannot be determined, return an empty string for that position.
@@ -43,12 +44,14 @@ prompts = dict(
     Do not add spaces before or after the $ separators.
 
     Columns:
-    {render_columns(cfg.get('columns'))}
+    {render_columns(columns)}
+
+    Examples are always written as "Examples: [example1,example2,example3]"
 
     Guidelines:
     - Use only what is visible in the image.
     - Do not infer or guess beyond the evidence on the page.
-    - Preserve spellings exactly as written, even if archaic or non-standard.
+    - Preserve spellings exactly as written, even if archaic or non-standard. Only exception is numbers, which should be written as float-values.s
     - If multiple values exist for a field, choose the most prominent or clearly stated one.
     - If nothing fits a column, output an empty field for that position (e.g., value1$$value3 for three columns where the middle one is unknown).
     - Replace any newline characters within a field with a single space.

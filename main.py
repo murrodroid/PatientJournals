@@ -2,16 +2,18 @@ from preprocess import preprocess_image
 from google import genai
 from google.genai import types
 from config import *
-from api_keys import gemini as api_key
+from api_keys import gemini_maarten as api_key
 import pandas as pd
 from tools import parse_separated
 
+
 def main():
+    model = cfg.get('model')
     client = genai.Client(api_key=api_key)
 
     data = ['test_image.png']
 
-    df = pd.DataFrame(columns=[key for key in columns.keys()] + ['file_name'])
+    df = pd.DataFrame(columns=[key for key in columns.keys()] + ['file_name','model_used'])
 
     try:
         for i, d in enumerate(data):
@@ -23,7 +25,7 @@ def main():
             )
 
             output = client.models.generate_content(
-                model=cfg.get('model'),
+                model=model,
                 contents=[
                     types.Part.from_bytes(
                         data=image_bytes,
@@ -36,7 +38,7 @@ def main():
             output_list = parse_separated(output.text, symbol='$')
 
             if len(output_list) == len(columns):
-                row = output_list + [d]
+                row = output_list + [d,model]
                 df.loc[i] = row
             else:
                 raise AssertionError('Length of output does not match columns.')
