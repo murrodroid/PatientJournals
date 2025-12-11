@@ -2,16 +2,16 @@ from preprocess import preprocess_image
 from google import genai
 from google.genai import types
 from config import *
-from api_keys import gemini
+from api_keys import gemini as api_key
 import pandas as pd
 from tools import parse_separated
 
 def main():
-    client = genai.Client(api_key=gemini)
+    client = genai.Client(api_key=api_key)
 
     data = ['test_image.png']
 
-    df = pd.DataFrame(columns=[key for key in cfg.get('columns').keys()] + ['file_name'])
+    df = pd.DataFrame(columns=[key for key in columns.keys()] + ['file_name'])
 
     try:
         for i, d in enumerate(data):
@@ -29,19 +29,19 @@ def main():
                         data=image_bytes,
                         mime_type=mime_type
                     ),
-                    prompts.get('primary', 'ERROR retrieving prompt. Return OUTPUT = ERROR.')
+                    prompts.get('primary')
                 ]
             )
 
             output_list = parse_separated(output.text, symbol='$')
 
-            if len(output_list) == len(cfg.get('columns')):
+            if len(output_list) == len(columns):
                 row = output_list + [d]
                 df.loc[i] = row
             else:
                 raise AssertionError('Length of output does not match columns.')
         
-        # add verification loop using other model
+            # add verification loop using other model/prompt    
 
     except Exception as e:
         print(f"Stopping early due to error: {e}")

@@ -2,16 +2,10 @@
 from tools import render_columns
 
 cfg = dict(
-    columns = dict(
-        name = "type:str, The name of the patient.",
-        age = "type:int>0, The age of the patient.",
-        diagnosesObs = "type:str, The diagnosis as written by the physician.",
-        dateOfAdmission = "type:datetime, The day the patient was admitted to the hospital.",
-        physician = "type:str, The physician who did the survey.",
-    ),
     model = 'gemini-2.5-flash-preview-09-2025',
     verification_model = '',
 )
+
 
 image_settings = dict(
     max_dim = 3000,
@@ -19,8 +13,21 @@ image_settings = dict(
     output_format = "PNG",
 )
 
+columns = dict(
+        name = "type:str, The name of the patient.",
+        age = "type:float64>0, The age of the patient.",
+        diagnosesObs = "type:str, The diagnosis as written by the physician.",
+        dateOfAdmission = "type:datetime, The day the patient was admitted to the hospital.",
+        physician = "type:str, The physician who did the survey.",
+    )
+
+# prompt ideas:
+## add "page on the right" context
+##
+
 prompts = dict(
-    primary = f"""
+    primary = 
+    f"""
     Context:
     You are given a scanned page from a Danish hospital patient journal from the late 1800s.
     Your task is to extract data from the content on the page.
