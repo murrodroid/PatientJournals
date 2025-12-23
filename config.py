@@ -3,7 +3,7 @@ cfg = dict(
     verification_model = '',
     batch_size = 2048,
     dataset_file_name = 'dataset',
-    target_folder='data',
+    target_folder='data/1may96_fp',
     input_glob='*.png',
     recursive=False,
     output_root='runs',
@@ -12,12 +12,12 @@ cfg = dict(
 image_settings = dict(
     max_dim = 3000,
     contrast_factor = 1.1,
-    margins = (50, # left
+    margins = (400, # left
                0,  # top
                0,  # right
                0,  # bottom
                ),
-    output_format = "PNG",
+    output_format = 'PNG',
 )
 
 prompts = dict(

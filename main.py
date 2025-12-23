@@ -31,7 +31,7 @@ def main():
             rows.append(journal_row)
 
             if len(rows) >= batch_size:
-                header_written = flush_csv(rows, str(out_csv_path), header_written)
+                header_written = flush_csv(rows=rows, out_csv=str(out_csv_path), header_written=header_written)
                 rows.clear() 
 
     except Exception as e:
@@ -39,7 +39,7 @@ def main():
 
     finally:
         if rows:
-            header_written = flush_csv(rows, str(out_csv_path), header_written)
+            header_written = flush_csv(rows=rows, out_csv=str(out_csv_path), header_written=header_written)
 
 
 

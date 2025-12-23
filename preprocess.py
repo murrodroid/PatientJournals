@@ -1,5 +1,6 @@
 from pathlib import Path
 from io import BytesIO
+import io
 from mimetypes import guess_type
 
 from PIL import Image, ImageEnhance
@@ -79,3 +80,31 @@ def preprocess_image(
     img = enhance_contrast(img, factor=contrast_factor)
     image_bytes, mime_type = image_to_bytes(img, format_hint=output_format)
     return image_bytes, mime_type
+
+if __name__ == "__main__":
+    def preview_preprocessed_image(
+        image_path: str | Path,
+        max_dim: int = 3000,
+        margins: tuple[int, int, int, int] = (0, 0, 0, 0),
+        contrast_factor: float = 1.0,
+        output_format: str = "PNG",
+    ) -> tuple[bytes, str]:
+        image_bytes, mime_type = preprocess_image(
+            path=str(image_path),
+            max_dim=max_dim,
+            margins=margins,
+            contrast_factor=contrast_factor,
+            output_format=output_format,
+        )
+
+        img = Image.open(io.BytesIO(image_bytes))
+        img.show()
+        return image_bytes, mime_type
+    
+    preview_preprocessed_image(
+    "data/test_image.png",
+    max_dim=3000,
+    margins=(400, 0, 0, 0),
+    contrast_factor=1.1,
+    output_format="PNG",
+    )
