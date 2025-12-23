@@ -9,6 +9,7 @@ dependencies:
   - opencv
   - pillow
   - openpyxl
+  - tqdm
   - pip
   - pip:
     - google-genai

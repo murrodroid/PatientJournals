@@ -7,6 +7,7 @@ import pandas as pd
 from classes import Journal
 from tools import data_to_row, flush_csv, create_subfolder, list_input_files
 from generate import generate_data
+from tqdm import tqdm
 
 
 def main():
@@ -24,7 +25,7 @@ def main():
     out_csv_path = run_dir / f"{out_name}.csv"
 
     try:
-        for file_name in data:
+        for file_name in tqdm(data, desc="Processing images", unit="img"):
             journal_data = generate_data(client=client,model=model,file_name=file_name)
             journal_row = data_to_row(data=journal_data,file_name=file_name)
             
