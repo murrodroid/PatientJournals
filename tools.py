@@ -1,3 +1,4 @@
+from __future__ import annotations
 import pandas as pd
 from datetime import datetime
 from pathlib import Path
@@ -6,8 +7,6 @@ import types
 import config as config_module
 from config import cfg
 from classes import Journal
-from __future__ import annotations
-
 
 def data_to_row(data: Journal, file_name: str) -> dict:
     row = data.model_dump(mode="python")
