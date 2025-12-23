@@ -2,7 +2,7 @@ cfg = dict(
     model = 'gemini-3-pro-preview',
     verification_model = '',
     batch_size = 2048,
-    dataset_file_name = 'test_dataset'
+    dataset_file_name = 'dataset'
 )
 
 image_settings = dict(
