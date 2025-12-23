@@ -9,11 +9,9 @@ from classes import Journal
 from __future__ import annotations
 
 
-
 def data_to_row(data: Journal, file_name: str) -> dict:
     row = data.model_dump(mode="python")
     row["file_name"] = file_name
-    row["model_used"] = cfg.get('model',None)
     return row
 
 def flush_csv(rows: list[dict], out_csv: str, header_written: bool, sep: str = '$') -> bool:
@@ -58,3 +56,18 @@ def create_subfolder(root: str | Path = "runs") -> Path:
     )
 
     return run_dir
+
+def list_input_files(cfg: dict) -> list[str]:
+    folder = Path(cfg["target_folder"]).expanduser()
+    if not folder.exists() or not folder.is_dir():
+        raise FileNotFoundError(f"target_folder not found or not a directory: {folder}")
+
+    pattern = cfg.get("input_glob", "*")
+    recursive = bool(cfg.get("recursive", False))
+
+    paths = folder.rglob(pattern) if recursive else folder.glob(pattern)
+    files = sorted(p for p in paths if p.is_file())
+    if not files:
+        raise FileNotFoundError(f"No files matched {pattern} in {folder} (recursive={recursive})")
+
+    return [str(p) for p in files]

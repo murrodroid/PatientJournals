@@ -5,7 +5,7 @@ from config import *
 from api_keys import gemini_maarten as api_key
 import pandas as pd
 from classes import Journal
-from tools import data_to_row, flush_csv, create_subfolder
+from tools import data_to_row, flush_csv, create_subfolder, list_input_files
 from generate import generate_data
 
 
@@ -13,14 +13,14 @@ def main():
     model = cfg.get('model')
     client = genai.Client(api_key=api_key)
     
-    data = ['test_image.png']
+    data = list_input_files(cfg)
     
     batch_size = cfg.get('batch_size',1024)
     rows: list[dict] = []
     header_written = False
-    out_name = cfg.get('dataset_file_name')
 
-    run_dir = create_subfolder()
+    out_name = cfg.get('dataset_file_name', 'dataset')
+    run_dir = create_subfolder(cfg.get("output_root", "runs"))
     out_csv_path = run_dir / f"{out_name}.csv"
 
     try:
