@@ -4,51 +4,40 @@ from google.genai import types
 from config import *
 from api_keys import gemini_maarten as api_key
 import pandas as pd
-from tools import parse_separated
+from classes import Journal
+from tools import data_to_row, flush_csv
+from generate import generate_data
 
 
 def main():
     model = cfg.get('model')
     client = genai.Client(api_key=api_key)
-
+    
     data = ['test_image.png']
-
-    df = pd.DataFrame(columns=[key for key in columns.keys()] + ['file_name','model_used'])
+    
+    batch_size = cfg.get('batch_size',1024)
+    rows: list[dict] = []
+    header_written = False
+    out_name = cfg.get('dataset_file_name')
 
     try:
-        for i, d in enumerate(data):
-            image_bytes, mime_type = preprocess_image(
-                d,
-                max_dim=image_settings.get('max_dim'),
-                contrast_factor=image_settings.get('contrast_factor'),
-                output_format=image_settings.get('output_format'),
-            )
+        for i, file_name in enumerate(data):
+            journal_data = generate_data(client=client,model=model,file_name=file_name)
+            journal_row = data_to_row(data=journal_data,file_name=file_name)
+            
+            rows.append(journal_row)
 
-            output = client.models.generate_content(
-                model=model,
-                contents=[
-                    types.Part.from_bytes(
-                        data=image_bytes,
-                        mime_type=mime_type
-                    ),
-                    prompts.get('primary')
-                ]
-            )
-
-            output_list = parse_separated(output.text, symbol='$')
-
-            if len(output_list) == len(columns):
-                row = output_list + [d,model]
-                df.loc[i] = row
-            else:
-                raise AssertionError('Length of output does not match columns.')
-        
-            # add verification loop using other model/prompt    
+            if len(rows) >= batch_size:
+                header_written = flush_csv(rows, out_name + '.csv', header_written)
+                rows.clear() 
 
     except Exception as e:
         print(f"Stopping early due to error: {e}")
+
     finally:
-        df.to_excel('test_dataset.xlsx')
+        if rows:
+            header_written = flush_csv(rows, out_name + '.csv', header_written)
+
 
 
 if __name__ == "__main__":
