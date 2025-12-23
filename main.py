@@ -5,7 +5,7 @@ from config import *
 from api_keys import gemini_maarten as api_key
 import pandas as pd
 from classes import Journal
-from tools import data_to_row, flush_csv
+from tools import data_to_row, flush_csv, create_subfolder
 from generate import generate_data
 
 
@@ -20,6 +20,9 @@ def main():
     header_written = False
     out_name = cfg.get('dataset_file_name')
 
+    run_dir = create_subfolder()
+    out_csv_path = run_dir / f"{out_name}.csv"
+
     try:
         for i, file_name in enumerate(data):
             journal_data = generate_data(client=client,model=model,file_name=file_name)
@@ -28,7 +31,7 @@ def main():
             rows.append(journal_row)
 
             if len(rows) >= batch_size:
-                header_written = flush_csv(rows, out_name + '.csv', header_written)
+                header_written = flush_csv(rows, str(out_csv_path), header_written)
                 rows.clear() 
 
     except Exception as e:
@@ -36,7 +39,7 @@ def main():
 
     finally:
         if rows:
-            header_written = flush_csv(rows, out_name + '.csv', header_written)
+            header_written = flush_csv(rows, str(out_csv_path), header_written)
 
 
 
