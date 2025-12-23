@@ -8,9 +8,10 @@ from classes import Journal
 def generate_data(client: genai.Client, model: str, file_name: str) -> Journal:
     image_bytes, mime_type = preprocess_image(
         file_name,
-        max_dim=image_settings.get("max_dim"),
-        contrast_factor=image_settings.get("contrast_factor"),
-        output_format=image_settings.get("output_format"),
+        max_dim=image_settings.get("max_dim", 3000),
+        margins=tuple(image_settings.get("margins", (0, 0, 0, 0))),
+        contrast_factor=image_settings.get("contrast_factor", 1.0),
+        output_format=image_settings.get("output_format", "PNG"),
     )
 
     output = client.models.generate_content(

@@ -23,15 +23,23 @@ def resize_image(img, max_dim=3000):
     return img.resize(new_size, Image.BICUBIC)
 
 
-def crop_margins(img, margin_px=0):
-    if margin_px <= 0:
-        return img
+def crop_margins(img, left=0, top=0, right=0, bottom=0):
     w, h = img.size
-    left = margin_px
-    top = margin_px
-    right = max(w - margin_px, left + 1)
-    bottom = max(h - margin_px, top + 1)
-    return img.crop((left, top, right, bottom))
+
+    left = max(0, int(left))
+    top = max(0, int(top))
+    right = max(0, int(right))
+    bottom = max(0, int(bottom))
+
+    x1 = min(left, w - 1)
+    y1 = min(top, h - 1)
+    x2 = max(w - right, x1 + 1)
+    y2 = max(h - bottom, y1 + 1)
+
+    x2 = min(x2, w)
+    y2 = min(y2, h)
+
+    return img.crop((x1, y1, x2, y2))
 
 
 def enhance_contrast(img, factor=1.0):
@@ -58,13 +66,16 @@ def image_to_bytes(img, format_hint="PNG"):
 def preprocess_image(
     path,
     max_dim=3000,
-    margin_px=0,
+    margins=(0, 0, 0, 0),
     contrast_factor=1.0,
     output_format="PNG",
 ):
     img = load_image(path)
     img = resize_image(img, max_dim=max_dim)
-    img = crop_margins(img, margin_px=margin_px)
+
+    left, top, right, bottom = margins
+    img = crop_margins(img, left=left, top=top, right=right, bottom=bottom)
+
     img = enhance_contrast(img, factor=contrast_factor)
     image_bytes, mime_type = image_to_bytes(img, format_hint=output_format)
     return image_bytes, mime_type

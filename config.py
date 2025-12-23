@@ -8,6 +8,11 @@ cfg = dict(
 image_settings = dict(
     max_dim = 3000,
     contrast_factor = 1.1,
+    margins = (50, # left
+               0,  # top
+               0,  # right
+               0,  # bottom
+               ),
     output_format = "PNG",
 )
 
