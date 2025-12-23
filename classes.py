@@ -13,6 +13,6 @@ class Journal(BaseModel):
     addressNumber: int = Field(description="Address number on the street. Strictly a single integer, written next to the street.")
     addressApartment: str = Field(description="Written left of the address number, describing the (danish-system) apartment floor. Typically written with smaller font size. It's often a number, sometimes text, sometimes both. Examples: [3, 1ste, St., kælderen]")
     dead: bool = Field(description="Determines whether the patient is dead. If true, a black cross is drawn on the page, typically at the top. Sometimes it looks like a plus, '+'. If the cross does not appear, it is False.")
-    admissionDate: datetime = Field(description="Written after “Indl”, and the upper-most date on the page. May feature additional text indicating time of day, otherwise assume hour 0. If year isn't written, remember to add year 1890.")
+    admissionDate: datetime = Field(description="Written after “Indl”, and the upper-most date on the page. May feature additional text indicating time of day, otherwise assume hour 0. If year isn't written, year is assumed as 1896.")
     releaseDate: datetime = Field(description="Written after 'Udskr', beneath admissionDate. May feature additional text indicating time of day, otherwise assume hour 0. If year isn't written, remember to add year 1890.")
     stayLength: str = Field(description="Written beneath the release date. Commonly a number describing days, but sometimes also indication of hours spent. Examples: [2 Dage (11 Timer), 5.5 Timer, 9 Dage, 3]")
