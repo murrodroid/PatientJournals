@@ -24,7 +24,7 @@ def main():
     out_csv_path = run_dir / f"{out_name}.csv"
 
     try:
-        for i, file_name in enumerate(data):
+        for file_name in data:
             journal_data = generate_data(client=client,model=model,file_name=file_name)
             journal_row = data_to_row(data=journal_data,file_name=file_name)
             
