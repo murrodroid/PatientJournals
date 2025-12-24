@@ -1,5 +1,6 @@
 cfg = dict(
     model = 'gemini-3-pro-preview',
+    concurrent_tasks = 6,
     verification_model = '',
     batch_size = 2048,
     dataset_file_name = 'dataset',

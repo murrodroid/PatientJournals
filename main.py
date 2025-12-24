@@ -1,22 +1,20 @@
-from preprocess import preprocess_image
+import asyncio
 from google import genai
-from google.genai import types
-from config import *
+from tqdm.asyncio import tqdm_asyncio
+
 from api_keys import gemini_maarten as api_key
-import pandas as pd
-from classes import Journal
-from tools import data_to_row, flush_csv, create_subfolder, list_input_files
-from generate import generate_data
-from tqdm import tqdm
+from config import *
+from tools import *
+from generate import process_file
 
 
-def main():
+async def main():
     model = cfg.get('model')
     client = genai.Client(api_key=api_key)
     
     data = list_input_files(cfg)
     
-    batch_size = cfg.get('batch_size',1024)
+    batch_size = cfg.get('batch_size')
     rows: list[dict] = []
     header_written = False
 
@@ -24,18 +22,23 @@ def main():
     run_dir = create_subfolder(cfg.get("output_root", "runs"))
     out_csv_path = run_dir / f"{out_name}.csv"
 
+    sem = asyncio.Semaphore(cfg.get('concurrent_tasks'))
+
     try:
-        for file_name in tqdm(data, desc="Processing images", unit="img"):
-            journal_data = generate_data(client=client,model=model,file_name=file_name)
-            journal_row = data_to_row(data=journal_data,file_name=file_name)
+        tasks = [process_file(sem, client, model, f) for f in data]
+
+        for coro in tqdm_asyncio.as_completed(tasks, desc="Processing images", unit="img"):
+            journal_row = await coro
             
-            rows.append(journal_row)
+            if journal_row:
+                rows.append(journal_row)
 
             if len(rows) >= batch_size:
                 header_written = flush_csv(rows=rows, out_csv=str(out_csv_path), header_written=header_written)
                 rows.clear() 
 
     except Exception as e:
+        write_run_error(run_dir, e)
         print(f"Stopping early due to error: {e}")
 
     finally:
@@ -43,6 +46,5 @@ def main():
             header_written = flush_csv(rows=rows, out_csv=str(out_csv_path), header_written=header_written)
 
 
-
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
