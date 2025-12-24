@@ -1,12 +1,16 @@
 from __future__ import annotations
+
 import pandas as pd
 from datetime import datetime
 from pathlib import Path
 import json
 import types
+import traceback
+
 import config as config_module
 from config import cfg
 from classes import Journal
+
 
 def data_to_row(data: Journal, file_name: str) -> dict:
     row = data.model_dump(mode="python")
@@ -70,3 +74,18 @@ def list_input_files(cfg: dict) -> list[str]:
         raise FileNotFoundError(f"No files matched {pattern} in {folder} (recursive={recursive})")
 
     return [str(p) for p in files]
+
+def write_run_error(run_dir: str | Path, exc: BaseException) -> Path:
+    run_path = Path(run_dir)
+    run_path.mkdir(parents=True, exist_ok=True)
+
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    err_path = run_path / f"error_{stamp}.txt"
+
+    msg = "".join(
+        traceback.format_exception(type(exc), exc, exc.__traceback__)
+    )
+    err_path.write_text(msg, encoding="utf-8")
+    return err_path
+
+
