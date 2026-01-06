@@ -8,6 +8,7 @@ cfg = dict(
     input_glob='*.png',
     recursive=False,
     output_root='runs',
+    batch_upload_limit = 20
 )
 
 image_settings = dict(
