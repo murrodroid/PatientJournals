@@ -5,7 +5,7 @@ from datetime import datetime
 
 class Journal(BaseModel):
     name: str               = Field(description="The name of the patient.")
-    age: float              = Field(description="The age of the patient. Written next to 'Aar'. In some cases, there are multiple guesses of age, ie '2 (2.5?)'. In the case of additional notation, only use the initial age mentioned (in this case, 2).")
+    age: float              = Field(description="The age (in years) of the patient. Written next to 'Aar'. In some cases, there are multiple guesses of age, ie '2 (2.5?)'. In the case of additional notation, only use the initial age mentioned (in this case, 2).")
     age_note: str           = Field(description="All additional data included after the age. Examples: [Aar, (2.5?)]")
     index: int              = Field(description="Index value of the patient journal. Typically written above the patient's name.")
     ward: str               = Field(description="Letter+number combination found in the top-left corner of the page. Numbers may sometimes be written with roman numerals.")

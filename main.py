@@ -19,15 +19,15 @@ async def main():
     header_written = False
 
     out_name = cfg.get('dataset_file_name', 'dataset')
-    run_dir = create_subfolder(cfg.get("output_root", "runs"))
-    out_csv_path = run_dir / f"{out_name}.csv"
+    run_dir = create_subfolder(cfg.get('output_root', 'runs'))
+    out_csv_path = run_dir / f'{out_name}.csv'
 
     sem = asyncio.Semaphore(cfg.get('concurrent_tasks'))
 
     try:
         tasks = [process_file(sem, client, model, f) for f in data]
 
-        for coro in tqdm_asyncio.as_completed(tasks, desc="Processing images", unit="img"):
+        for coro in tqdm_asyncio.as_completed(tasks, desc='Processing images', unit='img'):
             journal_row = await coro
             
             if journal_row:
@@ -39,12 +39,12 @@ async def main():
 
     except Exception as e:
         write_run_error(run_dir, e)
-        print(f"Stopping early due to error: {e}")
+        print(f'Stopping early due to error: {e}')
 
     finally:
         if rows:
             header_written = flush_csv(rows=rows, out_csv=str(out_csv_path), header_written=header_written)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     asyncio.run(main())
