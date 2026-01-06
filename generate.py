@@ -1,6 +1,7 @@
 import asyncio
 from google import genai
 from google.genai import types
+import time
 
 from preprocess import preprocess_image
 from config import *
@@ -8,7 +9,7 @@ from classes import Journal
 from tools import data_to_row
 
 
-async def generate_data(client: genai.Client, model: str, file_name: str) -> Journal:
+async def generate_data(client: genai.Client, model: str, file_name: str) -> tuple[Journal,float]:
     image_bytes, mime_type = await asyncio.to_thread(
         preprocess_image,
         file_name,
@@ -18,6 +19,7 @@ async def generate_data(client: genai.Client, model: str, file_name: str) -> Jou
         output_format=image_settings.get("output_format", "PNG"),
     )
 
+    start_time = time.perf_counter()
     output = await client.aio.models.generate_content(
         model=model,
         contents=[
@@ -29,13 +31,17 @@ async def generate_data(client: genai.Client, model: str, file_name: str) -> Jou
             "response_json_schema": Journal.model_json_schema(),
         },
     )
+    end_time = time.perf_counter()
+    duration = end_time - start_time
 
-    return Journal.model_validate_json(output.text)
+    return Journal.model_validate_json(output.text), duration
 
 async def process_file(sem, client, model, file_name):
     async with sem:
         try:
-            journal_data = await generate_data(client=client, model=model, file_name=file_name)
-            return data_to_row(data=journal_data, file_name=file_name)
+            journal_data,duration = await generate_data(client=client, model=model, file_name=file_name)
+            row = data_to_row(data=journal_data, file_name=file_name)
+            row['generation_seconds'] = duration
+            return row
         except Exception as e:
             return None
