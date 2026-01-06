@@ -33,10 +33,10 @@ prompts = dict(
 
     Objective:
     Fill each column with the information found in the image.
-    If a column cannot be determined, return an empty string for that position.
+    Not all columns are present within an image, meaning it isn't necessary to fill out all.
 
     Guidelines:
-    - Examples are always written as "Examples: [example1,example2,example3]"
+    - Examples are always written as 'Examples: [example1,example2,example3]'
     - Use only what is visible in the image.
     - Do not infer or guess beyond the evidence on the page.
     - Preserve spellings exactly as written, even if archaic or non-standard. Only exception is numbers, which should be written as float-values.

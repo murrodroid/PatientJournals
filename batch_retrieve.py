@@ -11,7 +11,7 @@ from classes import Journal
 
 def get_target_run_dir(user_path: str | None) -> Path | None:
     """
-    Determines the run directory based on user input or auto-discovery.
+    Determines the run directory.
     """
     # specified run
     if user_path:
@@ -110,3 +110,6 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+    # in terminal:
+    #   python batch_retrieve.py runs/20250501_103000
+    # to specify run

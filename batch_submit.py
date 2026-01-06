@@ -124,6 +124,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-    # in terminal:
-    # python batch_retrieve.py runs/20250501_103000
-    # to specify run
