@@ -23,7 +23,7 @@ async def main():
     output_format = cfg.get('output_format', 'csv')
     run_dir = create_subfolder(cfg.get('output_root', 'runs'))
     log = get_run_logger(run_dir)
-    out_path = run_dir / f'{out_name}.{output_format.lstrip(".")}'
+    out_path = run_dir / f'{run_dir.name}_{out_name}.{output_format.lstrip(".")}'
 
     sem = asyncio.Semaphore(cfg.get('concurrent_tasks'))
 
