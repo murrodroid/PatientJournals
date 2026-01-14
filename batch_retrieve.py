@@ -7,7 +7,8 @@ from pathlib import Path
 from google import genai
 
 from api_keys import gemini_maarten as api_key
-from classes import Journal
+from schemas import Journal
+from tools import data_to_row
 
 def get_target_run_dir(user_path: str | None) -> Path | None:
     """
@@ -83,8 +84,7 @@ async def main():
                 try:
                     journal = Journal.model_validate_json(response_text)
                     
-                    row = journal.model_dump(mode="python")
-                    row["file_name"] = custom_id 
+                    row = data_to_row(data=journal, file_name=custom_id)
                     rows.append(row)
                 except Exception as e:
                     print(f"Error parsing result for {custom_id}: {e}")
