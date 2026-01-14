@@ -17,15 +17,38 @@ def data_to_row(data: Journal, file_name: str) -> dict:
     row["file_name"] = file_name
     return row
 
-def flush_csv(rows: list[dict], out_csv: str, header_written: bool, sep: str = '$') -> bool:
-    pd.DataFrame.from_records(rows).to_csv(
-        out_csv,
-        mode="a",
-        index=False,
-        header=not header_written,
-        sep=sep
-    )
-    return True
+def _normalize_output_format(output_format: str) -> str:
+    fmt = output_format.strip().lower().lstrip(".")
+    if fmt not in {"csv", "jsonl"}:
+        raise ValueError(f"Unsupported output_format: {output_format}")
+    return fmt
+
+def _rows_to_flat_dataframe(rows: list[dict]) -> pd.DataFrame:
+    return pd.json_normalize(rows, sep=".")
+
+def flush_rows(
+    rows: list[dict],
+    out_path: str,
+    header_written: bool,
+    output_format: str,
+    sep: str = "$",
+) -> bool:
+    fmt = _normalize_output_format(output_format)
+    if fmt == "csv":
+        _rows_to_flat_dataframe(rows).to_csv(
+            out_path,
+            mode="a",
+            index=False,
+            header=not header_written,
+            sep=sep,
+        )
+        return True
+
+    with open(out_path, "a", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(json.dumps(row, ensure_ascii=False))
+            handle.write("\n")
+    return header_written
 
 def create_subfolder(root: str | Path = "runs") -> Path:
     root_path = Path(root)
@@ -88,4 +111,18 @@ def write_run_error(run_dir: str | Path, exc: BaseException) -> Path:
     err_path.write_text(msg, encoding="utf-8")
     return err_path
 
+def get_run_logger(run_dir: str | Path, log_name: str = "run.log"):
+    log_path = Path(run_dir) / log_name
 
+    def log(message: str, exc: BaseException | None = None) -> None:
+        stamp = datetime.now().isoformat(timespec="seconds")
+        line = f"[{stamp}] {message}"
+        if exc is not None:
+            detail = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+            line = f"{line}\n{detail}"
+        with open(log_path, "a", encoding="utf-8") as handle:
+            handle.write(line)
+            if not line.endswith("\n"):
+                handle.write("\n")
+
+    return log
