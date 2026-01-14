@@ -7,9 +7,8 @@ cfg = dict(
     target_folder='data',
     input_glob='*.png',
     recursive=True,
-    output_format = 'jsonl',
     output_root='runs',
-    batch_upload_limit = 20,
+    batch_upload_limit = 20
 )
 
 image_settings = dict(
