@@ -4,11 +4,12 @@ cfg = dict(
     verification_model = '',
     batch_size = 2048,
     dataset_file_name = 'dataset',
-    target_folder='data/1may96_fp',
+    target_folder='data',
     input_glob='*.png',
-    recursive=False,
+    recursive=True,
+    output_format = 'jsonl',
     output_root='runs',
-    batch_upload_limit = 20
+    batch_upload_limit = 20,
 )
 
 image_settings = dict(
