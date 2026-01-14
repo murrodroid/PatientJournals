@@ -36,7 +36,7 @@ async def generate_data(client: genai.Client, model: str, file_name: str) -> tup
 
     return Journal.model_validate_json(output.text), duration
 
-async def process_file(sem, client, model, file_name):
+async def process_file(sem, client, model, file_name, log):
     async with sem:
         try:
             journal_data,duration = await generate_data(client=client, model=model, file_name=file_name)
@@ -44,4 +44,5 @@ async def process_file(sem, client, model, file_name):
             row['generation_seconds'] = duration
             return row
         except Exception as e:
+            log(f"Error processing {file_name}", exc=e)
             return None
