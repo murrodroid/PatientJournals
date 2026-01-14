@@ -1,0 +1,13 @@
+[project]
+name = "patientjournals"
+version = "v1.0"
+description = "The project creates a structure for transcribing Patient Journals. Project is developed by Lucas Mortensen @ PandemiX."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "google-genai>=1.57.0",
+    "pandas>=2.3.3",
+    "pillow>=12.1.0",
+    "pydantic>=2.12.5",
+    "tqdm>=4.67.1",
+]
