@@ -11,7 +11,7 @@ from tqdm.asyncio import tqdm_asyncio
 
 from api_keys import gemini_maarten as api_key
 from config import cfg, prompts, image_settings
-from classes import Journal
+from schemas import Journal
 from preprocess import preprocess_image
 from tools import list_input_files, create_subfolder
 

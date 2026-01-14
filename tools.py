@@ -9,7 +9,7 @@ import traceback
 
 import config as config_module
 from config import cfg
-from classes import Journal
+from schemas import Journal
 
 
 def data_to_row(data: Journal, file_name: str) -> dict:

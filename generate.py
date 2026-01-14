@@ -5,7 +5,7 @@ import time
 
 from preprocess import preprocess_image
 from config import *
-from classes import Journal
+from schemas import Journal
 from tools import data_to_row
 
 

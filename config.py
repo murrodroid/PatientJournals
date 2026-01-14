@@ -14,7 +14,7 @@ cfg = dict(
 image_settings = dict(
     max_dim = 3000,
     contrast_factor = 1.1,
-    margins = (400, # left
+    margins = (300, # left
                0,  # top
                0,  # right
                0,  # bottom
@@ -28,8 +28,6 @@ prompts = dict(
     Context:
     You are given a scanned page from a Danish hospital patient journal from the late 1800s.
     Your task is to extract data from the content on the page.
-
-    The typical order of basic information is: name, age, occupation, address.
 
     Objective:
     Fill each column with the information found in the image.
