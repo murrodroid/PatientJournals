@@ -153,7 +153,7 @@ class ValidatorApp:
             cursor="hand2",
         )
         self.correct_button.pack(side="left", padx=(0, 8))
-        self.correct_button.bind("<Button-1>", lambda _e: self.on_mark(True))
+        self.correct_button.bind("<Button-1>", lambda _e: self.on_mark("correct"))
 
         self.incorrect_button = Label(
             self.mark_frame,
@@ -167,7 +167,21 @@ class ValidatorApp:
             cursor="hand2",
         )
         self.incorrect_button.pack(side="left")
-        self.incorrect_button.bind("<Button-1>", lambda _e: self.on_mark(False))
+        self.incorrect_button.bind("<Button-1>", lambda _e: self.on_mark("incorrect"))
+
+        self.unsure_button = Label(
+            self.mark_frame,
+            text="Unsure",
+            bg="#f9a825",
+            fg="black",
+            padx=14,
+            pady=8,
+            relief="raised",
+            bd=2,
+            cursor="hand2",
+        )
+        self.unsure_button.pack(side="left", padx=(8, 0))
+        self.unsure_button.bind("<Button-1>", lambda _e: self.on_mark("unsure"))
 
         self.control_frame = Frame(self.button_frame)
         self.control_frame.pack(side="right")
@@ -297,7 +311,7 @@ class ValidatorApp:
         self.reset_zoom()
 
         field_name, field_value = self.current_field
-        file_name = self.current_row.get("file_name", "")
+        file_name = Path(self.current_row.get("file_name", "")).name
         self.field_text.set(f"{file_name}\n{field_name}: {field_value}")
         self.log(f"Showing {file_name} {field_name}")
 
@@ -326,19 +340,22 @@ class ValidatorApp:
         self.canvas.create_image(0, 0, anchor="nw", image=self.photo)
         self.canvas.configure(scrollregion=(0, 0, scaled_w, scaled_h))
 
-    def on_mark(self, correct: bool):
+    def on_mark(self, label: str):
         field_name, _ = self.current_field
-        file_name = self.current_row.get("file_name", "")
+        file_name = Path(self.current_row.get("file_name", "")).name
         dataset_name = self.dataset_path.name
+        decided_at = datetime.now().isoformat(timespec="seconds")
         self.results.append(
             {
+                "label": label,
                 "column_name": field_name,
-                "correct": bool(correct),
                 "file_name": file_name,
                 "dataset_file": dataset_name,
+                "validator_id": self.username,
+                "decided_at": decided_at,
             }
         )
-        self.log(f"Marked {file_name} {field_name} correct={bool(correct)}")
+        self.log(f"Marked {file_name} {field_name} label={label}")
         self.next_sample()
 
     def on_exit(self):
@@ -353,7 +370,17 @@ class ValidatorApp:
         out_name = f"{run_name}_validations.csv"
         out_path = self.run_dir / out_name
         with open(out_path, "w", newline="", encoding="utf-8") as handle:
-            writer = csv.DictWriter(handle, fieldnames=["column_name", "correct", "file_name", "dataset_file"])
+            writer = csv.DictWriter(
+                handle,
+                fieldnames=[
+                    "label",
+                    "column_name",
+                    "file_name",
+                    "dataset_file",
+                    "validator_id",
+                    "decided_at",
+                ],
+            )
             writer.writeheader()
             writer.writerows(self.results)
 
