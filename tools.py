@@ -46,7 +46,7 @@ def flush_rows(
 
     with open(out_path, "a", encoding="utf-8") as handle:
         for row in rows:
-            handle.write(json.dumps(row, ensure_ascii=False))
+            handle.write(json.dumps(row, ensure_ascii=False, default=str))
             handle.write("\n")
     return header_written
 

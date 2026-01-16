@@ -5,10 +5,14 @@ import random
 import secrets
 from datetime import datetime
 from pathlib import Path
-from tkinter import Tk, Label, Button, StringVar, messagebox, Frame, Canvas, Scrollbar
+from tkinter import Tk, Label, Button, StringVar, messagebox, Frame, Canvas, Scrollbar, Entry
+from typing import get_args, get_origin
 
 import pandas as pd
 from PIL import Image, ImageTk
+from pydantic import BaseModel, TypeAdapter, ValidationError
+
+from schemas import Journal
 
 _COLUMNS_NOT_INCLUDED = ['generation_seconds','file_name']
 
@@ -60,6 +64,56 @@ def pick_flat_field(row: dict, rng: random.Random) -> tuple[str, object] | None:
         return None
     return rng.choice(candidates)
 
+def _stringify_value(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, float) and pd.isna(value):
+        return ""
+    return str(value)
+
+def _unwrap_optional(field_type: object) -> object:
+    origin = get_origin(field_type)
+    if origin is None:
+        return field_type
+    if origin is list or origin is tuple or origin is set:
+        return field_type
+    args = [arg for arg in get_args(field_type) if arg is not type(None)]
+    return args[0] if len(args) == 1 else field_type
+
+def _get_field_type(path: str) -> object | None:
+    current = Journal
+    field_type: object | None = None
+    for part in path.split("."):
+        if not hasattr(current, "model_fields"):
+            return None
+        field_info = current.model_fields.get(part)
+        if field_info is None:
+            return None
+        field_type = _unwrap_optional(field_info.annotation)
+        origin = get_origin(field_type)
+        if origin in {list, tuple, set}:
+            args = get_args(field_type)
+            field_type = args[0] if args else None
+            origin = get_origin(field_type)
+        if isinstance(field_type, type) and issubclass(field_type, BaseModel):
+            current = field_type
+        else:
+            current = None
+    return field_type
+
+def _parse_corrected_value(field_name: str, text: str) -> object:
+    stripped = text.strip()
+    if stripped == "":
+        return ""
+    field_type = _get_field_type(field_name)
+    if field_type is None:
+        return stripped
+    try:
+        adapter = TypeAdapter(field_type)
+        return adapter.validate_python(stripped)
+    except ValidationError as exc:
+        raise ValueError(f"Value '{stripped}' is invalid for {field_name}.") from exc
+
 
 def resolve_image_path(row: dict, image_index: dict[str, Path]) -> Path | None:
     file_name = row.get("file_name")
@@ -78,6 +132,8 @@ class ValidatorApp:
         self.rows = load_dataset(dataset_path)
         self.image_index = build_image_index(image_root)
         self.results: list[dict] = []
+        self.validated_pairs: set[tuple[str, str]] = set()
+        self.total_pairs = self._count_total_pairs()
         self.current_row = None
         self.current_field = None
         self.current_image = None
@@ -106,6 +162,11 @@ class ValidatorApp:
             font=("Helvetica", 14, "bold"),
         )
         self.field_label.pack(fill="x")
+
+        self.corrected_var = StringVar()
+        self.corrected_entry = Entry(self.text_frame, textvariable=self.corrected_var)
+        self.corrected_entry.pack(fill="x", pady=(6, 0))
+        self.corrected_var.trace_add("write", lambda *_: self._update_correct_state())
 
         self.canvas_frame = Frame(self.root)
         self.canvas_frame.pack(fill="both", expand=True, padx=12, pady=8)
@@ -141,9 +202,9 @@ class ValidatorApp:
         self.mark_frame = Frame(self.button_frame)
         self.mark_frame.pack(side="left")
 
-        self.correct_button = Label(
+        self.accept_button = Label(
             self.mark_frame,
-            text="Correct",
+            text="Accept",
             bg="#2e7d32",
             fg="white",
             padx=14,
@@ -152,12 +213,12 @@ class ValidatorApp:
             bd=2,
             cursor="hand2",
         )
-        self.correct_button.pack(side="left", padx=(0, 8))
-        self.correct_button.bind("<Button-1>", lambda _e: self.on_mark("correct"))
+        self.accept_button.pack(side="left", padx=(0, 8))
+        self.accept_button.bind("<Button-1>", lambda _e: self.on_mark("accept"))
 
-        self.incorrect_button = Label(
+        self.reject_button = Label(
             self.mark_frame,
-            text="Incorrect",
+            text="Reject",
             bg="#c62828",
             fg="white",
             padx=14,
@@ -166,8 +227,8 @@ class ValidatorApp:
             bd=2,
             cursor="hand2",
         )
-        self.incorrect_button.pack(side="left")
-        self.incorrect_button.bind("<Button-1>", lambda _e: self.on_mark("incorrect"))
+        self.reject_button.pack(side="left")
+        self.reject_button.bind("<Button-1>", lambda _e: self.on_mark("reject"))
 
         self.unsure_button = Label(
             self.mark_frame,
@@ -182,6 +243,27 @@ class ValidatorApp:
         )
         self.unsure_button.pack(side="left", padx=(8, 0))
         self.unsure_button.bind("<Button-1>", lambda _e: self.on_mark("unsure"))
+
+        self.save_correction_button = Label(
+            self.mark_frame,
+            text="Save Correction",
+            bg="#1565c0",
+            fg="white",
+            padx=14,
+            pady=8,
+            relief="raised",
+            bd=2,
+            cursor="hand2",
+        )
+        self.save_correction_button.bind("<Button-1>", lambda _e: self.on_mark("corrected"))
+        self.save_correction_button.pack_forget()
+
+        self._mark_buttons = {
+            self.accept_button: "#2e7d32",
+            self.reject_button: "#c62828",
+            self.unsure_button: "#f9a825",
+        }
+        self.mark_enabled = True
 
         self.control_frame = Frame(self.button_frame)
         self.control_frame.pack(side="right")
@@ -208,6 +290,23 @@ class ValidatorApp:
 
         self.log(f"Started validation. Seed={self.seed}")
         self.next_sample()
+
+    def _count_total_pairs(self) -> int:
+        total = 0
+        for row in self.rows:
+            file_name = Path(row.get("file_name", "")).name
+            if not file_name:
+                continue
+            flat = flatten_row(row)
+            for key, value in flat.items():
+                if key in _COLUMNS_NOT_INCLUDED:
+                    continue
+                if value is None or (isinstance(value, float) and pd.isna(value)):
+                    continue
+                if isinstance(value, (dict, list)):
+                    continue
+                total += 1
+        return total
 
     def _set_window_size(self) -> None:
         try:
@@ -297,11 +396,20 @@ class ValidatorApp:
             image_path = resolve_image_path(row, self.image_index)
             field = pick_flat_field(row, self.rng)
             if image_path and field:
+                file_name = Path(row.get("file_name", "")).name
+                pair = (file_name, field[0])
+                if pair in self.validated_pairs:
+                    continue
                 self.current_row = row
                 self.current_image = image_path
                 self.current_field = field
                 self.show_sample()
                 return
+        if len(self.validated_pairs) >= self.total_pairs:
+            print("All datapoints have been validated.")
+            self.log("All datapoints have been validated.")
+            self.on_exit()
+            return
         messagebox.showerror("No valid samples", "Unable to find a valid sample.")
         self.log("No valid samples found after 1000 attempts.")
         self.on_exit()
@@ -313,6 +421,10 @@ class ValidatorApp:
         field_name, field_value = self.current_field
         file_name = Path(self.current_row.get("file_name", "")).name
         self.field_text.set(f"{file_name}\n{field_name}: {field_value}")
+        self.original_field_raw = field_value
+        self.original_field_value = _stringify_value(field_value)
+        self.corrected_var.set(self.original_field_value)
+        self._update_correct_state()
         self.log(f"Showing {file_name} {field_name}")
 
     def reset_zoom(self) -> None:
@@ -341,10 +453,25 @@ class ValidatorApp:
         self.canvas.configure(scrollregion=(0, 0, scaled_w, scaled_h))
 
     def on_mark(self, label: str):
+        if label in {"accept", "reject", "unsure"} and not self.mark_enabled:
+            messagebox.showinfo("Correction changed", "Use Save Correction after editing the field.")
+            return
+        if label == "corrected" and self.mark_enabled:
+            messagebox.showinfo("No changes", "Edit the field before saving a correction.")
+            return
         field_name, _ = self.current_field
         file_name = Path(self.current_row.get("file_name", "")).name
         dataset_name = self.dataset_path.name
         decided_at = datetime.now().isoformat(timespec="seconds")
+        corrected_value = self.corrected_var.get().strip()
+        if corrected_value == self.original_field_value:
+            corrected_field = None
+        else:
+            try:
+                corrected_field = _parse_corrected_value(field_name, corrected_value)
+            except ValueError as exc:
+                messagebox.showerror("Invalid value", str(exc))
+                return
         self.results.append(
             {
                 "label": label,
@@ -353,10 +480,25 @@ class ValidatorApp:
                 "dataset_file": dataset_name,
                 "validator_id": self.username,
                 "decided_at": decided_at,
+                "corrected_field": corrected_field,
             }
         )
+        self.validated_pairs.add((file_name, field_name))
         self.log(f"Marked {file_name} {field_name} label={label}")
         self.next_sample()
+
+    def _update_correct_state(self) -> None:
+        current_value = self.corrected_var.get()
+        self.mark_enabled = current_value == getattr(self, "original_field_value", "")
+        if self.mark_enabled:
+            for button, color in self._mark_buttons.items():
+                button.configure(bg=color, fg="white")
+            self.save_correction_button.pack_forget()
+        else:
+            for button in self._mark_buttons.keys():
+                button.configure(bg="#9e9e9e", fg="white")
+            if not self.save_correction_button.winfo_ismapped():
+                self.save_correction_button.pack(side="left", padx=(8, 0))
 
     def on_exit(self):
         self.save_results()
@@ -379,6 +521,7 @@ class ValidatorApp:
                     "dataset_file",
                     "validator_id",
                     "decided_at",
+                    "corrected_field",
                 ],
             )
             writer.writeheader()
@@ -387,7 +530,7 @@ class ValidatorApp:
 
 def main():
     parser = argparse.ArgumentParser(description="Validate transcriptions against source images.")
-    parser.add_argument("-u", "--username", default="unspecified", help="Validator username")
+    parser.add_argument("--user", dest="username", default="unspecified", help="Validator username")
     parser.add_argument("--images", required=True, help="Root folder containing images")
     parser.add_argument("--results", required=True, help="Path to dataset file (.csv or .jsonl)")
     args = parser.parse_args()
