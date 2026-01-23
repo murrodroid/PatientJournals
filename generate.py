@@ -45,4 +45,23 @@ async def process_file(sem, client, model, file_name, log):
             return row
         except Exception as e:
             log(f"Error processing {file_name}", exc=e)
+            if _is_fatal_api_error(e):
+                raise
             return None
+
+
+def _is_fatal_api_error(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    fatal_markers = (
+        "token limit",
+        "quota",
+        "resource_exhausted",
+        "rate limit",
+        "permission",
+        "unauthorized",
+        "forbidden",
+        "invalid api key",
+        "invalid_api_key",
+        "billing",
+    )
+    return any(marker in text for marker in fatal_markers)
