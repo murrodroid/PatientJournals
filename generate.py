@@ -4,8 +4,7 @@ from google.genai import types
 import time
 
 from preprocess import preprocess_image
-from config import *
-from schemas import Journal
+from config import config
 from tools import data_to_row
 
 
@@ -13,10 +12,10 @@ async def generate_data(client: genai.Client, model: str, file_name: str) -> tup
     image_bytes, mime_type = await asyncio.to_thread(
         preprocess_image,
         file_name,
-        max_dim=image_settings.get("max_dim", 3000),
-        margins=tuple(image_settings.get("margins", (0, 0, 0, 0))),
-        contrast_factor=image_settings.get("contrast_factor", 1.0),
-        output_format=image_settings.get("output_format", "PNG"),
+        max_dim=config.image_settings.get("max_dim", 3000),
+        margins=tuple(config.image_settings.get("margins", (0, 0, 0, 0))),
+        contrast_factor=config.image_settings.get("contrast_factor", 1.0),
+        output_format=config.image_settings.get("output_format", "PNG"),
     )
 
     start_time = time.perf_counter()
@@ -24,11 +23,11 @@ async def generate_data(client: genai.Client, model: str, file_name: str) -> tup
         model=model,
         contents=[
             types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
-            prompts.get("primary"),
+            config.prompts.get("primary"),
         ],
         config={
             "response_mime_type": "application/json",
-            "response_json_schema": Journal.model_json_schema(),
+            "response_json_schema": config.output_schema,
         },
     )
     end_time = time.perf_counter()

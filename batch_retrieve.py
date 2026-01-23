@@ -6,7 +6,7 @@ from pathlib import Path
 from google import genai
 
 from api_keys import gemini_maarten as api_key
-from config import cfg
+from config import config
 from schemas import Journal
 from tools import data_to_row, flush_rows, get_run_logger
 
@@ -100,7 +100,7 @@ async def main():
                 log(f"Empty response for {custom_id}")
 
         if rows:
-            output_format = cfg.get("output_format", "csv")
+            output_format = config.output_format
             out_path = target_run / f"dataset_batch.{output_format.lstrip('.')}"
             flush_rows(
                 rows=rows,
