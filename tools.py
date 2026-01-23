@@ -7,10 +7,10 @@ import json
 import shutil
 import types
 import traceback
+from dataclasses import asdict, is_dataclass
 
 import config as config_module
-from config import cfg
-from schemas import Journal
+from config import config
 
 
 def data_to_row(data: Journal, file_name: str) -> dict:
@@ -62,20 +62,16 @@ def create_subfolder(root: str | Path = "runs") -> Path:
 
     def serializable_config(module: types.ModuleType) -> dict:
         out: dict[str, object] = {}
-        for k, v in module.__dict__.items():
-            if k.startswith("_"):
-                continue
-            if isinstance(v, types.ModuleType):
-                continue
-            if callable(v):
-                continue
-            out[k] = v
+        cfg = getattr(module, "config", None)
+        if cfg is not None and is_dataclass(cfg):
+            out["config"] = asdict(cfg)
         return out
 
     payload = {
         "created_at": datetime.now().isoformat(timespec="seconds"),
         "config_file": "config_snapshot.py",
         "config_values": serializable_config(config_module),
+        "output_schema": config.output_schema,
     }
     (run_dir / "metadata.json").write_text(
         json.dumps(payload, indent=2, ensure_ascii=False, default=str),
@@ -84,13 +80,23 @@ def create_subfolder(root: str | Path = "runs") -> Path:
 
     return run_dir
 
-def list_input_files(cfg: dict) -> list[str]:
-    folder = Path(cfg["target_folder"]).expanduser()
+def _cfg_get(cfg_obj: object, key: str, default: object | None = None):
+    if isinstance(cfg_obj, dict):
+        return cfg_obj.get(key, default)
+    if hasattr(cfg_obj, key):
+        return getattr(cfg_obj, key)
+    return default
+
+def list_input_files(cfg_obj: object) -> list[str]:
+    folder_value = _cfg_get(cfg_obj, "target_folder")
+    if folder_value is None:
+        raise KeyError("target_folder is missing from config")
+    folder = Path(folder_value).expanduser()
     if not folder.exists() or not folder.is_dir():
         raise FileNotFoundError(f"target_folder not found or not a directory: {folder}")
 
-    pattern = cfg.get("input_glob", "*")
-    recursive = bool(cfg.get("recursive", False))
+    pattern = _cfg_get(cfg_obj, "input_glob", "*")
+    recursive = bool(_cfg_get(cfg_obj, "recursive", False))
 
     paths = folder.rglob(pattern) if recursive else folder.glob(pattern)
     files = sorted(p for p in paths if p.is_file())

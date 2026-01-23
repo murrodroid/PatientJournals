@@ -5,7 +5,7 @@ from google import genai
 from tqdm.asyncio import tqdm_asyncio
 
 from api_keys import gemini_maarten as api_key
-from config import *
+from config import config
 from tools import *
 from generate import process_file
 
@@ -32,19 +32,19 @@ def parse_args() -> argparse.Namespace:
 
 async def main():
     args = parse_args()
-    model = cfg.get('model')
+    model = config.model
     client = genai.Client(api_key=api_key)
     
-    data = list_input_files(cfg)
+    data = list_input_files(config)
     
-    batch_size = cfg.get('batch_size')
+    batch_size = config.batch_size
     rows: list[dict] = []
     header_written = False
     total_written = 0
 
-    out_name = cfg.get('dataset_file_name', 'dataset')
-    output_format = cfg.get('output_format', 'csv')
-    run_dir = create_subfolder(cfg.get('output_root', 'runs'))
+    out_name = config.dataset_file_name
+    output_format = config.output_format
+    run_dir = create_subfolder(config.output_root)
     log = get_run_logger(run_dir)
     out_path = run_dir / f'{run_dir.name}_{out_name}.{output_format.lstrip(".")}'
 
@@ -83,7 +83,7 @@ async def main():
     elif args.verbose:
         print("Preloaded dataset covers 0/0 images.")
 
-    sem = asyncio.Semaphore(cfg.get('concurrent_tasks'))
+    sem = asyncio.Semaphore(config.concurrent_tasks)
 
     tasks = []
     try:
@@ -129,7 +129,7 @@ async def main():
             if total_written == 0:
                 log("No rows written; output file may be missing.")
         if args.verbose:
-            total_images = len(list_input_files(cfg))
+            total_images = len(list_input_files(config))
             covered_after = total_written
             print(
                 f"Dataset covers {covered_after}/{total_images} images after run."

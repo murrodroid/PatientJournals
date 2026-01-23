@@ -10,13 +10,12 @@ from google.genai import types
 from tqdm.asyncio import tqdm_asyncio
 
 from api_keys import gemini_maarten as api_key
-from config import cfg, prompts, image_settings
-from schemas import Journal
+from config import config
 from preprocess import preprocess_image
 from tools import list_input_files, create_subfolder
 
 
-UPLOAD_SEMAPHORE = asyncio.Semaphore(cfg.get('batch_upload_limit'))
+UPLOAD_SEMAPHORE = asyncio.Semaphore(config.batch_upload_limit)
 
 async def upload_image_for_batch(client: genai.Client, file_path: str) -> str:
     """
@@ -26,10 +25,10 @@ async def upload_image_for_batch(client: genai.Client, file_path: str) -> str:
         image_bytes, mime_type = await asyncio.to_thread(
             preprocess_image,
             file_path,
-            max_dim=image_settings.get("max_dim", 3000),
-            margins=tuple(image_settings.get("margins", (0, 0, 0, 0))),
-            contrast_factor=image_settings.get("contrast_factor", 1.0),
-            output_format=image_settings.get("output_format", "PNG"),
+            max_dim=config.image_settings.get("max_dim", 3000),
+            margins=tuple(config.image_settings.get("margins", (0, 0, 0, 0))),
+            contrast_factor=config.image_settings.get("contrast_factor", 1.0),
+            output_format=config.image_settings.get("output_format", "PNG"),
         )
 
         # save to temp file
@@ -63,11 +62,11 @@ async def prepare_batch_request(client: genai.Client, file_path: str, model: str
                 model=model,
                 contents=[
                     types.Part.from_uri(file_uri=file_uri, mime_type="image/png"),
-                    types.Part.from_text(text=prompts["primary"])
+                    types.Part.from_text(text=config.prompts["primary"])
                 ],
                 generation_config=types.GenerateContentConfig(
                     response_mime_type="application/json",
-                    response_schema=Journal.model_json_schema(),
+                    response_schema=config.output_schema,
                 )
             ),
             custom_id=request_id 
@@ -79,9 +78,9 @@ async def prepare_batch_request(client: genai.Client, file_path: str, model: str
 
 async def main():
     client = genai.Client(api_key=api_key)
-    model = cfg.get('model')
+    model = config.model
     
-    files = list_input_files(cfg)
+    files = list_input_files(config)
     print(f"Found {len(files)} files to process.")
 
     tasks = [prepare_batch_request(client, f, model) for f in files]
@@ -111,7 +110,7 @@ async def main():
     print(f"Job State: {batch_job.state}")
 
     # save Metadata so we can retrieve it later
-    run_dir = create_subfolder(cfg.get("output_root", "runs"))
+    run_dir = create_subfolder(config.output_root)
     metadata = {
         "batch_job_name": batch_job.name,
         "submit_time": datetime.now().isoformat(),
