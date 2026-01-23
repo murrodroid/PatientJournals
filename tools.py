@@ -4,6 +4,7 @@ import pandas as pd
 from datetime import datetime
 from pathlib import Path
 import json
+import shutil
 import types
 import traceback
 
@@ -97,6 +98,54 @@ def list_input_files(cfg: dict) -> list[str]:
         raise FileNotFoundError(f"No files matched {pattern} in {folder} (recursive={recursive})")
 
     return [str(p) for p in files]
+
+def normalize_path(path: str | Path) -> str:
+    return str(Path(path).expanduser().resolve())
+
+def load_existing_dataset(
+    dataset_path: str | Path,
+    output_format: str | None = None,
+    csv_sep: str = "$",
+) -> tuple[str, set[str], int]:
+    path = Path(dataset_path).expanduser()
+    if not path.exists() or not path.is_file():
+        raise FileNotFoundError(f"dataset not found or not a file: {path}")
+
+    fmt = _normalize_output_format(
+        output_format or path.suffix.lstrip(".")
+    )
+
+    file_names: set[str] = set()
+    row_count = 0
+
+    if fmt == "jsonl":
+        with open(path, "r", encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    payload = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(payload, dict):
+                    name = payload.get("file_name")
+                    if isinstance(name, str) and name:
+                        file_names.add(name)
+                row_count += 1
+    else:
+        df = pd.read_csv(path, sep=csv_sep)
+        row_count = len(df)
+        if "file_name" in df.columns:
+            file_names = set(df["file_name"].dropna().astype(str))
+
+    return fmt, file_names, row_count
+
+def copy_dataset(src_path: str | Path, dest_path: str | Path) -> None:
+    src = Path(src_path).expanduser()
+    dest = Path(dest_path).expanduser()
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(src, dest)
 
 def write_run_error(run_dir: str | Path, exc: BaseException) -> Path:
     run_path = Path(run_dir)
