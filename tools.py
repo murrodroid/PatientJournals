@@ -124,6 +124,32 @@ def build_path_id_set(
         ids.update(_candidate_path_ids(p, target_folder))
     return ids
 
+def find_newest_dataset(
+    run_root: str | Path,
+    dataset_name: str = "dataset",
+) -> Path:
+    root = Path(run_root).expanduser()
+    if not root.exists() or not root.is_dir():
+        raise FileNotFoundError(f"runs folder not found: {root}")
+
+    run_dirs = sorted(
+        (p for p in root.iterdir() if p.is_dir()),
+        reverse=True,
+    )
+    patterns = (
+        f"*_{dataset_name}.jsonl",
+        f"*_{dataset_name}.csv",
+    )
+    for run_dir in run_dirs:
+        for pattern in patterns:
+            matches = sorted(run_dir.glob(pattern))
+            if matches:
+                return matches[-1]
+
+    raise FileNotFoundError(
+        f"No dataset files found in {root} for name '{dataset_name}'."
+    )
+
 def load_existing_dataset(
     dataset_path: str | Path,
     output_format: str | None = None,
