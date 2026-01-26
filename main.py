@@ -18,7 +18,8 @@ def parse_args() -> argparse.Namespace:
         "--continue-dataset",
         dest="continue_dataset",
         help=(
-            "Path to an existing dataset file to append to. "
+            "Path to an existing dataset file to append to, or 'newest' to "
+            "select the latest run's dataset. "
             "Rows already in the dataset (by file_name) will be skipped."
         ),
     )
@@ -53,8 +54,14 @@ async def main():
     normalized_existing = set()
     input_ids = build_path_id_set(data, target_folder)
     if args.continue_dataset:
+        continue_path = args.continue_dataset
+        if continue_path.lower() == "newest":
+            continue_path = str(
+                find_newest_dataset(config.output_root, config.dataset_file_name)
+            )
+            log(f"Resolved newest dataset to {continue_path}")
         existing_format, existing_files, existing_count = load_existing_dataset(
-            args.continue_dataset
+            continue_path
         )
         if output_format.strip().lower().lstrip(".") != existing_format:
             log(
@@ -63,7 +70,7 @@ async def main():
             )
         output_format = existing_format
         out_path = run_dir / f'{run_dir.name}_{out_name}.{output_format.lstrip(".")}'
-        copy_dataset(args.continue_dataset, out_path)
+        copy_dataset(continue_path, out_path)
 
         normalized_existing = build_path_id_set(existing_files, target_folder)
         original_count = len(data)
@@ -76,7 +83,7 @@ async def main():
         total_written = existing_count
         covered_before = len(input_ids & normalized_existing)
         log(
-            f"Continuing dataset {args.continue_dataset} -> {out_path}. "
+            f"Continuing dataset {continue_path} -> {out_path}. "
             f"Existing rows={existing_count} Skipped files={skipped}"
         )
         if args.verbose:
