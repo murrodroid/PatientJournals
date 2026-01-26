@@ -36,8 +36,9 @@ async def main():
     client = genai.Client(api_key=api_key)
     
     data = list_input_files(config)
+    target_folder = config.target_folder
     
-    batch_size = config.batch_size
+    flush_every = config.flush_every or config.batch_size
     rows: list[dict] = []
     header_written = False
     total_written = 0
@@ -49,6 +50,8 @@ async def main():
     out_path = run_dir / f'{run_dir.name}_{out_name}.{output_format.lstrip(".")}'
 
     covered_before = 0
+    normalized_existing = set()
+    input_ids = build_path_id_set(data, target_folder)
     if args.continue_dataset:
         existing_format, existing_files, existing_count = load_existing_dataset(
             args.continue_dataset
@@ -62,7 +65,7 @@ async def main():
         out_path = run_dir / f'{run_dir.name}_{out_name}.{output_format.lstrip(".")}'
         copy_dataset(args.continue_dataset, out_path)
 
-        normalized_existing = {normalize_path(p) for p in existing_files}
+        normalized_existing = build_path_id_set(existing_files, target_folder)
         original_count = len(data)
         data = [
             f for f in data
@@ -71,7 +74,7 @@ async def main():
         skipped = original_count - len(data)
         header_written = existing_count > 0
         total_written = existing_count
-        covered_before = existing_count
+        covered_before = len(input_ids & normalized_existing)
         log(
             f"Continuing dataset {args.continue_dataset} -> {out_path}. "
             f"Existing rows={existing_count} Skipped files={skipped}"
@@ -88,7 +91,7 @@ async def main():
     tasks = []
     try:
         log(f"Starting run. Files={len(data)} Output={out_path.name}")
-        tasks = [process_file(sem, client, model, f, log) for f in data]
+        tasks = [asyncio.create_task(process_file(sem, client, model, f, log)) for f in data]
 
         for coro in tqdm_asyncio.as_completed(tasks, desc='Processing images', unit='img'):
             journal_row = await coro
@@ -98,7 +101,7 @@ async def main():
             else:
                 log("Received empty row from processing step.")
 
-            if len(rows) >= batch_size:
+            if len(rows) >= flush_every:
                 header_written = flush_rows(
                     rows=rows,
                     out_path=str(out_path),
@@ -129,8 +132,17 @@ async def main():
             if total_written == 0:
                 log("No rows written; output file may be missing.")
         if args.verbose:
-            total_images = len(list_input_files(config))
+            total_images = len(input_ids)
             covered_after = total_written
+            try:
+                _, final_files, _ = load_existing_dataset(out_path, output_format)
+                final_ids = build_path_id_set(final_files, target_folder)
+                covered_after = len(input_ids & final_ids)
+                missing = len(input_ids - final_ids)
+                if missing:
+                    print(f"Missing {missing} images from dataset coverage.")
+            except FileNotFoundError:
+                covered_after = len(input_ids & normalized_existing) if args.continue_dataset else 0
             print(
                 f"Dataset covers {covered_after}/{total_images} images after run."
             )

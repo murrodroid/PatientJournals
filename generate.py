@@ -6,7 +6,7 @@ import time
 from preprocess import preprocess_image
 from config import config
 from tools import data_to_row
-
+from schemas import Journal
 
 async def generate_data(client: genai.Client, model: str, file_name: str) -> tuple[Journal,float]:
     image_bytes, mime_type = await asyncio.to_thread(

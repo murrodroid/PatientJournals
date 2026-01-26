@@ -108,6 +108,22 @@ def list_input_files(cfg_obj: object) -> list[str]:
 def normalize_path(path: str | Path) -> str:
     return str(Path(path).expanduser().resolve())
 
+def _candidate_path_ids(path: str | Path, target_folder: str | Path | None) -> set[str]:
+    p = Path(path)
+    ids = {normalize_path(p)}
+    if not p.is_absolute() and target_folder is not None:
+        ids.add(normalize_path(Path(target_folder) / p))
+    return ids
+
+def build_path_id_set(
+    paths: list[str],
+    target_folder: str | Path | None = None,
+) -> set[str]:
+    ids: set[str] = set()
+    for p in paths:
+        ids.update(_candidate_path_ids(p, target_folder))
+    return ids
+
 def load_existing_dataset(
     dataset_path: str | Path,
     output_format: str | None = None,
