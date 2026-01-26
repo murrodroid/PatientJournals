@@ -2,6 +2,8 @@ from pydantic import BaseModel, Field
 from typing import List, Optional
 from datetime import date
 
+_SCHEMA_VERSION = 1.0
+
 class Address(BaseModel):
     street: str = Field(
         description="The (historical) street of the address. Can also be historical addresses, meaning they may no longer exist. Can also be the name of an institution. Written as the first, left-most, part of the address."
