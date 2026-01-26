@@ -9,6 +9,7 @@ class Config:
     concurrent_tasks: int = 6
     verification_model: str = ""
     batch_size: int = 2048
+    flush_every: int = 1
     dataset_file_name: str = "dataset"
     target_folder: str = "data"
     input_glob: str = "*.png"
