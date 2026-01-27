@@ -10,7 +10,7 @@ Then, run the following to sync dependencies:
 uv sync
 ```
 
-Validator usage
+**Validator usage**
 
 With uv:
 ```bash
@@ -19,11 +19,11 @@ uv run validate.py --user lucas --images data --results runs/20260127_103351/202
 
 Without uv:
 ```bash
-python validate.py --user lucas --images data --results runs/20260127_103351/20260127_103351_dataset.jsonl --corrections
+python validate.py --user lucas --images data --results runs/20260127_103351/20260127_103351_dataset.jsonl
 ```
 - --user: saves who did what; keep the same username each time.
 
-- --images: root folder of all images (subfolders are fine).
+- --images: root folder of all images (subfolders are fine). Place in /data folder.
 
 - --results: dataset location.
 
