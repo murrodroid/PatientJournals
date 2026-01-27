@@ -70,28 +70,34 @@ async def main():
             )
         output_format = existing_format
         out_path = run_dir / f'{run_dir.name}_{out_name}.{output_format.lstrip(".")}'
-        copy_dataset(continue_path, out_path)
-
-        normalized_existing = build_path_id_set(existing_files, target_folder)
+        normalized_existing = build_path_id_set(existing_files, target_folder) & input_ids
+        filtered_count = filter_dataset_by_input_ids(
+            continue_path,
+            out_path,
+            input_ids=input_ids,
+            output_format=output_format,
+            target_folder=target_folder,
+        )
         original_count = len(data)
         data = [
             f for f in data
             if normalize_path(f) not in normalized_existing
         ]
         skipped = original_count - len(data)
-        header_written = existing_count > 0
-        total_written = existing_count
+        header_written = filtered_count > 0
+        total_written = filtered_count
         covered_before = len(input_ids & normalized_existing)
         log(
             f"Continuing dataset {continue_path} -> {out_path}. "
-            f"Existing rows={existing_count} Skipped files={skipped}"
+            f"Existing rows={existing_count} Kept rows={filtered_count} "
+            f"Skipped files={skipped}"
         )
         if args.verbose:
             print(
-                f"Preloaded dataset covers {covered_before}/{original_count} images."
+                f"Preloaded dataset covers {covered_before}/{len(input_ids)} images."
             )
     elif args.verbose:
-        print("Preloaded dataset covers 0/0 images.")
+        print(f"Preloaded dataset covers 0/{len(input_ids)} images.")
 
     sem = asyncio.Semaphore(config.concurrent_tasks)
 
