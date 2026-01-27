@@ -112,7 +112,11 @@ def _candidate_path_ids(path: str | Path, target_folder: str | Path | None) -> s
     p = Path(path)
     ids = {normalize_path(p)}
     if not p.is_absolute() and target_folder is not None:
-        ids.add(normalize_path(Path(target_folder) / p))
+        base = Path(target_folder)
+        rel_parts = base.parts
+        p_parts = p.parts
+        if not (rel_parts and list(p_parts[:len(rel_parts)]) == list(rel_parts)):
+            ids.add(normalize_path(base / p))
     return ids
 
 def build_path_id_set(
@@ -123,6 +127,55 @@ def build_path_id_set(
     for p in paths:
         ids.update(_candidate_path_ids(p, target_folder))
     return ids
+
+def filter_dataset_by_input_ids(
+    src_path: str | Path,
+    dest_path: str | Path,
+    input_ids: set[str],
+    output_format: str | None = None,
+    csv_sep: str = "$",
+    target_folder: str | Path | None = None,
+) -> int:
+    src = Path(src_path).expanduser()
+    dest = Path(dest_path).expanduser()
+    dest.parent.mkdir(parents=True, exist_ok=True)
+
+    fmt = _normalize_output_format(output_format or src.suffix.lstrip("."))
+    kept = 0
+
+    if fmt == "jsonl":
+        with open(src, "r", encoding="utf-8") as src_handle, open(dest, "w", encoding="utf-8") as dst_handle:
+            for line in src_handle:
+                raw = line.strip()
+                if not raw:
+                    continue
+                try:
+                    payload = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(payload, dict):
+                    continue
+                name = payload.get("file_name")
+                if not isinstance(name, str) or not name:
+                    continue
+                candidate_ids = _candidate_path_ids(name, target_folder)
+                if input_ids.intersection(candidate_ids):
+                    dst_handle.write(raw)
+                    dst_handle.write("\n")
+                    kept += 1
+        return kept
+
+    df = pd.read_csv(src, sep=csv_sep)
+    if "file_name" in df.columns:
+        def _match(name: object) -> bool:
+            if not isinstance(name, str) or not name:
+                return False
+            return bool(input_ids.intersection(_candidate_path_ids(name, target_folder)))
+        mask = df["file_name"].apply(_match)
+        df = df[mask]
+    kept = len(df)
+    df.to_csv(dest, index=False, sep=csv_sep)
+    return kept
 
 def find_newest_dataset(
     run_root: str | Path,
