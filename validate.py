@@ -123,10 +123,11 @@ def resolve_image_path(row: dict, image_index: dict[str, Path]) -> Path | None:
 
 
 class ValidatorApp:
-    def __init__(self, dataset_path: Path, image_root: Path, username: str):
+    def __init__(self, dataset_path: Path, image_root: Path, username: str, allow_corrections: bool):
         self.dataset_path = dataset_path
         self.image_root = image_root
         self.username = username
+        self.allow_corrections = allow_corrections
         self.seed = secrets.randbits(64)
         self.rng = random.Random(self.seed)
         self.rows = load_dataset(dataset_path)
@@ -164,9 +165,12 @@ class ValidatorApp:
         self.field_label.pack(fill="x")
 
         self.corrected_var = StringVar()
-        self.corrected_entry = Entry(self.text_frame, textvariable=self.corrected_var)
-        self.corrected_entry.pack(fill="x", pady=(6, 0))
-        self.corrected_var.trace_add("write", lambda *_: self._update_correct_state())
+        if self.allow_corrections:
+            self.corrected_entry = Entry(self.text_frame, textvariable=self.corrected_var)
+            self.corrected_entry.pack(fill="x", pady=(6, 0))
+            self.corrected_var.trace_add("write", lambda *_: self._update_correct_state())
+        else:
+            self.corrected_entry = None
 
         self.canvas_frame = Frame(self.root)
         self.canvas_frame.pack(fill="both", expand=True, padx=12, pady=8)
@@ -216,6 +220,20 @@ class ValidatorApp:
         self.accept_button.pack(side="left", padx=(0, 8))
         self.accept_button.bind("<Button-1>", lambda _e: self.on_mark("accept"))
 
+        self.somewhat_button = Label(
+            self.mark_frame,
+            text="Somewhat Accept",
+            bg="#7cb342",
+            fg="white",
+            padx=14,
+            pady=8,
+            relief="raised",
+            bd=2,
+            cursor="hand2",
+        )
+        self.somewhat_button.pack(side="left", padx=(0, 8))
+        self.somewhat_button.bind("<Button-1>", lambda _e: self.on_mark("somewhat_accept"))
+
         self.reject_button = Label(
             self.mark_frame,
             text="Reject",
@@ -244,22 +262,26 @@ class ValidatorApp:
         self.unsure_button.pack(side="left", padx=(8, 0))
         self.unsure_button.bind("<Button-1>", lambda _e: self.on_mark("unsure"))
 
-        self.save_correction_button = Label(
-            self.mark_frame,
-            text="Save Correction",
-            bg="#1565c0",
-            fg="white",
-            padx=14,
-            pady=8,
-            relief="raised",
-            bd=2,
-            cursor="hand2",
-        )
-        self.save_correction_button.bind("<Button-1>", lambda _e: self.on_mark("corrected"))
-        self.save_correction_button.pack_forget()
+        if self.allow_corrections:
+            self.save_correction_button = Label(
+                self.mark_frame,
+                text="Save Correction",
+                bg="#1565c0",
+                fg="white",
+                padx=14,
+                pady=8,
+                relief="raised",
+                bd=2,
+                cursor="hand2",
+            )
+            self.save_correction_button.bind("<Button-1>", lambda _e: self.on_mark("corrected"))
+            self.save_correction_button.pack_forget()
+        else:
+            self.save_correction_button = None
 
         self._mark_buttons = {
             self.accept_button: "#2e7d32",
+            self.somewhat_button: "#7cb342",
             self.reject_button: "#c62828",
             self.unsure_button: "#f9a825",
         }
@@ -424,7 +446,8 @@ class ValidatorApp:
         self.original_field_raw = field_value
         self.original_field_value = _stringify_value(field_value)
         self.corrected_var.set(self.original_field_value)
-        self._update_correct_state()
+        if self.allow_corrections:
+            self._update_correct_state()
         self.log(f"Showing {file_name} {field_name}")
 
     def reset_zoom(self) -> None:
@@ -453,25 +476,30 @@ class ValidatorApp:
         self.canvas.configure(scrollregion=(0, 0, scaled_w, scaled_h))
 
     def on_mark(self, label: str):
-        if label in {"accept", "reject", "unsure"} and not self.mark_enabled:
+        if label in {"accept", "somewhat_accept", "reject", "unsure"} and not self.mark_enabled:
             messagebox.showinfo("Correction changed", "Use Save Correction after editing the field.")
             return
         if label == "corrected" and self.mark_enabled:
             messagebox.showinfo("No changes", "Edit the field before saving a correction.")
             return
+        if label == "corrected" and not self.allow_corrections:
+            messagebox.showinfo("Corrections disabled", "Run with --corrections to enable edits.")
+            return
         field_name, _ = self.current_field
         file_name = Path(self.current_row.get("file_name", "")).name
         dataset_name = self.dataset_path.name
         decided_at = datetime.now().isoformat(timespec="seconds")
-        corrected_value = self.corrected_var.get().strip()
-        if corrected_value == self.original_field_value:
-            corrected_field = None
-        else:
-            try:
-                corrected_field = _parse_corrected_value(field_name, corrected_value)
-            except ValueError as exc:
-                messagebox.showerror("Invalid value", str(exc))
-                return
+        corrected_field = None
+        if self.allow_corrections:
+            corrected_value = self.corrected_var.get().strip()
+            if corrected_value == self.original_field_value:
+                corrected_field = None
+            else:
+                try:
+                    corrected_field = _parse_corrected_value(field_name, corrected_value)
+                except ValueError as exc:
+                    messagebox.showerror("Invalid value", str(exc))
+                    return
         self.results.append(
             {
                 "label": label,
@@ -493,11 +521,12 @@ class ValidatorApp:
         if self.mark_enabled:
             for button, color in self._mark_buttons.items():
                 button.configure(bg=color, fg="white")
-            self.save_correction_button.pack_forget()
+            if self.save_correction_button:
+                self.save_correction_button.pack_forget()
         else:
             for button in self._mark_buttons.keys():
                 button.configure(bg="#9e9e9e", fg="white")
-            if not self.save_correction_button.winfo_ismapped():
+            if self.save_correction_button and not self.save_correction_button.winfo_ismapped():
                 self.save_correction_button.pack(side="left", padx=(8, 0))
 
     def on_exit(self):
@@ -533,6 +562,7 @@ def main():
     parser.add_argument("--user", dest="username", default="unspecified", help="Validator username")
     parser.add_argument("--images", required=True, help="Root folder containing images")
     parser.add_argument("--results", required=True, help="Path to dataset file (.csv or .jsonl)")
+    parser.add_argument("--corrections", action="store_true", help="Enable correction editing")
     args = parser.parse_args()
 
     username = args.username.strip()
@@ -547,7 +577,7 @@ def main():
     if not image_root.exists() or not image_root.is_dir():
         raise SystemExit(f"Data folder not found or not a directory: {image_root}")
 
-    app = ValidatorApp(dataset_path, image_root, username=username)
+    app = ValidatorApp(dataset_path, image_root, username=username, allow_corrections=args.corrections)
     app.root.mainloop()
 
 
