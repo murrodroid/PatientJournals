@@ -1,0 +1,3 @@
+[2026-01-26T10:04:57] Resolved newest dataset to runs/20260126_093939/20260126_093939_dataset.jsonl
+[2026-01-26T10:04:57] Continuing dataset runs/20260126_093939/20260126_093939_dataset.jsonl -> runs/20260126_100457/20260126_100457_dataset.jsonl. Existing rows=658 Skipped files=658
+[2026-01-26T10:04:57] Starting run. Files=350 Output=20260126_100457_dataset.jsonl
