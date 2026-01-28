@@ -9,5 +9,6 @@ dependencies = [
     "pandas>=2.3.3",
     "pillow>=12.1.0",
     "pydantic>=2.12.5",
+    "seaborn>=0.13.2",
     "tqdm>=4.67.1",
 ]
