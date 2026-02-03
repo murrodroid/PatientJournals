@@ -213,5 +213,6 @@ api_keys.py
 data
 .DS_Store
 
-# local runs stuff
+# local runs and dataset stuff
 runs/
+*.jsonl
