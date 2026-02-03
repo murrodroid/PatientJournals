@@ -212,3 +212,6 @@ __marimo__/
 api_keys.py
 data
 .DS_Store
+
+# local runs stuff
+runs/
