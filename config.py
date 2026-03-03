@@ -7,6 +7,7 @@ from schemas import Journal, TextPage
 @dataclass
 class Config:
     model: str = "gemini-3-pro-preview"
+    model_temperature: float = 0.0
     concurrent_tasks: int = 6
     verification_model: str = ""
     batch_size: int = 2048

@@ -28,6 +28,7 @@ async def generate_data(client: genai.Client, model: str, file_name: str) -> tup
         config={
             "response_mime_type": "application/json",
             "response_json_schema": config.output_schema,
+            "temperature": config.model_temperature,
         },
     )
     end_time = time.perf_counter()

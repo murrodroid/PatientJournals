@@ -67,6 +67,7 @@ async def prepare_batch_request(client: genai.Client, file_path: str, model: str
                 generation_config=types.GenerateContentConfig(
                     response_mime_type="application/json",
                     response_schema=config.output_schema,
+                    temperature=config.model_temperature,
                 )
             ),
             custom_id=request_id 
