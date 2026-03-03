@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 from pydantic import BaseModel
 from schemas import Journal, TextPage
 
@@ -8,7 +8,11 @@ from schemas import Journal, TextPage
 class Config:
     model: str = "gemini-3-pro-preview"
     model_temperature: float = 0.0
-    concurrent_tasks: int = 6
+    api_concurrent_tasks: int = 8
+    api_max_attempts: int = 6
+    api_retry_initial_delay_seconds: float = 2.0
+    api_retry_max_delay_seconds: float = 30.0
+    api_retry_jitter_seconds: float = 0.5
     verification_model: str = ""
     batch_size: int = 2048
     flush_every: int = 1
@@ -16,6 +20,9 @@ class Config:
     target_folder: str = "data"
     input_glob: str = "*.png"
     recursive: bool = True
+    input_series: str | None = "8dec96"
+    fp_mode: Literal["all", "only_fp", "exclude_fp"] = "exclude_fp"
+    fp_suffix: str = "_fp"
     output_format: str = "jsonl"
     output_root: str = "runs"
     batch_upload_limit: int = 20
@@ -26,7 +33,7 @@ class Config:
             "max_dim": 3000,
             "contrast_factor": 1.1,
             "margins": (
-                300,  # left
+                0,    # left
                 0,    # top
                 0,    # right
                 0,    # bottom

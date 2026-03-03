@@ -99,7 +99,7 @@ async def main():
     elif args.verbose:
         print(f"Preloaded dataset covers 0/{len(input_ids)} images.")
 
-    sem = asyncio.Semaphore(config.concurrent_tasks)
+    sem = asyncio.Semaphore(config.api_concurrent_tasks)
 
     tasks = []
     try:

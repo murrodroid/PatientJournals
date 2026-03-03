@@ -2,6 +2,7 @@ import asyncio
 from google import genai
 from google.genai import types
 import time
+import random
 from pydantic import BaseModel
 
 from preprocess import preprocess_image
@@ -38,17 +39,34 @@ async def generate_data(client: genai.Client, model: str, file_name: str) -> tup
 
 async def process_file(sem, client, model, file_name, log):
     async with sem:
-        try:
-            journal_data,duration = await generate_data(client=client, model=model, file_name=file_name)
-            rows = data_to_rows(data=journal_data, file_name=file_name)
-            for row in rows:
-                row["generation_seconds"] = duration
-            return rows
-        except Exception as e:
-            log(f"Error processing {file_name}", exc=e)
-            if _is_fatal_api_error(e):
-                raise
-            return None
+        max_attempts = max(1, int(config.api_max_attempts))
+        for attempt in range(1, max_attempts + 1):
+            try:
+                journal_data, duration = await generate_data(
+                    client=client,
+                    model=model,
+                    file_name=file_name,
+                )
+                rows = data_to_rows(data=journal_data, file_name=file_name)
+                for row in rows:
+                    row["generation_seconds"] = duration
+                return rows
+            except Exception as e:
+                retryable = _is_retryable_api_error(e)
+                if retryable and attempt < max_attempts:
+                    delay = _retry_delay_seconds(attempt)
+                    log(
+                        f"Transient API error for {file_name} "
+                        f"(attempt {attempt}/{max_attempts}). "
+                        f"Retrying in {delay:.1f}s. Error: {e}"
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+
+                log(f"Error processing {file_name}", exc=e)
+                if _is_fatal_api_error(e) or retryable:
+                    raise
+                return None
 
 
 def _is_fatal_api_error(exc: BaseException) -> bool:
@@ -56,8 +74,6 @@ def _is_fatal_api_error(exc: BaseException) -> bool:
     fatal_markers = (
         "token limit",
         "quota",
-        "resource_exhausted",
-        "rate limit",
         "permission",
         "unauthorized",
         "forbidden",
@@ -66,3 +82,34 @@ def _is_fatal_api_error(exc: BaseException) -> bool:
         "billing",
     )
     return any(marker in text for marker in fatal_markers)
+
+
+def _is_retryable_api_error(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    retryable_markers = (
+        "503",
+        "unavailable",
+        "resource_exhausted",
+        "rate limit",
+        "429",
+        "internal",
+        "deadline",
+        "timed out",
+        "timeout",
+        "connection reset",
+        "connection error",
+        "temporarily",
+        "backend error",
+    )
+    return any(marker in text for marker in retryable_markers)
+
+
+def _retry_delay_seconds(attempt: int) -> float:
+    initial = max(0.0, float(config.api_retry_initial_delay_seconds))
+    maximum = max(initial, float(config.api_retry_max_delay_seconds))
+    jitter = max(0.0, float(config.api_retry_jitter_seconds))
+
+    delay = min(initial * (2 ** max(0, attempt - 1)), maximum)
+    if jitter > 0:
+        delay += random.uniform(0, jitter)
+    return delay
