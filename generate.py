@@ -24,7 +24,7 @@ async def generate_data(client: genai.Client, model: str, file_name: str) -> tup
         model=model,
         contents=[
             types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
-            config.prompts.get("primary"),
+            config.input_prompt,
         ],
         config={
             "response_mime_type": "application/json",

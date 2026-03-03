@@ -62,7 +62,7 @@ async def prepare_batch_request(client: genai.Client, file_path: str, model: str
                 model=model,
                 contents=[
                     types.Part.from_uri(file_uri=file_uri, mime_type="image/png"),
-                    types.Part.from_text(text=config.prompts["primary"])
+                    types.Part.from_text(text=config.input_prompt)
                 ],
                 generation_config=types.GenerateContentConfig(
                     response_mime_type="application/json",
