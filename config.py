@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Any
-from schemas import Journal
+from pydantic import BaseModel
+from schemas import Journal, TextPage
 
 
 @dataclass
@@ -17,9 +18,8 @@ class Config:
     output_format: str = "jsonl"
     output_root: str = "runs"
     batch_upload_limit: int = 20
-    output_schema: dict[str, Any] = field(
-        default_factory=lambda: Journal.model_json_schema()
-    )
+    output_model: type[BaseModel] = TextPage
+    output_schema: dict[str, Any] = field(init=False)
     image_settings: dict[str, Any] = field(
         default_factory=lambda: {
             "max_dim": 3000,
@@ -53,6 +53,9 @@ class Config:
     """,
         }
     )
+
+    def __post_init__(self) -> None:
+        self.output_schema = self.output_model.model_json_schema()
 
 
 config = Config()

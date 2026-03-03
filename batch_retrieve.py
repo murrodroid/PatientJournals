@@ -7,8 +7,7 @@ from google import genai
 
 from api_keys import gemini_maarten as api_key
 from config import config
-from schemas import Journal
-from tools import data_to_row, flush_rows, get_run_logger
+from tools import data_to_rows, flush_rows, get_run_logger
 
 def get_target_run_dir(user_path: str | None) -> Path | None:
     """
@@ -88,10 +87,9 @@ async def main():
             if item.result.response.parts:
                 response_text = item.result.response.parts[0].text
                 try:
-                    journal = Journal.model_validate_json(response_text)
+                    journal = config.output_model.model_validate_json(response_text)
                     
-                    row = data_to_row(data=journal, file_name=custom_id)
-                    rows.append(row)
+                    rows.extend(data_to_rows(data=journal, file_name=custom_id))
                 except Exception as e:
                     print(f"Error parsing result for {custom_id}: {e}")
                     log(f"Error parsing result for {custom_id}", exc=e)

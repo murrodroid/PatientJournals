@@ -2,13 +2,13 @@ import asyncio
 from google import genai
 from google.genai import types
 import time
+from pydantic import BaseModel
 
 from preprocess import preprocess_image
 from config import config
-from tools import data_to_row
-from schemas import Journal
+from tools import data_to_rows
 
-async def generate_data(client: genai.Client, model: str, file_name: str) -> tuple[Journal,float]:
+async def generate_data(client: genai.Client, model: str, file_name: str) -> tuple[BaseModel, float]:
     image_bytes, mime_type = await asyncio.to_thread(
         preprocess_image,
         file_name,
@@ -33,15 +33,16 @@ async def generate_data(client: genai.Client, model: str, file_name: str) -> tup
     end_time = time.perf_counter()
     duration = end_time - start_time
 
-    return Journal.model_validate_json(output.text), duration
+    return config.output_model.model_validate_json(output.text), duration
 
 async def process_file(sem, client, model, file_name, log):
     async with sem:
         try:
             journal_data,duration = await generate_data(client=client, model=model, file_name=file_name)
-            row = data_to_row(data=journal_data, file_name=file_name)
-            row['generation_seconds'] = duration
-            return row
+            rows = data_to_rows(data=journal_data, file_name=file_name)
+            for row in rows:
+                row["generation_seconds"] = duration
+            return rows
         except Exception as e:
             log(f"Error processing {file_name}", exc=e)
             if _is_fatal_api_error(e):

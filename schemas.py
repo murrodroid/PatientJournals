@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from typing import List, Optional
 from datetime import date
 
@@ -130,3 +130,22 @@ class Journal(BaseModel):
         description="Contains information on whether the patient was treated with anti-diphtheria serum, and if so, the type of serum and dosis information. Not all cases have this information. If it is found, it is in the top left corner of the journal, underneath or beside the ward information. Often written diagonally."
     )
 
+
+# text pages schema
+class PageLine(BaseModel):
+    text: str = Field(description="This includes all text described that isn't written seperated from the line.")
+    metadata: Optional[str] = Field(None, description="Contains the metadata of the line, can describe dates, temperatures, etc. Most commonly written in the left-side, before normal text is written.")
+    page_line_number: Optional[int] = Field(
+        default=None,
+        description="1-based line number derived from this item's position in page_lines.",
+    )
+
+
+class TextPage(BaseModel):
+    page_lines: List[PageLine] = Field(description="This is meant for each line on the page, seperated by linebreaks.")
+
+    @model_validator(mode="after")
+    def assign_line_numbers(self) -> "TextPage":
+        for index, line in enumerate(self.page_lines, start=1):
+            line.page_line_number = index
+        return self

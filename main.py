@@ -107,10 +107,10 @@ async def main():
         tasks = [asyncio.create_task(process_file(sem, client, model, f, log)) for f in data]
 
         for coro in tqdm_asyncio.as_completed(tasks, desc='Processing images', unit='img'):
-            journal_row = await coro
+            generated_rows = await coro
             
-            if journal_row:
-                rows.append(journal_row)
+            if generated_rows:
+                rows.extend(generated_rows)
             else:
                 log("Received empty row from processing step.")
 

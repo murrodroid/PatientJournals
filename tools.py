@@ -8,15 +8,25 @@ import shutil
 import types
 import traceback
 from dataclasses import asdict, is_dataclass
+from pydantic import BaseModel
 
 import config as config_module
 from config import config
+from output_handler import data_to_rows as schema_data_to_rows
 
 
-def data_to_row(data: Journal, file_name: str) -> dict:
-    row = data.model_dump(mode="python")
-    row["file_name"] = file_name
-    return row
+def data_to_rows(data: BaseModel, file_name: str) -> list[dict]:
+    return schema_data_to_rows(data, file_name)
+
+
+def data_to_row(data: BaseModel, file_name: str) -> dict:
+    rows = data_to_rows(data, file_name)
+    if len(rows) != 1:
+        raise ValueError(
+            "data_to_row received data that expands to multiple rows. "
+            "Use data_to_rows instead."
+        )
+    return rows[0]
 
 def _normalize_output_format(output_format: str) -> str:
     fmt = output_format.strip().lower().lstrip(".")
