@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Any, Literal
 from pydantic import BaseModel
-from schemas import Journal, TextPage
+from schemas import *
 
 
 @dataclass
@@ -20,7 +20,6 @@ class Config:
     target_folder: str = "data"
     input_glob: str = "*.png"
     recursive: bool = True
-    input_series: str | None = "8dec96"
     fp_mode: Literal["all", "only_fp", "exclude_fp"] = "exclude_fp"
     fp_suffix: str = "_fp"
     output_format: str = "jsonl"

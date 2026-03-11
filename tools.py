@@ -98,12 +98,6 @@ def _cfg_get(cfg_obj: object, key: str, default: object | None = None):
     return default
 
 
-def _series_key(folder_name: str, fp_suffix: str) -> str:
-    if folder_name.endswith(fp_suffix):
-        return folder_name[: -len(fp_suffix)]
-    return folder_name
-
-
 def _is_fp_file(path: Path, root: Path, fp_suffix: str) -> bool:
     try:
         rel = path.relative_to(root)
@@ -113,17 +107,9 @@ def _is_fp_file(path: Path, root: Path, fp_suffix: str) -> bool:
     return any(part.endswith(fp_suffix) for part in folder_parts)
 
 
-def _matches_series(path: Path, root: Path, series: str, fp_suffix: str) -> bool:
-    try:
-        rel = path.relative_to(root)
-    except ValueError:
-        rel = path
-
-    if len(rel.parts) > 1:
-        top_folder = rel.parts[0]
-    else:
-        top_folder = root.name
-    return _series_key(top_folder, fp_suffix) == series
+def _gather_files(root: Path, pattern: str, recursive: bool) -> list[Path]:
+    paths = root.rglob(pattern) if recursive else root.glob(pattern)
+    return [p for p in paths if p.is_file()]
 
 
 def list_input_files(cfg_obj: object) -> list[str]:
@@ -136,7 +122,6 @@ def list_input_files(cfg_obj: object) -> list[str]:
 
     pattern = _cfg_get(cfg_obj, "input_glob", "*")
     recursive = bool(_cfg_get(cfg_obj, "recursive", False))
-    series = _cfg_get(cfg_obj, "input_series")
     fp_mode = str(_cfg_get(cfg_obj, "fp_mode", "all")).lower()
     fp_suffix = str(_cfg_get(cfg_obj, "fp_suffix", "_fp"))
 
@@ -147,22 +132,25 @@ def list_input_files(cfg_obj: object) -> list[str]:
             f"Expected one of: {sorted(allowed_fp_modes)}"
         )
 
-    paths = folder.rglob(pattern) if recursive else folder.glob(pattern)
-    files = [p for p in paths if p.is_file()]
-
-    if series:
-        files = [p for p in files if _matches_series(p, folder, str(series), fp_suffix)]
-
+    files = _gather_files(folder, pattern, recursive)
     if fp_mode == "only_fp":
         files = [p for p in files if _is_fp_file(p, folder, fp_suffix)]
     elif fp_mode == "exclude_fp":
         files = [p for p in files if not _is_fp_file(p, folder, fp_suffix)]
 
+    if fp_mode == "exclude_fp":
+        leaked = [p for p in files if _is_fp_file(p, folder, fp_suffix)]
+        if leaked:
+            raise RuntimeError(
+                "Internal selection error: _fp files leaked in exclude_fp mode. "
+                f"Example: {leaked[0]}"
+            )
+
     files = sorted(files)
     if not files:
         raise FileNotFoundError(
             "No files matched selection "
-            f"(pattern={pattern}, series={series}, fp_mode={fp_mode}) "
+            f"(pattern={pattern}, fp_mode={fp_mode}) "
             f"in {folder} (recursive={recursive})"
         )
 

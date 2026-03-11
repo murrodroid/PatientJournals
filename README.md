@@ -58,13 +58,44 @@ python validation_analysis.py --input validations --out validation_reports --min
 
 - --min-n: limits the minimum amount of validations for a column's data to be included.
 
-**Model Generation**
+**Local Transcription Generation (`main.py`)**
 
 Currently, the project is only set up for using Gemini. This will be updated in the future.
 
 Create a file `api_keys.py` and write your API key in it. This should then be the one imported in `main.py`.
 
-In `config.py`, you can specify all details of generation, and then simply run:
+In `config.py`, you can specify default generation settings. Basic run:
 ```bash
 uv run main.py
 ```
+
+Useful `main.py` features:
+
+- Continue from an existing dataset and skip already-transcribed files:
+```bash
+uv run main.py --continue-dataset runs/20260301_101010/20260301_101010_dataset.jsonl
+```
+
+- Continue from the most recent run automatically:
+```bash
+uv run main.py --continue-dataset newest
+```
+
+- Show dataset coverage before/after the run:
+```bash
+uv run main.py --verbose
+```
+
+- Run against a specific folder instead of the default data root:
+```bash
+uv run main.py --data-folder data/8dec96
+```
+You can also pass a folder name relative to the configured `target_folder`, e.g. `--data-folder 8dec96`.
+For a local folder outside the project data root, pass an absolute path, e.g. `--data-folder /Users/you/local_journal_images`.
+
+Behavior notes:
+
+- If `--data-folder` is not set, `main.py` uses the configured `target_folder` (default: `data`).
+- You can also set `target_folder` in `config.py` to an absolute local path if you want that location as the default input root.
+- When `--continue-dataset` is used, existing rows are carried into the new run output and only missing files are processed.
+- `fp_mode` in `config.py` controls whether input selection uses `_fp` folders (`only_fp`), non-`_fp` folders (`exclude_fp`), or both (`all`).

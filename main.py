@@ -10,9 +10,42 @@ from tools import *
 from generate import process_file
 
 
+def resolve_data_folder(
+    folder_arg: str | None,
+    default_folder: str | Path,
+) -> Path:
+    default_path = Path(default_folder).expanduser()
+    if not folder_arg:
+        return default_path
+
+    requested = Path(folder_arg).expanduser()
+    candidates = [requested]
+    if not requested.is_absolute():
+        candidates.append(default_path / requested)
+
+    for candidate in candidates:
+        if candidate.exists() and candidate.is_dir():
+            return candidate.resolve()
+
+    readable_candidates = ", ".join(str(p) for p in candidates)
+    raise FileNotFoundError(
+        f"Unable to resolve data folder '{folder_arg}'. "
+        f"Tried: {readable_candidates}"
+    )
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Process journal images and write a dataset."
+    )
+    parser.add_argument(
+        "--data-folder",
+        dest="data_folder",
+        help=(
+            "Folder to process as input data. Accepts an absolute path, a "
+            "path relative to the current working directory, or a path "
+            "relative to the configured target folder."
+        ),
     )
     parser.add_argument(
         "--continue-dataset",
@@ -35,10 +68,17 @@ async def main():
     args = parse_args()
     model = config.model
     client = genai.Client(api_key=api_key)
-    
-    data = list_input_files(config)
-    target_folder = config.target_folder
-    
+
+    target_folder = resolve_data_folder(args.data_folder, config.target_folder)
+    selection_cfg = {
+        "target_folder": str(target_folder),
+        "input_glob": config.input_glob,
+        "recursive": config.recursive,
+        "fp_mode": config.fp_mode,
+        "fp_suffix": config.fp_suffix,
+    }
+    data = list_input_files(selection_cfg)
+
     flush_every = config.flush_every or config.batch_size
     rows: list[dict] = []
     header_written = False
@@ -103,7 +143,13 @@ async def main():
 
     tasks = []
     try:
-        log(f"Starting run. Files={len(data)} Output={out_path.name}")
+        log(
+            "Starting run. "
+            f"Files={len(data)} "
+            f"Folder={target_folder} "
+            f"fp_mode={selection_cfg['fp_mode']} "
+            f"Output={out_path.name}"
+        )
         tasks = [asyncio.create_task(process_file(sem, client, model, f, log)) for f in data]
 
         for coro in tqdm_asyncio.as_completed(tasks, desc='Processing images', unit='img'):
