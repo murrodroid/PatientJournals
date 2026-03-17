@@ -216,3 +216,5 @@ data
 # local runs and dataset stuff
 runs/
 *.jsonl
+service-account.json
+check_data.ipynb

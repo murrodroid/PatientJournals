@@ -8,8 +8,8 @@ from api_keys import gemini_maarten as api_key
 @dataclass
 class Config:
     model: str = "gemini-3-pro-preview"
-    input_prompt_name: str = "textpage"
-    output_model: type[BaseModel] = TextPage # change to correct schema in schemas.py
+    input_prompt_name: str = "frontpage"          # change to correct prompt
+    output_model: type[BaseModel] = FrontPage     # change to correct schema in schemas.py
     target_folder: str = "data"
     fp_mode: Literal["all", "only_fp", "exclude_fp"] = "exclude_fp"
     output_format: str = "jsonl"
@@ -59,23 +59,21 @@ class Config:
     api_recovery_model: str = ""
 
     # GCP/GCS settings
-    service_account_file: str = ""
-    gcp_project_id: str = ""
-    gcp_location: str = "us-central1"
-    gcs_bucket_name: str = ""
+    service_account_file: str = "service-account.json"
+    gcp_project_id: str = "gen-lang-client-0854332640"
+    gcp_location: str = "europe-north1"
+    gcs_bucket_name: str = "data-blegdams"
     gcs_pages_prefix: str = "pages"
     batch_requests_gcs_prefix: str = "batch/requests"
     batch_outputs_gcs_prefix: str = "batch/outputs"
     datasets_gcs_prefix: str = "datasets"
     upload_dataset_to_gcs: bool = False
 
-    # Upload/render settings for PDF -> GCS image pages
+    # Upload/render settings for PDF to GCS image pages
     batch_upload_limit: int = 20
     upload_workers: int = 4
     pdf_render_dpi: int = 300
     page_number_digits: int = 4
-    
-    output_schema: dict[str, Any] = field(init=False)
     image_settings: dict[str, Any] = field(
         default_factory=lambda: {
             "max_dim": 3000,
@@ -89,6 +87,8 @@ class Config:
             "output_format": "PNG",
         }
     )
+
+    
     prompts: dict[str, str] = field(
         default_factory=lambda: {
             "frontpage": f"""
@@ -126,6 +126,9 @@ class Config:
                 """
         }
     )
+    
+    # backend for config
+    output_schema: dict[str, Any] = field(init=False)
 
     def __post_init__(self) -> None:
         self.output_schema = self.output_model.model_json_schema()

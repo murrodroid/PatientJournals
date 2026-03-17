@@ -12,7 +12,7 @@ import pandas as pd
 from PIL import Image, ImageTk
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
-from schemas import Journal
+from schemas import FrontPage
 
 _COLUMNS_NOT_INCLUDED = ['generation_seconds','file_name']
 
@@ -81,7 +81,7 @@ def _unwrap_optional(field_type: object) -> object:
     return args[0] if len(args) == 1 else field_type
 
 def _get_field_type(path: str) -> object | None:
-    current = Journal
+    current = FrontPage
     field_type: object | None = None
     for part in path.split("."):
         if not hasattr(current, "model_fields"):

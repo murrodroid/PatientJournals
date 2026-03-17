@@ -110,7 +110,7 @@ class Serum(BaseModel):
     )
 
 
-class Journal(BaseModel):
+class FrontPage(BaseModel):
     is_dead: bool = Field(
         description="Determines whether the patient is dead. If true, a black cross is drawn on the page, typically at the top. Sometimes it looks like a plus, '+'. If the cross does not appear, it is False."
     )

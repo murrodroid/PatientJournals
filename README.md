@@ -99,3 +99,54 @@ Behavior notes:
 - You can also set `target_folder` in `config.py` to an absolute local path if you want that location as the default input root.
 - When `--continue-dataset` is used, existing rows are carried into the new run output and only missing files are processed.
 - `fp_mode` in `config.py` controls whether input selection uses `_fp` folders (`only_fp`), non-`_fp` folders (`exclude_fp`), or both (`all`).
+
+**Batch Jobs On GCP (`batch_*.py`)**
+
+Batch scripts (`batch_submit.py`, `batch_status.py`, `batch_retrieve.py`) are configured through `config.py` and use Vertex AI + GCS when `batch_backend="vertex"`. You should use vertex, and activate "Vertex AI API" in your GCS project.
+ 
+1. Create or choose a GCP project and a GCS bucket.
+
+2. Create a service account and key (example with `gcloud`):
+```bash
+gcloud iam service-accounts create patientjournals-batch \
+  --display-name="PatientJournals Batch"
+
+gcloud iam service-accounts keys create ./service-account.json \
+  --iam-account=patientjournals-batch@PROJECT_ID.iam.gserviceaccount.com
+```
+
+3. Grant roles to that service account:
+```bash
+gcloud projects add-iam-policy-binding PROJECT_ID \
+  --member="serviceAccount:patientjournals-batch@PROJECT_ID.iam.gserviceaccount.com" \
+  --role="roles/aiplatform.user"
+
+gcloud projects add-iam-policy-binding PROJECT_ID \
+  --member="serviceAccount:patientjournals-batch@PROJECT_ID.iam.gserviceaccount.com" \
+  --role="roles/storage.objectAdmin"
+```
+
+4. Set required `config.py` values:
+- `batch_backend = "vertex"`
+- `service_account_file = "service-account.json"` (or absolute path)
+- `gcp_project_id = "your-project-id"`
+- `gcp_location = "europe-north1"` (or your Vertex region)
+- `gcs_bucket_name = "your-bucket-name"`
+- `input_prompt_name = "textpage"` (or another prompt key in `prompts`)
+
+5. Common optional `config.py` values:
+- `gcs_pages_prefix`, `batch_requests_gcs_prefix`, `batch_outputs_gcs_prefix`, `datasets_gcs_prefix`
+- `batch_input_prefix` (limit batch input to a specific prefix in bucket)
+- `batch_use_local_pdf_folders` and `batch_auto_upload_missing`
+- `batch_job_display_name`, `batch_poll_interval_seconds`
+- `upload_dataset_to_gcs`
+- `api_recovery_enabled`, `api_recovery_max_missing_pages`, `api_recovery_model`, `api_key` (only if recovery is enabled)
+
+
+Typical batch flow:
+```bash
+uv run upload.py
+uv run batch_submit.py
+uv run batch_status.py --watch
+uv run batch_retrieve.py --wait
+```

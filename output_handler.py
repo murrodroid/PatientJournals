@@ -4,10 +4,10 @@ from typing import Callable
 
 from pydantic import BaseModel
 
-from schemas import Journal, TextPage
+from schemas import FrontPage, TextPage
 
 
-def journal_rows(data: Journal, file_name: str) -> list[dict]:
+def journal_rows(data: FrontPage, file_name: str) -> list[dict]:
     row = data.model_dump(mode="python")
     row["file_name"] = file_name
     return [row]
@@ -31,7 +31,7 @@ def default_rows(data: BaseModel, file_name: str) -> list[dict]:
 
 
 _HANDLERS: dict[type[BaseModel], Callable[[BaseModel, str], list[dict]]] = {
-    Journal: journal_rows,
+    FrontPage: journal_rows,
     TextPage: text_page_rows,
 }
 
