@@ -13,3 +13,5 @@ dependencies:
   - pip
   - pip:
     - google-genai
+    - google-cloud-storage
+    - pypdfium2

@@ -61,9 +61,12 @@ def flush_rows(
             handle.write("\n")
     return header_written
 
-def create_subfolder(root: str | Path = "runs") -> Path:
+def create_subfolder(
+    root: str | Path = "runs",
+    prefix: str = "",
+) -> Path:
     root_path = Path(root)
-    run_name = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_name = f"{prefix}{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     run_dir = root_path / run_name
     run_dir.mkdir(parents=True, exist_ok=False)
 

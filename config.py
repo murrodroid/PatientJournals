@@ -2,12 +2,21 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 from pydantic import BaseModel
 from schemas import *
+from api_keys import gemini_maarten as api_key
 
 
 @dataclass
 class Config:
     model: str = "gemini-3-pro-preview"
+    input_prompt_name: str = "textpage"
+    output_model: type[BaseModel] = TextPage # change to correct schema in schemas.py
+    target_folder: str = "data"
+    fp_mode: Literal["all", "only_fp", "exclude_fp"] = "exclude_fp"
+    output_format: str = "jsonl"
+    csv_sep: str = "$"
+    
     model_temperature: float = 0.0
+    api_key: str = api_key
     api_concurrent_tasks: int = 8
     api_max_attempts: int = 6
     api_retry_initial_delay_seconds: float = 2.0
@@ -17,16 +26,55 @@ class Config:
     batch_size: int = 2048
     flush_every: int = 1
     dataset_file_name: str = "dataset"
-    target_folder: str = "data"
     input_glob: str = "*.png"
     recursive: bool = True
-    fp_mode: Literal["all", "only_fp", "exclude_fp"] = "exclude_fp"
     fp_suffix: str = "_fp"
-    output_format: str = "jsonl"
     output_root: str = "runs"
+
+    # Batch + cloud backend settings
+    batch_backend: Literal["vertex", "mldev"] = "vertex"
+    batch_job_display_name: str = "patientjournals-batch"
+    batch_job_name: str = ""
+    batch_poll_interval_seconds: int = 20
+    batch_requests_file_name: str = "batch_requests.jsonl"
+    batch_input_source: Literal["gcs"] = "gcs"
+    batch_input_prefix: str = ""
+    batch_input_extensions: tuple[str, ...] = ("png", "jpg", "jpeg", "webp", "tiff")
+    batch_input_max_bytes: int = 0
+    batch_include_response_schema: bool = True
+    batch_use_local_pdf_folders: bool = True
+    batch_auto_upload_missing: bool = False
+
+    response_mime_type: str = "application/json"
+    response_schema_field: Literal["response_json_schema", "response_schema"] = "response_json_schema"
+
+    # Validation/recovery controls for batch retrieval
+    require_all_expected_pages: bool = True
+    require_all_pages_successful: bool = True
+    page_validation_sample_size: int = 5
+    require_headers_for_all_rows: bool = False
+    header_validation_sample_size: int = 5
+    api_recovery_enabled: bool = False
+    api_recovery_max_missing_pages: int = 5
+    api_recovery_model: str = ""
+
+    # GCP/GCS settings
+    service_account_file: str = ""
+    gcp_project_id: str = ""
+    gcp_location: str = "us-central1"
+    gcs_bucket_name: str = ""
+    gcs_pages_prefix: str = "pages"
+    batch_requests_gcs_prefix: str = "batch/requests"
+    batch_outputs_gcs_prefix: str = "batch/outputs"
+    datasets_gcs_prefix: str = "datasets"
+    upload_dataset_to_gcs: bool = False
+
+    # Upload/render settings for PDF -> GCS image pages
     batch_upload_limit: int = 20
-    input_prompt_name: str = "textpage"
-    output_model: type[BaseModel] = TextPage
+    upload_workers: int = 4
+    pdf_render_dpi: int = 300
+    page_number_digits: int = 4
+    
     output_schema: dict[str, Any] = field(init=False)
     image_settings: dict[str, Any] = field(
         default_factory=lambda: {
