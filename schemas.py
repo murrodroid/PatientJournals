@@ -93,7 +93,7 @@ class Ward(BaseModel):
             Often a combination of a letter and a number. The number can be given as either an Arabic or Roman numeral. 
             The ward can also be 'Observationsbygningen' or 'Officiantbygningen', often abbreviated as 'Observation',  'Obs.' or 'Officiant', Off.', respectively. The following rule exists, anything with Observation: 'Obs.' and anything regarding Officiant: 'Off.' 
             The ward can also be a tent ('Telt') which is often followed by a specifying letter. 
-            Examples: {"Officiant":"Off","Observation":"Obs","FII":"F2","AI":"A1"}
+            Examples: {"Officiant":"Off.","Observation":"Obs.","FII":"F2","AI":"A1"}
         """
     )
     is_enestue: bool = Field(
@@ -106,9 +106,13 @@ class HospitalStay(BaseModel):
         description="The ward of the patient journal. Strictly written in the upper-most left corner, only the text in the very-upper corner, not anywhere else. Can be missing in rare cases."
     )
     admission_date: date = Field(
+        ge=date(1879, 1, 1),
+        le=date(1910, 12, 31),
         description="Written after 'Indl' or 'indskrevet' or similar indication of admission, and the upper-most date on the page. The year must be between 1879 and 1910."
     )
     release_date: date = Field(
+        ge=date(1879, 1, 1),
+        le=date(1910, 12, 31),
         description="Written after 'Udskr', 'Udskrevet' or similar indication of discharge, beneath admissionDate. May feature additional text indicating time of day. This is not transcribed here but in “note”. The year must be between 1879 and 1910."
     )
     stay_length: str = Field(
@@ -127,6 +131,7 @@ class Top(BaseModel):
     """
     )
     db: Optional[List[DB_CLASSES]] = Field(
+        default=None,
         description="""
             If the patient is either positive or not positive for diphtheria bacteria, this has been noted either in the top-right corner or as part of the list of conditions.  
             Examples: {'+D.B.':'+DB', '÷D.B':'-DB', 'med D.B.':'+DB', 'ikke D.B.':'-DB', '+D.B. in reconv':'DB in reconv'}
@@ -137,6 +142,7 @@ class Top(BaseModel):
 
 class Severity(BaseModel):
     modifier: Optional[SEVERITY_CLASSES] = Field(
+        default=None,
         description="A modifier that indicates if the given severity is worse than the word or better than the word. Written before the severity word. Sometimes written in the margin shadow."
     )
     word: str = Field(
@@ -169,7 +175,7 @@ class Serum(BaseModel):
     )
     doses: Optional[str] = Field(
         default=None,
-        description="""
+        description=r"""
             Indicates the doses of serum given, as well as the days since symptom start. Only if SerumGiven is True. Usually an integer, or a list of integers separated by “+”. Can contain roman numerals or integers as well; often underneath the integers with in many cases a horizontal “{“ connecting subsequent doses on the same day, but can also be written underneath the integers without “{“. In nearly all cases these notes are written directly underneath the serum information (variable “type”), but can in rare cases extend on two or more lines. In rare cases, it can also be followed by a short string.  
             Should be transcribed where connected dosages are in square brackets and the roman numeral or integer is separated by a comma. Subsequent doses are added similarly.  
             Choose integers from 10, 15, 20, or 30. 
@@ -182,6 +188,7 @@ class Serum(BaseModel):
         """
     )
     type: Optional[str] = Field(
+        default=None,
         description="The type of serum given. Usually contains the word ”Serum” followed by a specification such as “dan”, “dansk”, “danic”, “fransk”, “fra.”, “f”, “fort” or similar -- can be in different order."
     )
 
@@ -206,6 +213,7 @@ class FrontPage(BaseModel):
         description="Contains information on whether the patient was treated with anti-diphtheria serum, and if so, the type of serum and dosis information. Not all cases have this information. If it is found, it is in the top left corner of the journal, underneath or beside the ward information. Often written diagonally."
     )
     crossed_out: Optional[str] = Field(
+        default=None,
         description="Verbose description of any sections of the page that have crossed out (not underlined) words or numbers, that have not been included in any other variables."
     )
 
