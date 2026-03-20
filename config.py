@@ -106,6 +106,7 @@ class Config:
                 - Do not infer or guess beyond the evidence on the page.
                 - Preserve spellings exactly as written, even if archaic or non-standard. Only exception is numbers, which should be written as float-values.
                 - If nothing fits a Field, output an empty field for that position.
+                - If a line is crossed out, it should not be included in the datapoint of which it's relevant to.
                 """,
             "textpage": """
                 **Role:**
