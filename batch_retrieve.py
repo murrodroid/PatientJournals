@@ -593,6 +593,14 @@ def _resolve_batch_name(args: argparse.Namespace) -> str:
     )
 
 
+def _extract_location_from_batch_name(batch_name: str) -> str | None:
+    parts = [part for part in batch_name.split("/") if part]
+    for index, part in enumerate(parts):
+        if part == "locations" and index + 1 < len(parts):
+            return parts[index + 1]
+    return None
+
+
 def _flush_rows(
     *,
     rows_to_flush: list[dict],
@@ -622,7 +630,13 @@ def retrieve_batch() -> Path:
     run_dir = create_subfolder(config.output_root, prefix="retrieve_")
     log = get_run_logger(run_dir)
 
-    client = get_batch_client()
+    client_location = (
+        _extract_location_from_batch_name(batch_name)
+        or (config.vertex_model_location or "").strip()
+        or (config.gcp_location or "").strip()
+        or None
+    )
+    client = get_batch_client(location=client_location)
     batch_job = client.batches.get(name=batch_name)
     state = getattr(batch_job, "state", None)
     if state != "JOB_STATE_SUCCEEDED":

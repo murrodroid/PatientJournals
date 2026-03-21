@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import mimetypes
 from pathlib import Path
 import re
 
@@ -15,9 +16,11 @@ from preprocess import (
     enhance_contrast,
     image_to_bytes,
 )
+from tools import list_input_files
 
 
 _PAGE_NAME_PATTERN = re.compile(r"^page_(\d+)\.([A-Za-z0-9]+)$")
+_ALLOWED_FP_MODES = {"all", "only_fp", "exclude_fp"}
 
 
 def _apply_image_settings(img):
@@ -123,15 +126,88 @@ def _upload_blob_bytes(
     blob.upload_from_string(image_bytes, content_type=mime_type)
 
 
+def _is_fp_pdf_path(path: Path, root: Path, fp_suffix: str) -> bool:
+    try:
+        rel = path.relative_to(root)
+    except ValueError:
+        rel = path
+    parent_parts = rel.parts[:-1]
+    return any(part.endswith(fp_suffix) for part in parent_parts) or path.stem.endswith(fp_suffix)
+
+
+def _apply_fp_mode_filter(
+    paths: list[Path],
+    *,
+    root: Path,
+    fp_mode: str,
+    fp_suffix: str,
+) -> list[Path]:
+    mode = fp_mode.lower()
+    if mode not in _ALLOWED_FP_MODES:
+        raise ValueError(
+            f"Unsupported fp_mode: {fp_mode}. "
+            f"Expected one of: {sorted(_ALLOWED_FP_MODES)}"
+        )
+
+    if mode == "only_fp":
+        return [p for p in paths if _is_fp_pdf_path(p, root, fp_suffix)]
+    if mode == "exclude_fp":
+        return [p for p in paths if not _is_fp_pdf_path(p, root, fp_suffix)]
+    return paths
+
+
+def _ensure_unique_pdf_names(paths: list[Path]) -> None:
+    by_name: dict[str, Path] = {}
+    duplicates: dict[str, list[Path]] = {}
+    for path in paths:
+        existing = by_name.get(path.name)
+        if existing is None:
+            by_name[path.name] = path
+            continue
+        duplicates.setdefault(path.name, [existing]).append(path)
+
+    if not duplicates:
+        return
+
+    examples = []
+    for name, duplicate_paths in sorted(duplicates.items()):
+        shown = ", ".join(str(p) for p in duplicate_paths[:3])
+        suffix = "..." if len(duplicate_paths) > 3 else ""
+        examples.append(f"{name}: {shown}{suffix}")
+    raise ValueError(
+        "Duplicate PDF file names detected. "
+        "Batch upload/submit maps pages by PDF file name, so names must be unique. "
+        f"Conflicts: {'; '.join(examples)}"
+    )
+
+
 def _list_target_pdfs(target_folder: str | None) -> list[Path]:
     if not target_folder:
         raise KeyError("target_folder is missing from config")
     folder = Path(target_folder).expanduser()
     if not folder.exists() or not folder.is_dir():
         raise FileNotFoundError(f"target_folder not found or not a directory: {folder}")
-    pdfs = sorted(p for p in folder.glob("*.pdf") if p.is_file())
+    recursive = bool(config.recursive)
+    fp_mode = str(config.fp_mode or "all")
+    fp_suffix = str(config.fp_suffix or "_fp")
+
+    candidates = folder.rglob("*") if recursive else folder.glob("*")
+    pdfs = sorted(
+        p for p in candidates
+        if p.is_file() and p.suffix.lower() == ".pdf"
+    )
+    pdfs = _apply_fp_mode_filter(
+        pdfs,
+        root=folder,
+        fp_mode=fp_mode,
+        fp_suffix=fp_suffix,
+    )
+    _ensure_unique_pdf_names(pdfs)
     if not pdfs:
-        raise FileNotFoundError(f"No PDFs found in {folder}")
+        raise FileNotFoundError(
+            f"No PDFs found in {folder} "
+            f"(recursive={recursive}, fp_mode={fp_mode})"
+        )
     return pdfs
 
 
@@ -299,6 +375,53 @@ def upload_missing_pdfs(
     if not incomplete_paths:
         return []
     return _upload_pdf_paths(incomplete_paths, active_bucket)
+
+
+def upload_missing_images(
+    image_paths: list[str | Path] | None = None,
+    bucket: storage.Bucket | None = None,
+) -> list[str]:
+    if image_paths is None:
+        selection_cfg = {
+            "target_folder": config.target_folder,
+            "input_glob": config.input_glob,
+            "recursive": config.recursive,
+            "fp_mode": config.fp_mode,
+            "fp_suffix": config.fp_suffix,
+        }
+        candidate_paths = [Path(path) for path in list_input_files(selection_cfg)]
+    else:
+        candidate_paths = [Path(path).expanduser() for path in image_paths]
+
+    active_bucket = bucket or _build_bucket()
+    pages_prefix = _normalize_prefix(config.gcs_pages_prefix or "")
+    root = Path(config.target_folder).expanduser()
+
+    existing = {
+        blob.name
+        for blob in active_bucket.list_blobs(prefix=pages_prefix or None)
+        if not blob.name.endswith("/")
+    }
+
+    uploaded: list[str] = []
+    for local_path in candidate_paths:
+        if not local_path.exists() or not local_path.is_file():
+            continue
+        try:
+            rel = local_path.relative_to(root)
+        except ValueError:
+            rel = Path(local_path.name)
+        blob_path = f"{pages_prefix}{rel.as_posix()}"
+        if blob_path in existing:
+            continue
+        mime_type = mimetypes.guess_type(str(local_path))[0] or "application/octet-stream"
+        active_bucket.blob(blob_path).upload_from_filename(
+            str(local_path),
+            content_type=mime_type,
+        )
+        existing.add(blob_path)
+        uploaded.append(blob_path)
+    return uploaded
 
 
 def upload_all_pdfs() -> None:

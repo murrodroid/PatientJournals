@@ -34,7 +34,7 @@ def infer_project_id_from_service_account(path: Path) -> str | None:
     return None
 
 
-def get_batch_client() -> genai.Client:
+def get_batch_client(*, location: str | None = None) -> genai.Client:
     backend = (config.batch_backend or "").strip().lower()
     if backend != "vertex":
         api_key = (config.api_key or "").strip()
@@ -62,6 +62,17 @@ def get_batch_client() -> genai.Client:
             "or ensure project_id exists in service_account_file."
         )
 
+    vertex_location = (
+        (location or "").strip()
+        or (config.vertex_model_location or "").strip()
+        or (config.gcp_location or "").strip()
+    )
+    if not vertex_location:
+        raise ValueError(
+            "Unable to resolve Vertex location. Set config.vertex_model_location "
+            "or config.gcp_location."
+        )
+
     credentials = service_account.Credentials.from_service_account_file(
         str(service_account_path),
         scopes=[_CLOUD_PLATFORM_SCOPE],
@@ -71,6 +82,6 @@ def get_batch_client() -> genai.Client:
         vertexai=True,
         credentials=credentials,
         project=project_id,
-        location=config.gcp_location,
+        location=vertex_location,
         http_options=types.HttpOptions(api_version="v1"),
     )

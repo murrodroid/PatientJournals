@@ -96,6 +96,14 @@ def _resolve_batch_name(args: argparse.Namespace) -> str:
     )
 
 
+def _extract_location_from_batch_name(batch_name: str) -> str | None:
+    parts = [part for part in batch_name.split("/") if part]
+    for index, part in enumerate(parts):
+        if part == "locations" and index + 1 < len(parts):
+            return parts[index + 1]
+    return None
+
+
 def _batch_summary(batch_job: object) -> str:
     name = getattr(batch_job, "name", None)
     state = getattr(batch_job, "state", None)
@@ -168,7 +176,13 @@ def main() -> None:
     if args.cancel and args.watch:
         raise ValueError("--cancel and --watch cannot be used together.")
 
-    client = get_batch_client()
+    client_location = (
+        _extract_location_from_batch_name(batch_name)
+        or (config.vertex_model_location or "").strip()
+        or (config.gcp_location or "").strip()
+        or None
+    )
+    client = get_batch_client(location=client_location)
 
     if args.cancel:
         batch_job = client.batches.get(name=batch_name)

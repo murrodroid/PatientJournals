@@ -7,11 +7,11 @@ from api_keys import gemini_maarten as api_key
 
 @dataclass
 class Config:
-    model: str = "gemini-3-pro-preview"
+    model: str = "gemini-3.1-pro-preview"
     input_prompt_name: str = "frontpage"          # change to correct prompt
     output_model: type[BaseModel] = FrontPage     # change to correct schema in schemas.py
     target_folder: str = "data"
-    fp_mode: Literal["all", "only_fp", "exclude_fp"] = "exclude_fp"
+    fp_mode: Literal["all", "only_fp", "exclude_fp"] = "only_fp"
     output_format: str = "jsonl"
     csv_sep: str = "$"
     
@@ -43,7 +43,7 @@ class Config:
     batch_input_max_bytes: int = 0
     batch_include_response_schema: bool = True
     batch_use_local_pdf_folders: bool = True
-    batch_auto_upload_missing: bool = False
+    batch_auto_upload_missing: bool = True
 
     response_mime_type: str = "application/json"
     response_schema_field: Literal["response_json_schema", "response_schema"] = "response_json_schema"
@@ -62,7 +62,8 @@ class Config:
     service_account_file: str = "service-account.json"
     gcp_project_id: str = "gen-lang-client-0854332640"
     gcp_location: str = "europe-north1"
-    gcs_bucket_name: str = "data-blegdams"
+    vertex_model_location: str = "global"
+    gcs_bucket_name: str = "data-blegdamsjournaler"
     gcs_pages_prefix: str = "pages"
     batch_requests_gcs_prefix: str = "batch/requests"
     batch_outputs_gcs_prefix: str = "batch/outputs"

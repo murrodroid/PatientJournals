@@ -12,7 +12,10 @@ from tqdm import tqdm
 from batch_client import get_batch_client, resolve_service_account_path
 from config import config
 from tools import create_subfolder, get_run_logger
-from upload import upload_missing_pdfs
+from upload import upload_missing_images, upload_missing_pdfs
+
+
+_ALLOWED_FP_MODES = {"all", "only_fp", "exclude_fp"}
 
 
 def _pages_prefix() -> str:
@@ -29,11 +32,23 @@ def _list_input_blobs(bucket: storage.Bucket) -> list[storage.Blob]:
         return _list_image_blobs_for_prefix(bucket, override_prefix, allowed)
 
     if not config.batch_use_local_pdf_folders:
-        return _list_image_blobs_for_prefix(bucket, pages_prefix, allowed)
+        all_blobs = _list_image_blobs_for_prefix(bucket, pages_prefix, allowed)
+        return _apply_fp_mode_to_blobs(
+            all_blobs,
+            pages_prefix=pages_prefix,
+            fp_mode=str(config.fp_mode or "all"),
+            fp_suffix=str(config.fp_suffix or "_fp"),
+        )
 
     local_pdf_paths = _list_local_pdf_paths(config.target_folder)
     if not local_pdf_paths:
-        return _list_image_blobs_for_prefix(bucket, pages_prefix, allowed)
+        all_blobs = _list_image_blobs_for_prefix(bucket, pages_prefix, allowed)
+        return _apply_fp_mode_to_blobs(
+            all_blobs,
+            pages_prefix=pages_prefix,
+            fp_mode=str(config.fp_mode or "all"),
+            fp_suffix=str(config.fp_suffix or "_fp"),
+        )
 
     collected: list[storage.Blob] = []
     missing: list[str] = []
@@ -70,33 +85,162 @@ def _normalize_prefix(prefix: str) -> str:
     return f"{value}/"
 
 
+def _is_fp_pdf_path(path: Path, root: Path, fp_suffix: str) -> bool:
+    try:
+        rel = path.relative_to(root)
+    except ValueError:
+        rel = path
+    parent_parts = rel.parts[:-1]
+    return any(part.endswith(fp_suffix) for part in parent_parts) or path.stem.endswith(fp_suffix)
+
+
+def _apply_fp_mode_to_pdf_paths(
+    paths: list[Path],
+    *,
+    root: Path,
+    fp_mode: str,
+    fp_suffix: str,
+) -> list[Path]:
+    mode = fp_mode.lower()
+    if mode not in _ALLOWED_FP_MODES:
+        raise ValueError(
+            f"Unsupported fp_mode: {fp_mode}. "
+            f"Expected one of: {sorted(_ALLOWED_FP_MODES)}"
+        )
+    if mode == "only_fp":
+        return [p for p in paths if _is_fp_pdf_path(p, root, fp_suffix)]
+    if mode == "exclude_fp":
+        return [p for p in paths if not _is_fp_pdf_path(p, root, fp_suffix)]
+    return paths
+
+
+def _ensure_unique_pdf_names(paths: list[Path]) -> None:
+    by_name: dict[str, Path] = {}
+    duplicates: dict[str, list[Path]] = {}
+    for path in paths:
+        existing = by_name.get(path.name)
+        if existing is None:
+            by_name[path.name] = path
+            continue
+        duplicates.setdefault(path.name, [existing]).append(path)
+
+    if not duplicates:
+        return
+
+    examples = []
+    for name, duplicate_paths in sorted(duplicates.items()):
+        shown = ", ".join(str(p) for p in duplicate_paths[:3])
+        suffix = "..." if len(duplicate_paths) > 3 else ""
+        examples.append(f"{name}: {shown}{suffix}")
+    raise ValueError(
+        "Duplicate PDF file names detected. "
+        "Batch submit maps input folders by PDF file name, so names must be unique. "
+        f"Conflicts: {'; '.join(examples)}"
+    )
+
+
+def _is_fp_blob_name(blob_name: str, pages_prefix: str, fp_suffix: str) -> bool:
+    relative = blob_name
+    if pages_prefix and blob_name.startswith(pages_prefix):
+        relative = blob_name[len(pages_prefix):]
+    parts = Path(relative).parts
+    if len(parts) < 2:
+        return False
+    folder_parts = parts[:-1]
+    return any(
+        part.endswith(fp_suffix) or Path(part).stem.endswith(fp_suffix)
+        for part in folder_parts
+    )
+
+
+def _apply_fp_mode_to_blobs(
+    blobs: list[storage.Blob],
+    *,
+    pages_prefix: str,
+    fp_mode: str,
+    fp_suffix: str,
+) -> list[storage.Blob]:
+    mode = fp_mode.lower()
+    if mode not in _ALLOWED_FP_MODES:
+        raise ValueError(
+            f"Unsupported fp_mode: {fp_mode}. "
+            f"Expected one of: {sorted(_ALLOWED_FP_MODES)}"
+        )
+    if mode == "all":
+        return sorted(blobs, key=lambda item: item.name)
+
+    if mode == "only_fp":
+        filtered = [
+            blob
+            for blob in blobs
+            if _is_fp_blob_name(blob.name, pages_prefix, fp_suffix)
+        ]
+    else:
+        filtered = [
+            blob
+            for blob in blobs
+            if not _is_fp_blob_name(blob.name, pages_prefix, fp_suffix)
+        ]
+    return sorted(filtered, key=lambda item: item.name)
+
+
 def _list_local_pdf_paths(target_folder: str | None) -> list[Path]:
     if not target_folder:
         return []
     folder = Path(target_folder).expanduser()
     if not folder.exists() or not folder.is_dir():
         return []
-    return sorted(path for path in folder.glob("*.pdf") if path.is_file())
+    recursive = bool(config.recursive)
+    fp_mode = str(config.fp_mode or "all")
+    fp_suffix = str(config.fp_suffix or "_fp")
+    candidates = folder.rglob("*") if recursive else folder.glob("*")
+    pdfs = sorted(
+        path for path in candidates
+        if path.is_file() and path.suffix.lower() == ".pdf"
+    )
+    selected = _apply_fp_mode_to_pdf_paths(
+        pdfs,
+        root=folder,
+        fp_mode=fp_mode,
+        fp_suffix=fp_suffix,
+    )
+    _ensure_unique_pdf_names(selected)
+    return selected
 
 
 def _allowed_extensions() -> set[str]:
-    return {ext.lower().lstrip(".") for ext in config.batch_input_extensions}
+    allowed = {ext.lower().lstrip(".") for ext in config.batch_input_extensions}
+    output_format = str((config.image_settings or {}).get("output_format", "PNG")).strip().lower()
+    if output_format in {"jpeg", "jpg"}:
+        allowed.add("jpg")
+    elif output_format in {"tif", "tiff"}:
+        allowed.add("tiff")
+    elif output_format:
+        allowed.add(output_format)
+    return {ext for ext in allowed if ext}
 
 
 def _ensure_uploaded_sources(bucket: storage.Bucket, log) -> list[str]:
     if not config.batch_auto_upload_missing:
         return []
-    if not config.batch_use_local_pdf_folders:
+
+    if config.batch_use_local_pdf_folders:
+        local_pdf_paths = _list_local_pdf_paths(config.target_folder)
+        if local_pdf_paths:
+            uploaded = upload_missing_pdfs(pdf_paths=local_pdf_paths, bucket=bucket)
+            if uploaded:
+                log(f"Uploaded missing page images for PDF folders: {', '.join(uploaded)}")
+            return uploaded
+
+    try:
+        uploaded_images = upload_missing_images(bucket=bucket)
+    except (FileNotFoundError, KeyError, ValueError) as exc:
+        log(f"Skipped local image auto-upload: {exc}")
         return []
 
-    local_pdf_paths = _list_local_pdf_paths(config.target_folder)
-    if not local_pdf_paths:
-        return []
-
-    uploaded = upload_missing_pdfs(pdf_paths=local_pdf_paths, bucket=bucket)
-    if uploaded:
-        log(f"Uploaded missing page images for PDF folders: {', '.join(uploaded)}")
-    return uploaded
+    if uploaded_images:
+        log(f"Uploaded {len(uploaded_images)} missing local image file(s).")
+    return uploaded_images
 
 
 def _list_image_blobs_for_prefix(
@@ -339,7 +483,11 @@ def submit_batch() -> None:
             f"with prefix '{config.batch_input_prefix}'."
         )
 
-    client = get_batch_client()
+    vertex_location = (
+        (config.vertex_model_location or "").strip()
+        or (config.gcp_location or "").strip()
+    )
+    client = get_batch_client(location=vertex_location)
 
     requests_path = run_dir / config.batch_requests_file_name
     request_count, request_bytes = _write_requests_file(
@@ -404,6 +552,7 @@ def submit_batch() -> None:
         "output_destination": dest_ref or None,
         "model": config.model,
         "client_backend": "vertex" if client.vertexai else "mldev",
+        "vertex_location": vertex_location if client.vertexai else None,
     }
     (run_dir / "batch_job.json").write_text(
         json.dumps(meta, indent=2, ensure_ascii=False),
