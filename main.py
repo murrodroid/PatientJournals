@@ -79,7 +79,7 @@ async def main():
     }
     data = list_input_files(selection_cfg)
 
-    flush_every = config.flush_every or config.batch_size
+    flush_every = max(1, int(config.flush_every))
     rows: list[dict] = []
     header_written = False
     total_written = 0
@@ -161,13 +161,18 @@ async def main():
                 log("Received empty row from processing step.")
 
             if len(rows) >= flush_every:
+                flush_count = len(rows)
                 header_written = flush_rows(
                     rows=rows,
                     out_path=str(out_path),
                     header_written=header_written,
                     output_format=output_format,
                 )
-                total_written += len(rows)
+                total_written += flush_count
+                log(
+                    f"Flushed {flush_count} row(s) to {out_path.name} "
+                    f"(flush_every={flush_every})."
+                )
                 rows.clear() 
 
     except Exception as e:

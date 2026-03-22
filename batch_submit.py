@@ -11,6 +11,7 @@ from tqdm import tqdm
 
 from batch_client import get_batch_client, resolve_service_account_path
 from config import config
+from generation_spec import build_batch_generation_config, prompt_text
 from tools import create_subfolder, get_run_logger
 from upload import upload_missing_images, upload_missing_pdfs
 
@@ -335,26 +336,17 @@ def _vertex_compatible_schema(raw_schema: object) -> object:
 
 
 def _build_request_config(*, for_vertex: bool) -> dict:
-    cfg = {"responseMimeType": config.response_mime_type}
-
-    if not config.batch_include_response_schema:
-        return cfg
-
     schema_payload: object = config.output_schema
     if for_vertex:
         schema_payload = _vertex_compatible_schema(config.output_schema)
 
-    schema_field = config.response_schema_field
-    if schema_field:
-        if for_vertex and schema_field == "response_json_schema":
-            cfg["responseSchema"] = schema_payload
-        elif schema_field == "response_json_schema":
-            cfg["responseJsonSchema"] = schema_payload
-        elif schema_field == "response_schema":
-            cfg["responseSchema"] = schema_payload
-        else:
-            cfg[schema_field] = schema_payload
-    return cfg
+    return build_batch_generation_config(
+        for_vertex=for_vertex,
+        include_schema=bool(config.batch_include_response_schema),
+        include_temperature=True,
+        include_thinking_level=True,
+        schema_payload=schema_payload,
+    )
 
 
 def _build_request_line(
@@ -372,7 +364,7 @@ def _build_request_line(
     }
 
     parts = [media_part]
-    prompt = config.input_prompt
+    prompt = prompt_text()
     if prompt:
         parts.append({"text": prompt})
 

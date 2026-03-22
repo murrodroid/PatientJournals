@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 from pydantic import BaseModel
 from schemas import *
 from api_keys import gemini_maarten as api_key
@@ -16,6 +16,9 @@ class Config:
     csv_sep: str = "$"
     
     model_temperature: float = 0.0
+    thinking_level: Optional[Literal["low", "medium", "high"]] = "high"
+    include_thoughts: bool = True
+    include_confidence_scores: bool = False
     api_key: str = api_key
     api_concurrent_tasks: int = 8
     api_max_attempts: int = 6
@@ -54,7 +57,7 @@ class Config:
     page_validation_sample_size: int = 5
     require_headers_for_all_rows: bool = False
     header_validation_sample_size: int = 5
-    api_recovery_enabled: bool = False
+    api_recovery_enabled: bool = True
     api_recovery_max_missing_pages: int = 5
     api_recovery_model: str = ""
 

@@ -13,7 +13,9 @@ from tqdm import tqdm
 
 from batch_client import get_batch_client, resolve_service_account_path
 from config import config
+from generation_spec import build_live_generation_config
 from output_handler import data_to_rows
+from response_parsing import extract_response_metadata
 from tools import create_subfolder, flush_rows, get_run_logger
 
 
@@ -48,32 +50,6 @@ def _normalize_key(value: object) -> str | None:
     return normalized
 
 
-def _extract_text(response: object) -> str | None:
-    if not isinstance(response, dict):
-        return None
-
-    candidates = response.get("candidates") or []
-    for candidate in candidates:
-        if not isinstance(candidate, dict):
-            continue
-        content = candidate.get("content") or {}
-        if not isinstance(content, dict):
-            continue
-        parts = content.get("parts") or []
-        for part in parts:
-            if not isinstance(part, dict):
-                continue
-            text = part.get("text")
-            if isinstance(text, str) and text.strip():
-                return text
-
-    text = response.get("text")
-    if isinstance(text, str) and text.strip():
-        return text
-
-    return None
-
-
 def _record_failure(
     failures: dict[str, str],
     *,
@@ -90,6 +66,19 @@ def _sample_keys(values: set[str], limit: int) -> list[str]:
     return sorted(values)[: max(1, limit)]
 
 
+def _is_parse_failure_reason(reason: str | None) -> bool:
+    if not reason:
+        return False
+    parse_related_prefixes = (
+        "schema_validation_failed",
+        "empty_response_text",
+        "missing_response",
+        "invalid_jsonl_line",
+        "invalid_record_type",
+    )
+    return reason.startswith(parse_related_prefixes)
+
+
 def _expected_success_keys(
     *,
     expected_keys: set[str],
@@ -99,15 +88,11 @@ def _expected_success_keys(
 
 
 def _build_api_key_generation_config() -> dict:
-    generation_config: dict[str, object] = {
-        "response_mime_type": config.response_mime_type
-    }
-    if not config.batch_include_response_schema:
-        return generation_config
-    schema_field = config.response_schema_field
-    if schema_field:
-        generation_config[schema_field] = config.output_schema
-    return generation_config
+    return build_live_generation_config(
+        include_schema=bool(config.batch_include_response_schema),
+        include_temperature=True,
+        include_thinking_level=True,
+    )
 
 
 def _guess_blob_mime_type(blob: storage.Blob, key: str) -> str:
@@ -143,27 +128,28 @@ def _recover_missing_pages_via_api_key(
     observed_output_keys: set[str],
     failures: dict[str, str],
     rows_to_flush: list[dict],
-    raw_rows_to_flush: list[dict],
     log,
+    force: bool = False,
 ) -> int:
     if not missing_keys:
         return 0
 
-    if not config.api_recovery_enabled:
+    if not config.api_recovery_enabled and not force:
         return 0
 
-    max_missing = max(0, int(config.api_recovery_max_missing_pages or 0))
-    if max_missing <= 0:
-        raise RuntimeError(
-            "API key recovery is enabled but api_recovery_max_missing_pages is <= 0."
-        )
+    if not force:
+        max_missing = max(0, int(config.api_recovery_max_missing_pages or 0))
+        if max_missing <= 0:
+            raise RuntimeError(
+                "API key recovery is enabled but api_recovery_max_missing_pages is <= 0."
+            )
 
-    if len(missing_keys) > max_missing:
-        raise RuntimeError(
-            "API key recovery aborted: "
-            f"{len(missing_keys)} page(s) missing successful output, "
-            f"which exceeds api_recovery_max_missing_pages={max_missing}."
-        )
+        if len(missing_keys) > max_missing:
+            raise RuntimeError(
+                "API key recovery aborted: "
+                f"{len(missing_keys)} page(s) missing successful output, "
+                f"which exceeds api_recovery_max_missing_pages={max_missing}."
+            )
 
     bucket_name = _require_bucket_name()
     service_account_file = _require_service_account_file()
@@ -205,7 +191,8 @@ def _recover_missing_pages_via_api_key(
                 config=generation_config,
             )
 
-            text_payload = getattr(response, "text", None)
+            metadata = extract_response_metadata(response)
+            text_payload = metadata.get("text")
             if not isinstance(text_payload, str) or not text_payload.strip():
                 raise ValueError("Empty response text from API key recovery.")
 
@@ -225,14 +212,12 @@ def _recover_missing_pages_via_api_key(
         observed_output_keys.add(key)
         failures.pop(key, None)
 
-        rows_to_flush.extend(data_to_rows(parsed_model, file_name=key))
-        raw_rows_to_flush.append(
-            {
-                "file_name": key,
-                "source": "api_recovery",
-                "response": parsed_model.model_dump(mode="python"),
-            }
-        )
+        rows = data_to_rows(parsed_model, file_name=key)
+        for row in rows:
+            row["thoughts"] = metadata.get("thoughts") or None
+            row["response_confidence_logprobs"] = metadata.get("response_confidence_logprobs")
+            row["response_confidence_ratio"] = metadata.get("response_confidence_ratio")
+        rows_to_flush.extend(rows)
 
     if recovered:
         log(
@@ -448,6 +433,9 @@ def _upload_dataset_to_gcs(
     log,
 ) -> str | None:
     if not config.upload_dataset_to_gcs:
+        return None
+    if not dataset_path.exists():
+        log(f"Skipped upload for missing file: {dataset_path.name}")
         return None
 
     bucket_name = _require_bucket_name()
@@ -668,15 +656,11 @@ def retrieve_batch() -> Path:
     out_name = config.dataset_file_name
     output_dataset_format = config.output_format
     out_path = run_dir / f"{run_dir.name}_{out_name}.{output_dataset_format.lstrip('.')}"
-    raw_out_path = run_dir / f"{run_dir.name}_{out_name}_raw.{output_dataset_format.lstrip('.')}"
 
     flush_every = max(1, int(config.flush_every or config.batch_size))
     rows_to_flush: list[dict] = []
-    raw_rows_to_flush: list[dict] = []
     header_written = False
-    raw_header_written = False
     total_rows = 0
-    raw_total_rows = 0
     error_rows = 0
 
     output_keys_seen: set[str] = set()
@@ -742,7 +726,8 @@ def retrieve_batch() -> Path:
                 )
                 continue
 
-            text_payload = _extract_text(response)
+            metadata = extract_response_metadata(response)
+            text_payload = metadata.get("text")
             if not text_payload:
                 error_rows += 1
                 log(f"Empty response text for key={key}")
@@ -771,14 +756,12 @@ def retrieve_batch() -> Path:
             if key:
                 successful_page_keys.add(key)
 
-            rows_to_flush.extend(data_to_rows(parsed_model, file_name=file_key))
-            raw_rows_to_flush.append(
-                {
-                    "file_name": file_key,
-                    "source": "batch",
-                    "response": parsed_model.model_dump(mode="python"),
-                }
-            )
+            rows = data_to_rows(parsed_model, file_name=file_key)
+            for row in rows:
+                row["thoughts"] = metadata.get("thoughts") or None
+                row["response_confidence_logprobs"] = metadata.get("response_confidence_logprobs")
+                row["response_confidence_ratio"] = metadata.get("response_confidence_ratio")
+            rows_to_flush.extend(rows)
 
             if len(rows_to_flush) >= flush_every:
                 header_written, wrote = _flush_rows(
@@ -789,49 +772,72 @@ def retrieve_batch() -> Path:
                 )
                 total_rows += wrote
 
-            if len(raw_rows_to_flush) >= flush_every:
-                raw_header_written, raw_wrote = _flush_rows(
-                    rows_to_flush=raw_rows_to_flush,
-                    out_path=raw_out_path,
-                    output_dataset_format=output_dataset_format,
-                    header_written=raw_header_written,
-                )
-                raw_total_rows += raw_wrote
-
     expected_keys = _resolve_expected_request_keys(args, batch_name, log)
     expected_success = _expected_success_keys(
         expected_keys=expected_keys,
         observed_output_keys=output_keys_seen,
     )
     missing_success_keys = expected_success - successful_page_keys
+    parse_failure_missing_keys = {
+        key
+        for key in missing_success_keys
+        if _is_parse_failure_reason(failures.get(key))
+    }
 
-    if missing_success_keys and config.api_recovery_enabled:
-        recovered_count = _recover_missing_pages_via_api_key(
-            missing_keys=missing_success_keys,
-            successful_keys=successful_page_keys,
+    forced_parse_recovery_used = False
+    if missing_success_keys:
+        recovery_keys: set[str] = set()
+        recovery_force = False
+
+        if config.api_recovery_enabled:
+            recovery_keys = missing_success_keys
+        elif parse_failure_missing_keys:
+            recovery_keys = parse_failure_missing_keys
+            recovery_force = True
+            forced_parse_recovery_used = True
+            log(
+                "Detected parse-related batch failures; attempting API-key recovery "
+                "for affected page(s) even though api_recovery_enabled=False."
+            )
+
+        if recovery_keys:
+            recovered_count = _recover_missing_pages_via_api_key(
+                missing_keys=recovery_keys,
+                successful_keys=successful_page_keys,
+                observed_output_keys=output_keys_seen,
+                failures=failures,
+                rows_to_flush=rows_to_flush,
+                log=log,
+                force=recovery_force,
+            )
+            if recovered_count:
+                remaining = (
+                    _expected_success_keys(
+                        expected_keys=expected_keys,
+                        observed_output_keys=output_keys_seen,
+                    )
+                    - successful_page_keys
+                )
+                log(f"API key recovery remaining unsuccessful pages: {len(remaining)}.")
+
+    try:
+        _validate_page_completeness(
+            expected_keys=expected_keys,
             observed_output_keys=output_keys_seen,
+            successful_keys=successful_page_keys,
             failures=failures,
-            rows_to_flush=rows_to_flush,
-            raw_rows_to_flush=raw_rows_to_flush,
             log=log,
         )
-        if recovered_count:
-            remaining = (
-                _expected_success_keys(
-                    expected_keys=expected_keys,
-                    observed_output_keys=output_keys_seen,
-                )
-                - successful_page_keys
+    except RuntimeError as exc:
+        if forced_parse_recovery_used:
+            log(
+                "Coverage validation failed after forced parse recovery. "
+                "Continuing to write partial dataset.",
+                exc=exc,
             )
-            log(f"API key recovery remaining unsuccessful pages: {len(remaining)}.")
+        else:
+            raise
 
-    _validate_page_completeness(
-        expected_keys=expected_keys,
-        observed_output_keys=output_keys_seen,
-        successful_keys=successful_page_keys,
-        failures=failures,
-        log=log,
-    )
     _print_validation_summary(
         expected_keys=expected_keys,
         observed_output_keys=output_keys_seen,
@@ -848,22 +854,8 @@ def retrieve_batch() -> Path:
         )
         total_rows += wrote
 
-    if raw_rows_to_flush:
-        raw_header_written, raw_wrote = _flush_rows(
-            rows_to_flush=raw_rows_to_flush,
-            out_path=raw_out_path,
-            output_dataset_format=output_dataset_format,
-            header_written=raw_header_written,
-        )
-        raw_total_rows += raw_wrote
-
-    log(
-        f"Retrieved {total_rows} processed row(s) into {out_path.name} "
-        f"and {raw_total_rows} raw row(s) into {raw_out_path.name} "
-        f"(errors={error_rows})."
-    )
+    log(f"Retrieved {total_rows} processed row(s) into {out_path.name} (errors={error_rows}).")
     _upload_dataset_to_gcs(out_path, run_dir.name, log)
-    _upload_dataset_to_gcs(raw_out_path, run_dir.name, log)
     return out_path
 
 
