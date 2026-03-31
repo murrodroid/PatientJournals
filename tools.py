@@ -15,12 +15,28 @@ from config import config
 from output_handler import data_to_rows as schema_data_to_rows
 
 
-def data_to_rows(data: BaseModel, file_name: str) -> list[dict]:
-    return schema_data_to_rows(data, file_name)
+def data_to_rows(
+    data: BaseModel,
+    file_name: str,
+    field_confidence_by_pointer: dict[str, dict[str, float | None]] | None = None,
+) -> list[dict]:
+    return schema_data_to_rows(
+        data,
+        file_name,
+        field_confidence_by_pointer=field_confidence_by_pointer,
+    )
 
 
-def data_to_row(data: BaseModel, file_name: str) -> dict:
-    rows = data_to_rows(data, file_name)
+def data_to_row(
+    data: BaseModel,
+    file_name: str,
+    field_confidence_by_pointer: dict[str, dict[str, float | None]] | None = None,
+) -> dict:
+    rows = data_to_rows(
+        data,
+        file_name,
+        field_confidence_by_pointer=field_confidence_by_pointer,
+    )
     if len(rows) != 1:
         raise ValueError(
             "data_to_row received data that expands to multiple rows. "

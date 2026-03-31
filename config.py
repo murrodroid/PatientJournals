@@ -2,7 +2,51 @@ from dataclasses import dataclass, field
 from typing import Any, Literal, Optional
 from pydantic import BaseModel
 from schemas import *
-from api_keys import gemini_maarten as api_key
+
+
+_PROVIDER_NAMES: tuple[str, ...] = ("gemini", "openai", "anthropic")
+
+
+def _load_provider_api_keys() -> dict[str, str]:
+    keys = {name: "" for name in _PROVIDER_NAMES}
+    env_aliases: dict[str, tuple[str, ...]] = {
+        "gemini": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
+        "openai": ("OPENAI_API_KEY",),
+        "anthropic": ("ANTHROPIC_API_KEY",),
+    }
+    for provider, names in env_aliases.items():
+        for name in names:
+            try:
+                import os
+
+                value = os.getenv(name, "")
+            except Exception:
+                value = ""
+            if isinstance(value, str) and value.strip():
+                keys[provider] = value.strip()
+                break
+
+    try:
+        import api_keys as key_module
+    except Exception:
+        return keys
+
+    aliases: dict[str, tuple[str, ...]] = {
+        "gemini": ("gemini_maarten", "gemini", "google", "google_gemini"),
+        "openai": ("openai", "openai_api_key", "gpt"),
+        "anthropic": ("anthropic", "anthropic_api_key", "claude"),
+    }
+    for provider, names in aliases.items():
+        for name in names:
+            value = getattr(key_module, name, "")
+            if isinstance(value, str) and value.strip():
+                keys[provider] = value.strip()
+                break
+    return keys
+
+
+def _default_api_key() -> str:
+    return _load_provider_api_keys().get("gemini", "")
 
 
 @dataclass
@@ -16,10 +60,12 @@ class Config:
     csv_sep: str = "$"
     
     model_temperature: float = 0.0
+    model_max_output_tokens: int = 4096
     thinking_level: Optional[Literal["low", "medium", "high"]] = "high"
-    include_thoughts: bool = True
+    include_thoughts: bool = False
     include_confidence_scores: bool = False
-    api_key: str = api_key
+    provider_api_keys: dict[str, str] = field(default_factory=_load_provider_api_keys)
+    api_key: str = field(default_factory=_default_api_key)
     api_concurrent_tasks: int = 8
     api_max_attempts: int = 6
     api_retry_initial_delay_seconds: float = 2.0
@@ -136,8 +182,32 @@ class Config:
     output_schema: dict[str, Any] = field(init=False)
 
     def __post_init__(self) -> None:
+        self.provider_api_keys = {
+            str(provider).strip().lower(): str(value).strip()
+            for provider, value in (self.provider_api_keys or {}).items()
+            if str(provider).strip()
+        }
+        if not (self.api_key or "").strip():
+            self.api_key = self.provider_api_keys.get("gemini", "")
         self.output_schema = self.output_model.model_json_schema()
         _ = self.input_prompt
+
+    def api_key_for_provider(self, provider: str) -> str:
+        provider_name = str(provider or "").strip().lower()
+        if not provider_name:
+            raise ValueError("Provider name is empty while resolving API key.")
+
+        api_key = (self.provider_api_keys.get(provider_name) or "").strip()
+        if api_key:
+            return api_key
+
+        if provider_name == "gemini" and (self.api_key or "").strip():
+            return self.api_key.strip()
+
+        raise ValueError(
+            f"No API key configured for provider '{provider_name}'. "
+            "Set config.provider_api_keys[...] or update api_keys.py."
+        )
 
     @property
     def input_prompt(self) -> str:

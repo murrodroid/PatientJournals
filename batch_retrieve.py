@@ -212,11 +212,13 @@ def _recover_missing_pages_via_api_key(
         observed_output_keys.add(key)
         failures.pop(key, None)
 
-        rows = data_to_rows(parsed_model, file_name=key)
+        rows = data_to_rows(
+            parsed_model,
+            file_name=key,
+            field_confidence_by_pointer=metadata.get("field_confidence_by_pointer"),
+        )
         for row in rows:
             row["thoughts"] = metadata.get("thoughts") or None
-            row["response_confidence_logprobs"] = metadata.get("response_confidence_logprobs")
-            row["response_confidence_ratio"] = metadata.get("response_confidence_ratio")
         rows_to_flush.extend(rows)
 
     if recovered:
@@ -756,11 +758,13 @@ def retrieve_batch() -> Path:
             if key:
                 successful_page_keys.add(key)
 
-            rows = data_to_rows(parsed_model, file_name=file_key)
+            rows = data_to_rows(
+                parsed_model,
+                file_name=file_key,
+                field_confidence_by_pointer=metadata.get("field_confidence_by_pointer"),
+            )
             for row in rows:
                 row["thoughts"] = metadata.get("thoughts") or None
-                row["response_confidence_logprobs"] = metadata.get("response_confidence_logprobs")
-                row["response_confidence_ratio"] = metadata.get("response_confidence_ratio")
             rows_to_flush.extend(rows)
 
             if len(rows_to_flush) >= flush_every:

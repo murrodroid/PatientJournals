@@ -60,9 +60,17 @@ python validation_analysis.py --input validations --out validation_reports --min
 
 **Local Transcription Generation (`main.py`)**
 
-Currently, the project is only set up for using Gemini. This will be updated in the future.
+`main.py` supports multiple providers for local requests:
+- Gemini
+- OpenAI
+- Anthropic
 
-Create a file `api_keys.py` and write your API key in it. This should then be the one imported in `main.py`.
+Set `config.model` to the model you want to run. The provider is resolved dynamically from `models.py`.
+
+Create/update `api_keys.py` with provider keys. Supported key names:
+- Gemini: `gemini_maarten`, `gemini`, `google`, or `google_gemini`
+- OpenAI: `openai`, `openai_api_key`, or `gpt`
+- Anthropic: `anthropic`, `anthropic_api_key`, or `claude`
 
 In `config.py`, you can specify default generation settings. Basic run:
 ```bash

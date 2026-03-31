@@ -1,13 +1,12 @@
 import asyncio
 import argparse
 from pathlib import Path
-from google import genai
 from tqdm.asyncio import tqdm_asyncio
 
-from api_keys import gemini_maarten as api_key
 from config import config
 from tools import *
 from generate import process_file
+from local_model_client import create_local_model_client
 
 
 def resolve_data_folder(
@@ -67,7 +66,7 @@ def parse_args() -> argparse.Namespace:
 async def main():
     args = parse_args()
     model = config.model
-    client = genai.Client(api_key=api_key)
+    model_client = create_local_model_client(model)
 
     target_folder = resolve_data_folder(args.data_folder, config.target_folder)
     selection_cfg = {
@@ -144,13 +143,23 @@ async def main():
     tasks = []
     try:
         log(
+            f"Local model provider resolved: model={model_client.model_name} "
+            f"provider={model_client.provider}"
+        )
+        for warning in model_client.capability_warnings():
+            log(f"Capability warning: {warning}")
+
+        log(
             "Starting run. "
             f"Files={len(data)} "
             f"Folder={target_folder} "
             f"fp_mode={selection_cfg['fp_mode']} "
             f"Output={out_path.name}"
         )
-        tasks = [asyncio.create_task(process_file(sem, client, model, f, log)) for f in data]
+        tasks = [
+            asyncio.create_task(process_file(sem, model_client, f, log))
+            for f in data
+        ]
 
         for coro in tqdm_asyncio.as_completed(tasks, desc='Processing images', unit='img'):
             generated_rows = await coro
@@ -183,6 +192,7 @@ async def main():
         print(f'Stopping early due to error: {e}')
 
     finally:
+        await model_client.aclose()
         if rows:
             header_written = flush_rows(
                 rows=rows,

@@ -1,22 +1,17 @@
 import asyncio
-from google import genai
 import time
 import random
 from typing import Any
 from pydantic import BaseModel
 
-from generation_spec import (
-    build_live_generation_config,
-    build_live_request_contents,
-)
 from preprocess import preprocess_image
 from config import config
-from response_parsing import extract_response_metadata
+from local_model_client import LocalModelClient
 from tools import data_to_rows
 
+
 async def generate_data(
-    client: genai.Client,
-    model: str,
+    model_client: LocalModelClient,
     file_name: str,
 ) -> tuple[BaseModel, float, dict[str, Any]]:
     image_bytes, mime_type = await asyncio.to_thread(
@@ -29,39 +24,40 @@ async def generate_data(
     )
 
     start_time = time.perf_counter()
-    output = await client.aio.models.generate_content(
-        model=model,
-        contents=build_live_request_contents(image_bytes=image_bytes, mime_type=mime_type),
-        config=build_live_generation_config(
-            include_schema=True,
-            include_temperature=True,
-            include_thinking_level=True,
-        ),
+    output = await model_client.generate_json(
+        image_bytes=image_bytes,
+        mime_type=mime_type,
     )
     end_time = time.perf_counter()
     duration = end_time - start_time
-    metadata = extract_response_metadata(output)
+    metadata = {
+        "text": output.text,
+        "thoughts": output.thoughts,
+        "field_confidence_by_pointer": output.field_confidence_by_pointer or {},
+    }
     payload_text = metadata.get("text")
     if not isinstance(payload_text, str) or not payload_text.strip():
         raise ValueError("Empty response text from API.")
     return config.output_model.model_validate_json(payload_text), duration, metadata
 
-async def process_file(sem, client, model, file_name, log):
+
+async def process_file(sem, model_client, file_name, log):
     async with sem:
         max_attempts = max(1, int(config.api_max_attempts))
         for attempt in range(1, max_attempts + 1):
             try:
                 journal_data, duration, metadata = await generate_data(
-                    client=client,
-                    model=model,
+                    model_client=model_client,
                     file_name=file_name,
                 )
-                rows = data_to_rows(data=journal_data, file_name=file_name)
+                rows = data_to_rows(
+                    data=journal_data,
+                    file_name=file_name,
+                    field_confidence_by_pointer=metadata.get("field_confidence_by_pointer"),
+                )
                 for row in rows:
                     row["generation_seconds"] = duration
                     row["thoughts"] = metadata.get("thoughts") or None
-                    row["response_confidence_logprobs"] = metadata.get("response_confidence_logprobs")
-                    row["response_confidence_ratio"] = metadata.get("response_confidence_ratio")
                 return rows
             except Exception as e:
                 retryable = _is_retryable_api_error(e)
