@@ -198,7 +198,7 @@ class FrontPage(BaseModel):
         description="Determines whether the patient is dead. If true, a black cross is drawn on the page, typically at the top. Sometimes it looks like a plus, '+'. If the cross does not appear, it is False."
     )
     fk_info: str = Field(
-        description="The page often contains an abbreviation in the left-center part. Typically this would say ”F.K.” or ”FK”, but alternative values include variations such as (but not limited to) ”u.k.”, ”udskr. u.k.” or ”e.O.” Specifications can appear in brackets, transcribe these as is. Do not include information that belongs in diagnoses.severity such as ”middel” or ”svær”."
+        description="The page often contains an abbreviation in the left-center part. Typically this would say ”F.K.” or ”FK”, but alternative values include variations such as (but not limited to) ”u.k.” or ”e.O.” with an eventual N or B or NB afterwards. Specifications can appear in parenthesis, transcribe these as is. Do not include information that belongs in diagnoses.severity such as ”middel” or ”svær”."
     )
     patient: Patient = Field(
         description="Patient related information like, name, age, address, position in the household and patient number. Generally located around the center of the page. The information is written in late 19th and early 20th century Danish."
