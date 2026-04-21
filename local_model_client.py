@@ -128,10 +128,17 @@ class LocalModelClient:
     def capability_warnings(self) -> list[str]:
         warnings: list[str] = []
         if config.include_confidence_scores and not self.model_spec.supports_confidence_scores:
-            warnings.append(
-                "include_confidence_scores=True is not supported by "
-                f"provider '{self.provider}'. Field confidence output will be empty."
-            )
+            if self.provider == "anthropic":
+                warnings.append(
+                    "include_confidence_scores=True is enabled, but Anthropic "
+                    "Messages API responses do not include token logprobs. "
+                    "Field confidence output will be empty."
+                )
+            else:
+                warnings.append(
+                    "include_confidence_scores=True is not supported by "
+                    f"provider '{self.provider}'. Field confidence output will be empty."
+                )
         if config.include_thoughts and not self.model_spec.supports_thoughts:
             warnings.append(
                 f"include_thoughts=True is not supported by provider '{self.provider}'."

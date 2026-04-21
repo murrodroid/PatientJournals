@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import mimetypes
 from pathlib import Path
 import re
+import time
 
 from google.cloud import storage
+from PIL import Image, UnidentifiedImageError
 import pypdfium2 as pdfium
 from tqdm import tqdm
 
@@ -17,10 +18,12 @@ from preprocess import (
     image_to_bytes,
 )
 from tools import list_input_files
+from upload_tuning import UploadAutoTuner, build_upload_tuner
 
 
 _PAGE_NAME_PATTERN = re.compile(r"^page_(\d+)\.([A-Za-z0-9]+)$")
 _ALLOWED_FP_MODES = {"all", "only_fp", "exclude_fp"}
+_ALLOWED_UPLOAD_SOURCES = {"pdf", "images", "auto"}
 
 
 def _apply_image_settings(img):
@@ -121,9 +124,30 @@ def _upload_blob_bytes(
     blob_path: str,
     image_bytes: bytes,
     mime_type: str,
-) -> None:
+) -> bool:
+    timeout_seconds = max(1.0, float(config.upload_timeout_seconds or 120.0))
+    max_attempts = max(1, int(config.upload_retry_attempts or 1))
+    initial_delay = max(0.0, float(config.upload_retry_initial_delay_seconds or 0.0))
+    max_delay = max(initial_delay, float(config.upload_retry_max_delay_seconds or initial_delay))
     blob = bucket.blob(blob_path)
-    blob.upload_from_string(image_bytes, content_type=mime_type)
+    for attempt in range(1, max_attempts + 1):
+        try:
+            blob.upload_from_string(
+                image_bytes,
+                content_type=mime_type,
+                timeout=timeout_seconds,
+            )
+            return True
+        except Exception as exc:
+            if attempt >= max_attempts:
+                tqdm.write(
+                    f"Upload failed after {max_attempts} attempts: {blob_path} ({exc})"
+                )
+                return False
+            delay = min(max_delay, initial_delay * (2 ** (attempt - 1)))
+            if delay > 0:
+                time.sleep(delay)
+    return False
 
 
 def _is_fp_pdf_path(path: Path, root: Path, fp_suffix: str) -> bool:
@@ -211,6 +235,44 @@ def _list_target_pdfs(target_folder: str | None) -> list[Path]:
     return pdfs
 
 
+def _resolve_image_upload_root(image_folder: str | Path | None = None) -> Path:
+    configured_folder = str(config.upload_images_folder or "").strip()
+    folder_value: str | Path | None = image_folder
+    if folder_value is None:
+        folder_value = configured_folder or config.target_folder
+
+    if not folder_value:
+        raise KeyError(
+            "No image upload folder configured. "
+            "Set config.upload_images_folder or config.target_folder."
+        )
+
+    folder = Path(folder_value).expanduser()
+    if not folder.exists() or not folder.is_dir():
+        raise FileNotFoundError(
+            f"image upload folder not found or not a directory: {folder}"
+        )
+    return folder
+
+
+def _resolve_image_upload_recursive(recursive: bool | None = None) -> bool:
+    if recursive is not None:
+        return bool(recursive)
+    return bool(config.upload_images_recursive)
+
+
+def _resolve_image_upload_glob() -> str:
+    pattern = str(config.upload_images_glob or "").strip()
+    if not pattern:
+        return "*.png"
+    return pattern
+
+
+def _should_skip_local_image(path: Path) -> bool:
+    # macOS AppleDouble sidecar files (e.g. ._foo.png) are not real images.
+    return path.name.startswith("._")
+
+
 def _resolve_service_account_path(service_account_file: str) -> Path:
     candidate = Path(service_account_file).expanduser()
     if not candidate.is_absolute():
@@ -227,7 +289,7 @@ def _build_bucket() -> storage.Bucket:
     if not bucket_name:
         raise ValueError(
             "config.gcs_bucket_name is empty. "
-            "Set the target GCS bucket before uploading PDF pages."
+            "Set the target GCS bucket before uploading pages/images."
         )
     service_account_path = _resolve_service_account_path(
         config.service_account_file
@@ -238,15 +300,38 @@ def _build_bucket() -> storage.Bucket:
     return client.bucket(bucket_name)
 
 
+def _make_upload_tuner() -> UploadAutoTuner | None:
+    if not bool(config.upload_auto_tune):
+        return None
+    return build_upload_tuner(
+        profile=str(config.upload_profile or "normal"),
+        initial_workers=max(1, int(config.upload_workers or 1)),
+        initial_batch_limit=max(1, int(config.batch_upload_limit or 1)),
+        max_workers_override=max(0, int(config.upload_max_workers or 0)),
+    )
+
+
+def _effective_workers(tuner: UploadAutoTuner | None) -> int:
+    if tuner is None:
+        return max(1, int(config.upload_workers or 1))
+    return max(1, int(tuner.current_workers))
+
+
+def _effective_batch_limit(tuner: UploadAutoTuner | None) -> int:
+    if tuner is None:
+        return max(1, int(config.batch_upload_limit or 1))
+    return max(1, int(tuner.current_batch_limit))
+
+
 def _upload_single_pdf(
     pdf_path: Path,
     bucket: storage.Bucket,
     render_dpi: int,
     batch_size: int,
     existing_page_numbers: set[int] | None = None,
+    tuner: UploadAutoTuner | None = None,
 ) -> None:
     uploaded_pages = existing_page_numbers or set()
-    upload_workers = max(1, int(config.upload_workers or 1))
     doc = pdfium.PdfDocument(str(pdf_path))
     try:
         total_pages = len(doc)
@@ -264,9 +349,17 @@ def _upload_single_pdf(
             desc=f"Uploading {pdf_path.name}",
             unit="page",
         ) as progress:
-            for start in range(0, total_pages, batch_size):
-                end = min(start + batch_size, total_pages)
-                progress.set_postfix_str(f"batch {start // batch_size + 1}")
+            start = 0
+            batch_index = 0
+            dynamic_batch_size = max(1, int(batch_size or 1))
+            while start < total_pages:
+                batch_index += 1
+                dynamic_batch_size = _effective_batch_limit(tuner)
+                end = min(start + dynamic_batch_size, total_pages)
+                progress.set_postfix_str(
+                    f"batch {batch_index} w={_effective_workers(tuner)}"
+                )
+                batch_started_at = time.perf_counter()
                 pending_uploads: list[tuple[str, bytes, str, int]] = []
                 for index in range(start, end):
                     page_number = index + 1
@@ -296,38 +389,56 @@ def _upload_single_pdf(
                             img.close()
                         page.close()
 
+                start = end
                 if not pending_uploads:
                     continue
 
+                upload_workers = _effective_workers(tuner)
+                failed_uploads = 0
                 if upload_workers == 1 or len(pending_uploads) == 1:
                     for blob_path, image_bytes, mime_type, page_number in pending_uploads:
-                        _upload_blob_bytes(
+                        ok = _upload_blob_bytes(
                             bucket=bucket,
                             blob_path=blob_path,
                             image_bytes=image_bytes,
                             mime_type=mime_type,
                         )
-                        uploaded_pages.add(page_number)
+                        if ok:
+                            uploaded_pages.add(page_number)
+                        else:
+                            failed_uploads += 1
                         progress.update(1)
-                    continue
+                else:
+                    with ThreadPoolExecutor(
+                        max_workers=min(upload_workers, len(pending_uploads))
+                    ) as executor:
+                        futures = {
+                            executor.submit(
+                                _upload_blob_bytes,
+                                bucket,
+                                blob_path,
+                                image_bytes,
+                                mime_type,
+                            ): (page_number, blob_path)
+                            for blob_path, image_bytes, mime_type, page_number in pending_uploads
+                        }
+                        for future in as_completed(futures):
+                            ok = future.result()
+                            page_number, _ = futures[future]
+                            if ok:
+                                uploaded_pages.add(page_number)
+                            else:
+                                failed_uploads += 1
+                            progress.update(1)
 
-                with ThreadPoolExecutor(
-                    max_workers=min(upload_workers, len(pending_uploads))
-                ) as executor:
-                    futures = {
-                        executor.submit(
-                            _upload_blob_bytes,
-                            bucket,
-                            blob_path,
-                            image_bytes,
-                            mime_type,
-                        ): page_number
-                        for blob_path, image_bytes, mime_type, page_number in pending_uploads
-                    }
-                    for future in as_completed(futures):
-                        future.result()
-                        uploaded_pages.add(futures[future])
-                        progress.update(1)
+                if tuner is not None:
+                    elapsed = time.perf_counter() - batch_started_at
+                    tuner.record_batch(
+                        items=len(pending_uploads),
+                        seconds=elapsed,
+                        had_errors=failed_uploads > 0,
+                    )
+                    dynamic_batch_size = _effective_batch_limit(tuner)
     finally:
         doc.close()
 
@@ -336,10 +447,9 @@ def _upload_pdf_paths(
     pdf_paths: list[Path],
     bucket: storage.Bucket,
 ) -> list[str]:
-    render_dpi = int(config.pdf_render_dpi or 300)
-    batch_size = int(config.batch_upload_limit or 20)
-    if batch_size <= 0:
-        batch_size = 1
+    render_dpi = max(1, int(config.pdf_render_dpi or 300))
+    batch_size = max(1, int(config.batch_upload_limit or 20))
+    tuner = _make_upload_tuner()
 
     uploaded: list[str] = []
     for pdf_path in pdf_paths:
@@ -351,6 +461,7 @@ def _upload_pdf_paths(
             render_dpi=render_dpi,
             batch_size=batch_size,
             existing_page_numbers=existing_pages,
+            tuner=tuner,
         )
         uploaded.append(pdf_path.name)
     return uploaded
@@ -380,22 +491,28 @@ def upload_missing_pdfs(
 def upload_missing_images(
     image_paths: list[str | Path] | None = None,
     bucket: storage.Bucket | None = None,
+    image_folder: str | Path | None = None,
+    recursive: bool | None = None,
 ) -> list[str]:
     if image_paths is None:
+        root = _resolve_image_upload_root(image_folder)
         selection_cfg = {
-            "target_folder": config.target_folder,
-            "input_glob": config.input_glob,
-            "recursive": config.recursive,
+            "target_folder": str(root),
+            "input_glob": _resolve_image_upload_glob(),
+            "recursive": _resolve_image_upload_recursive(recursive),
             "fp_mode": config.fp_mode,
             "fp_suffix": config.fp_suffix,
         }
         candidate_paths = [Path(path) for path in list_input_files(selection_cfg)]
     else:
         candidate_paths = [Path(path).expanduser() for path in image_paths]
+        try:
+            root = _resolve_image_upload_root(image_folder)
+        except (FileNotFoundError, KeyError):
+            root = Path.cwd()
 
     active_bucket = bucket or _build_bucket()
     pages_prefix = _normalize_prefix(config.gcs_pages_prefix or "")
-    root = Path(config.target_folder).expanduser()
 
     existing = {
         blob.name
@@ -403,24 +520,95 @@ def upload_missing_images(
         if not blob.name.endswith("/")
     }
 
+    tuner = _make_upload_tuner()
+    fallback_batch_limit = max(1, int(config.batch_upload_limit or 1))
     uploaded: list[str] = []
-    for local_path in candidate_paths:
-        if not local_path.exists() or not local_path.is_file():
-            continue
-        try:
-            rel = local_path.relative_to(root)
-        except ValueError:
-            rel = Path(local_path.name)
-        blob_path = f"{pages_prefix}{rel.as_posix()}"
-        if blob_path in existing:
-            continue
-        mime_type = mimetypes.guess_type(str(local_path))[0] or "application/octet-stream"
-        active_bucket.blob(blob_path).upload_from_filename(
-            str(local_path),
-            content_type=mime_type,
-        )
-        existing.add(blob_path)
-        uploaded.append(blob_path)
+    total_candidates = len(candidate_paths)
+    cursor = 0
+    batch_index = 0
+    with tqdm(total=total_candidates, desc="Uploading images", unit="img") as progress:
+        while cursor < total_candidates:
+            batch_index += 1
+            batch_limit = _effective_batch_limit(tuner)
+            if batch_limit <= 0:
+                batch_limit = fallback_batch_limit
+            current_batch = candidate_paths[cursor: cursor + batch_limit]
+            cursor += len(current_batch)
+            pending_uploads: list[tuple[str, bytes, str]] = []
+            batch_started_at = time.perf_counter()
+
+            for local_path in current_batch:
+                if not local_path.exists() or not local_path.is_file():
+                    progress.update(1)
+                    continue
+                if _should_skip_local_image(local_path):
+                    progress.update(1)
+                    continue
+                try:
+                    rel = local_path.relative_to(root)
+                except ValueError:
+                    rel = Path(local_path.name)
+                blob_path = f"{pages_prefix}{rel.as_posix()}"
+                if blob_path in existing:
+                    progress.update(1)
+                    continue
+                try:
+                    with Image.open(local_path) as img:
+                        image_bytes, mime_type, _ = _apply_image_settings(img)
+                except (UnidentifiedImageError, OSError) as exc:
+                    tqdm.write(f"Skipping unreadable image: {local_path} ({exc})")
+                    progress.update(1)
+                    continue
+                pending_uploads.append((blob_path, image_bytes, mime_type))
+
+            workers = _effective_workers(tuner)
+            progress.set_postfix_str(f"batch {batch_index} w={workers}")
+            failed_uploads = 0
+            if workers == 1 or len(pending_uploads) <= 1:
+                for blob_path, image_bytes, mime_type in pending_uploads:
+                    ok = _upload_blob_bytes(
+                        bucket=active_bucket,
+                        blob_path=blob_path,
+                        image_bytes=image_bytes,
+                        mime_type=mime_type,
+                    )
+                    if ok:
+                        existing.add(blob_path)
+                        uploaded.append(blob_path)
+                    else:
+                        failed_uploads += 1
+                    progress.update(1)
+            else:
+                with ThreadPoolExecutor(
+                    max_workers=min(workers, len(pending_uploads))
+                ) as executor:
+                    futures = {
+                        executor.submit(
+                            _upload_blob_bytes,
+                            active_bucket,
+                            blob_path,
+                            image_bytes,
+                            mime_type,
+                        ): blob_path
+                        for blob_path, image_bytes, mime_type in pending_uploads
+                    }
+                    for future in as_completed(futures):
+                        ok = future.result()
+                        blob_path = futures[future]
+                        if ok:
+                            existing.add(blob_path)
+                            uploaded.append(blob_path)
+                        else:
+                            failed_uploads += 1
+                        progress.update(1)
+
+            if tuner is not None and pending_uploads:
+                elapsed = time.perf_counter() - batch_started_at
+                tuner.record_batch(
+                    items=len(pending_uploads),
+                    seconds=elapsed,
+                    had_errors=failed_uploads > 0,
+                )
     return uploaded
 
 
@@ -434,5 +622,52 @@ def upload_pdf_pages() -> None:
     upload_all_pdfs()
 
 
+def upload_all_images(
+    image_folder: str | Path | None = None,
+    recursive: bool | None = None,
+) -> list[str]:
+    bucket = _build_bucket()
+    return upload_missing_images(
+        bucket=bucket,
+        image_folder=image_folder,
+        recursive=recursive,
+    )
+
+
+def _resolve_upload_source() -> str:
+    source = str(config.upload_source or "pdf").strip().lower()
+    if source not in _ALLOWED_UPLOAD_SOURCES:
+        raise ValueError(
+            f"Unsupported upload_source: {config.upload_source}. "
+            f"Expected one of: {sorted(_ALLOWED_UPLOAD_SOURCES)}"
+        )
+    return source
+
+
+def upload_all_sources() -> None:
+    source = _resolve_upload_source()
+    if source == "pdf":
+        upload_all_pdfs()
+        return
+
+    if source == "images":
+        upload_all_images(
+            image_folder=config.upload_images_folder or None,
+            recursive=config.upload_images_recursive,
+        )
+        return
+
+    try:
+        upload_all_pdfs()
+        return
+    except (FileNotFoundError, KeyError):
+        pass
+
+    upload_all_images(
+        image_folder=config.upload_images_folder or None,
+        recursive=config.upload_images_recursive,
+    )
+
+
 if __name__ == "__main__":
-    upload_all_pdfs()
+    upload_all_sources()

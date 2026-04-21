@@ -45,9 +45,21 @@ _REGISTERED_MODELS: dict[str, ModelSpec] = {
     "gpt-4.1": ModelSpec(name="gpt-4.1", provider="openai"),
     "gpt-4.1-mini": ModelSpec(name="gpt-4.1-mini", provider="openai"),
     # Anthropic
-    "claude-opus-4-6": ModelSpec(name="claude-opus-4-6", provider="anthropic"),
-    "claude-sonnet-4-5": ModelSpec(name="claude-sonnet-4-5", provider="anthropic"),
-    "claude-haiku-4-5": ModelSpec(name="claude-haiku-4-5", provider="anthropic"),
+    "claude-opus-4-6": ModelSpec(
+        name="claude-opus-4-6",
+        provider="anthropic",
+        supports_batch=True,
+    ),
+    "claude-sonnet-4-5": ModelSpec(
+        name="claude-sonnet-4-5",
+        provider="anthropic",
+        supports_batch=True,
+    ),
+    "claude-haiku-4-5": ModelSpec(
+        name="claude-haiku-4-5",
+        provider="anthropic",
+        supports_batch=True,
+    ),
 }
 
 
@@ -114,7 +126,7 @@ def resolve_model_spec(model_name: str) -> ModelSpec:
             supports_thoughts=False,
         ),
         "anthropic": dict(
-            supports_batch=False,
+            supports_batch=True,
             supports_confidence_scores=False,
             supports_thoughts=False,
         ),

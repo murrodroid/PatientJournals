@@ -51,14 +51,14 @@ def _default_api_key() -> str:
 
 @dataclass
 class Config:
-    model: str = "gemini-3.1-pro-preview"
-    input_prompt_name: str = "frontpage"          # change to correct prompt
-    output_model: type[BaseModel] = FrontPage     # change to correct schema in schemas.py
-    target_folder: str = "data"
-    fp_mode: Literal["all", "only_fp", "exclude_fp"] = "only_fp"
-    output_format: str = "jsonl"
+    model: str = "claude-opus-4-7"  # gemini-3.1-pro-preview
+    input_prompt_name: str = "frontpage"  # change to correct prompt
+    output_model: type[BaseModel] = FrontPage  # change to correct schema in schemas.py
+    target_folder: str = "/Volumes/Expansion/patientjournaler_1889-1897_jpg"
+    fp_mode: Literal["all", "only_fp", "exclude_fp"] = "all"
+    output_format: str = "csv"
     csv_sep: str = "$"
-    
+
     model_temperature: float = 0.0
     model_max_output_tokens: int = 4096
     thinking_level: Optional[Literal["low", "medium", "high"]] = "high"
@@ -67,7 +67,7 @@ class Config:
     provider_api_keys: dict[str, str] = field(default_factory=_load_provider_api_keys)
     api_key: str = field(default_factory=_default_api_key)
     api_concurrent_tasks: int = 8
-    api_max_attempts: int = 6
+    api_max_attempts: int = 10
     api_retry_initial_delay_seconds: float = 2.0
     api_retry_max_delay_seconds: float = 30.0
     api_retry_jitter_seconds: float = 0.5
@@ -86,6 +86,7 @@ class Config:
     batch_job_name: str = ""
     batch_poll_interval_seconds: int = 20
     batch_requests_file_name: str = "batch_requests.jsonl"
+    batch_num_chunks: int = 1
     batch_input_source: Literal["gcs"] = "gcs"
     batch_input_prefix: str = ""
     batch_input_extensions: tuple[str, ...] = ("png", "jpg", "jpeg", "webp", "tiff")
@@ -93,18 +94,21 @@ class Config:
     batch_include_response_schema: bool = True
     batch_use_local_pdf_folders: bool = True
     batch_auto_upload_missing: bool = True
+    anthropic_signed_url_ttl_hours: int = 48
 
     response_mime_type: str = "application/json"
-    response_schema_field: Literal["response_json_schema", "response_schema"] = "response_json_schema"
+    response_schema_field: Literal["response_json_schema", "response_schema"] = (
+        "response_json_schema"
+    )
 
     # Validation/recovery controls for batch retrieval
     require_all_expected_pages: bool = True
-    require_all_pages_successful: bool = True
+    require_all_pages_successful: bool = False
     page_validation_sample_size: int = 5
     require_headers_for_all_rows: bool = False
     header_validation_sample_size: int = 5
     api_recovery_enabled: bool = True
-    api_recovery_max_missing_pages: int = 5
+    api_recovery_max_missing_pages: int = 50
     api_recovery_model: str = ""
 
     # GCP/GCS settings
@@ -120,8 +124,19 @@ class Config:
     upload_dataset_to_gcs: bool = False
 
     # Upload/render settings for PDF to GCS image pages
-    batch_upload_limit: int = 20
-    upload_workers: int = 4
+    upload_source: Literal["pdf", "images", "auto"] = "images"
+    upload_images_folder: str = "/Volumes/Expansion/patientjournaler_1889-1897_jpg"
+    upload_images_recursive: bool = True
+    upload_images_glob: str = "*.png"
+    upload_auto_tune: bool = True
+    upload_profile: Literal["light", "normal", "aggressive"] = "normal"
+    upload_max_workers: int = 0
+    upload_timeout_seconds: float = 300.0
+    upload_retry_attempts: int = 8
+    upload_retry_initial_delay_seconds: float = 1.5
+    upload_retry_max_delay_seconds: float = 30.0
+    batch_upload_limit: int = 100
+    upload_workers: int = 35
     pdf_render_dpi: int = 300
     page_number_digits: int = 4
     image_settings: dict[str, Any] = field(
@@ -129,16 +144,15 @@ class Config:
             "max_dim": 3000,
             "contrast_factor": 1.1,
             "margins": (
-                0,    # left
-                0,    # top
-                0,    # right
-                0,    # bottom
+                150,  # left
+                0,  # top
+                0,  # right
+                0,  # bottom
             ),
             "output_format": "PNG",
         }
     )
 
-    
     prompts: dict[str, str] = field(
         default_factory=lambda: {
             "frontpage": f"""
@@ -174,10 +188,10 @@ class Config:
                 4.  **Language & Spelling:**
                     *   Preserve archaic Danish spelling exactly (e.g., write "The" not "Te", "Smerter", "aa" instead of "å").
                     *   Keep all medical abbreviations (e.g., "Rp.", "Tp.", "P.", "Steth.", "dgl.").
-                """
+                """,
         }
     )
-    
+
     # backend for config
     output_schema: dict[str, Any] = field(init=False)
 
