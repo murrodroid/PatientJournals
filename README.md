@@ -155,6 +155,7 @@ For Anthropic-only batch runs, Vertex role (`roles/aiplatform.user`) is not requ
 5. Common optional `config.py` values:
 - `gcs_pages_prefix`, `batch_requests_gcs_prefix`, `batch_outputs_gcs_prefix`, `datasets_gcs_prefix`
 - `batch_input_prefix` (limit batch input to a specific prefix in bucket)
+- `batch_date_mapping_file` + `batch_year_filter` (optional year-based folder filtering using a CSV mapping with `sbid` and `year` columns; supports 2-digit tokens like `91` -> `1891` when unambiguous)
 - `batch_num_chunks` (split one logical submit into multiple smaller batch jobs)
 - `batch_use_local_pdf_folders` and `batch_auto_upload_missing`
 - `upload_source` (`"pdf"`, `"images"`, or `"auto"`)
@@ -164,6 +165,7 @@ For Anthropic-only batch runs, Vertex role (`roles/aiplatform.user`) is not requ
 - `batch_job_display_name`, `batch_poll_interval_seconds`
 - `upload_dataset_to_gcs`
 - `api_recovery_enabled`, `api_recovery_max_missing_pages`, `api_recovery_model`, `api_key` (only if recovery is enabled)
+- `batch_submit_failed_pages` (if `True`, `batch_retrieve.py` auto-submits a separate retry batch for errored/schema-invalid keys)
 - `anthropic_signed_url_ttl_hours` (Anthropic batch only; signed URL lifetime for GCS image URLs)
 
 
@@ -198,6 +200,12 @@ Partial retrieval (acknowledging incomplete jobs):
 - `uv run batch_retrieve.py --run-dir runs/submit_YYYYMMDD_HHMMSS --allow-partial`
 - This retrieves only succeeded chunk jobs and skips running/failed/cancelled chunks.
 - If you omit `--allow-partial`, retrieval stays strict and fails when not all jobs have succeeded.
+
+Submit failed keys as a separate retry batch:
+
+- `uv run batch_retrieve.py --wait --submit-failed`
+- This compiles keys that failed (batch errors, invalid JSON, schema validation failures, or otherwise missing successful output) and submits them as a new one-chunk batch job in a new `runs/submit_*` directory.
+- You can enable the same behavior by default with `batch_submit_failed_pages = True` in `config.py`.
 
 PNG folder upload mode:
 

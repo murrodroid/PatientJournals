@@ -90,6 +90,8 @@ class Config:
     batch_input_source: Literal["gcs"] = "gcs"
     batch_input_prefix: str = ""
     batch_input_extensions: tuple[str, ...] = ("png", "jpg", "jpeg", "webp", "tiff")
+    batch_date_mapping_file: str = "date_mapping.csv"
+    batch_year_filter: tuple[int | str, ...] = ()
     batch_input_max_bytes: int = 0
     batch_include_response_schema: bool = True
     batch_use_local_pdf_folders: bool = True
@@ -110,6 +112,7 @@ class Config:
     api_recovery_enabled: bool = True
     api_recovery_max_missing_pages: int = 50
     api_recovery_model: str = ""
+    batch_submit_failed_pages: bool = False
 
     # GCP/GCS settings
     service_account_file: str = "service-account.json"

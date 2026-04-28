@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import csv
 import hashlib
 import json
 import mimetypes
@@ -26,6 +27,7 @@ from upload import upload_missing_images, upload_missing_pdfs
 _ALLOWED_FP_MODES = {"all", "only_fp", "exclude_fp"}
 _ALLOWED_UPLOAD_SOURCES = {"pdf", "images", "auto"}
 _ANTHROPIC_CUSTOM_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+_SBID_TOKEN_PATTERN = re.compile(r"(\d{5,})")
 
 
 def _anthropic_custom_id_for_key(key: str) -> str:
@@ -43,8 +45,7 @@ def _parse_args() -> argparse.Namespace:
         dest="num_batches",
         type=int,
         help=(
-            "Split inputs into N smaller batch jobs. "
-            "Overrides config.batch_num_chunks."
+            "Split inputs into N smaller batch jobs. Overrides config.batch_num_chunks."
         ),
     )
     parser.add_argument(
@@ -59,7 +60,7 @@ def _parse_args() -> argparse.Namespace:
         "--run-dir",
         dest="run_dir",
         help=(
-            "Submit run directory containing batch_job.json. "
+            "Submit run directory to resume. "
             "Used with --rerun to choose which run to resume."
         ),
     )
@@ -80,9 +81,7 @@ def _resolve_num_batches(args: argparse.Namespace) -> int:
     if value is None:
         value = int(config.batch_num_chunks or 1)
     if value <= 0:
-        raise ValueError(
-            f"num_batches must be >= 1 (received {value})."
-        )
+        raise ValueError(f"num_batches must be >= 1 (received {value}).")
     return value
 
 
@@ -119,9 +118,7 @@ def _resolve_downscale(args: argparse.Namespace) -> float | None:
     if value is None:
         return None
     if value <= 0.0 or value > 1.0:
-        raise ValueError(
-            f"downscale must be > 0 and <= 1 (received {value})."
-        )
+        raise ValueError(f"downscale must be > 0 and <= 1 (received {value}).")
     return float(value)
 
 
@@ -207,7 +204,223 @@ def _resolved_upload_source() -> str:
     return upload_source
 
 
-def _list_input_blobs(bucket: storage.Bucket) -> list[storage.Blob]:
+def _configured_year_filter_tokens() -> list[int]:
+    raw = getattr(config, "batch_year_filter", ())
+    if raw is None:
+        return []
+
+    if isinstance(raw, (int, str)):
+        values: list[object] = [raw]
+    elif isinstance(raw, (tuple, list, set)):
+        values = list(raw)
+    else:
+        raise ValueError(
+            "config.batch_year_filter must be an int/str or a list/tuple/set "
+            f"of year values (received {type(raw).__name__})."
+        )
+
+    tokens: set[int] = set()
+    for value in values:
+        if isinstance(value, int):
+            token = int(value)
+        elif isinstance(value, str):
+            text = value.strip()
+            if not text:
+                continue
+            if not re.fullmatch(r"\d{1,4}", text):
+                raise ValueError(
+                    f"Invalid year token in config.batch_year_filter: {value!r}. "
+                    "Use integers like 91, 94, 1891."
+                )
+            token = int(text)
+        else:
+            raise ValueError(
+                "config.batch_year_filter contains unsupported value type "
+                f"{type(value).__name__}: {value!r}"
+            )
+
+        if token < 0 or token > 9999:
+            raise ValueError(f"Year token out of supported range [0, 9999]: {token}")
+        tokens.add(token)
+
+    return sorted(tokens)
+
+
+def _load_date_mapping_year_by_sbid(path: Path) -> tuple[dict[str, int], set[int]]:
+    if not path.exists() or not path.is_file():
+        raise FileNotFoundError(
+            f"date mapping file not found: {path}. "
+            "Set config.batch_date_mapping_file to a valid CSV file."
+        )
+
+    with open(path, "r", encoding="utf-8-sig", newline="") as handle:
+        sample = handle.read(4096)
+        handle.seek(0)
+        try:
+            dialect = csv.Sniffer().sniff(sample, delimiters=";,")
+        except csv.Error:
+            dialect = csv.excel
+            dialect.delimiter = ";"
+
+        reader = csv.DictReader(handle, dialect=dialect)
+        if not reader.fieldnames:
+            raise ValueError(f"date mapping file has no header row: {path}")
+
+        columns = {
+            str(name).strip().lower(): str(name)
+            for name in reader.fieldnames
+            if isinstance(name, str) and name.strip()
+        }
+        sbid_col = columns.get("sbid")
+        year_col = columns.get("year")
+        if not sbid_col or not year_col:
+            available = ", ".join(reader.fieldnames)
+            raise ValueError(
+                f"date mapping file {path} must contain 'sbid' and 'year' columns. "
+                f"Found: {available}"
+            )
+
+        mapping: dict[str, int] = {}
+        years: set[int] = set()
+        for row in reader:
+            sbid_raw = str(row.get(sbid_col) or "").strip()
+            year_raw = str(row.get(year_col) or "").strip()
+            if not sbid_raw or not year_raw:
+                continue
+
+            sbid_match = _SBID_TOKEN_PATTERN.search(sbid_raw)
+            if not sbid_match:
+                continue
+            sbid = sbid_match.group(1)
+
+            try:
+                year = int(year_raw)
+            except ValueError:
+                continue
+
+            mapping[sbid] = year
+            years.add(year)
+
+    if not mapping:
+        raise ValueError(
+            f"date mapping file {path} did not produce any sbid->year rows."
+        )
+    return mapping, years
+
+
+def _resolve_year_filter_targets(
+    tokens: list[int],
+    *,
+    available_years: set[int],
+) -> set[int]:
+    if not tokens:
+        return set()
+
+    targets: set[int] = set()
+    sorted_available = sorted(available_years)
+    for token in tokens:
+        if token >= 1000:
+            if token not in available_years:
+                raise ValueError(
+                    f"Year {token} was requested in config.batch_year_filter but "
+                    "is not present in date_mapping.csv. "
+                    f"Available years: {sorted_available}"
+                )
+            targets.add(token)
+            continue
+
+        suffix = token % 100
+        matches = sorted(year for year in available_years if year % 100 == suffix)
+        if not matches:
+            raise ValueError(
+                f"Year token '{token}' in config.batch_year_filter did not match "
+                "any year suffix in date_mapping.csv. "
+                f"Available years: {sorted_available}"
+            )
+        if len(matches) > 1:
+            raise ValueError(
+                f"Year token '{token}' is ambiguous in date_mapping.csv. "
+                f"Matches: {matches}. Use full year (e.g. {matches[0]})."
+            )
+        targets.add(matches[0])
+
+    return targets
+
+
+def _extract_sbid_from_blob_name(blob_name: str, *, pages_prefix: str) -> str | None:
+    parts = list(Path(blob_name).parts)
+    if len(parts) < 2:
+        return None
+
+    folder_parts = parts[:-1]
+    normalized_prefix = pages_prefix.rstrip("/")
+    if normalized_prefix:
+        prefix_parts = list(Path(normalized_prefix).parts)
+        if prefix_parts and folder_parts[: len(prefix_parts)] == prefix_parts:
+            folder_parts = folder_parts[len(prefix_parts) :]
+
+    for folder in reversed(folder_parts):
+        matches = _SBID_TOKEN_PATTERN.findall(folder)
+        if matches:
+            return matches[-1]
+
+    filename_stem = Path(parts[-1]).stem
+    stem_matches = _SBID_TOKEN_PATTERN.findall(filename_stem)
+    if stem_matches:
+        return stem_matches[0]
+    return None
+
+
+def _apply_year_filter_to_blobs(
+    blobs: list[storage.Blob],
+    *,
+    pages_prefix: str,
+    log,
+) -> list[storage.Blob]:
+    tokens = _configured_year_filter_tokens()
+    if not tokens:
+        return sorted(blobs, key=lambda item: item.name)
+
+    mapping_value = str(getattr(config, "batch_date_mapping_file", "") or "").strip()
+    if not mapping_value:
+        raise ValueError(
+            "config.batch_year_filter is set but config.batch_date_mapping_file is empty."
+        )
+    mapping_path = Path(mapping_value).expanduser()
+    sbid_to_year, years = _load_date_mapping_year_by_sbid(mapping_path)
+    target_years = _resolve_year_filter_targets(tokens, available_years=years)
+
+    filtered: list[storage.Blob] = []
+    unmatched_sbid = 0
+    missing_mapping = 0
+    for blob in blobs:
+        sbid = _extract_sbid_from_blob_name(blob.name, pages_prefix=pages_prefix)
+        if not sbid:
+            unmatched_sbid += 1
+            continue
+        year = sbid_to_year.get(sbid)
+        if year is None:
+            missing_mapping += 1
+            continue
+        if year in target_years:
+            filtered.append(blob)
+
+    if not filtered:
+        raise FileNotFoundError(
+            "Year filter removed all input blobs. "
+            f"Requested years={sorted(target_years)} from {mapping_path}."
+        )
+
+    log(
+        "Applied batch_year_filter: "
+        f"requested_tokens={tokens} resolved_years={sorted(target_years)} "
+        f"selected={len(filtered)}/{len(blobs)} "
+        f"(unparsed_sbid={unmatched_sbid}, missing_mapping={missing_mapping})."
+    )
+    return sorted(filtered, key=lambda item: item.name)
+
+
+def _list_input_blobs(bucket: storage.Bucket, *, log) -> list[storage.Blob]:
     _assert_gcs_input_source(config.batch_input_source)
     upload_source = _resolved_upload_source()
     override_prefix = _normalize_prefix(config.batch_input_prefix or "")
@@ -215,7 +428,8 @@ def _list_input_blobs(bucket: storage.Bucket) -> list[storage.Blob]:
     allowed = _allowed_extensions()
 
     if override_prefix:
-        return _list_image_blobs_for_prefix(bucket, override_prefix, allowed)
+        blobs = _list_image_blobs_for_prefix(bucket, override_prefix, allowed)
+        return _apply_year_filter_to_blobs(blobs, pages_prefix=pages_prefix, log=log)
 
     prefer_pdf_folders = bool(config.batch_use_local_pdf_folders) and upload_source in {
         "pdf",
@@ -223,21 +437,31 @@ def _list_input_blobs(bucket: storage.Bucket) -> list[storage.Blob]:
     }
     if not prefer_pdf_folders:
         all_blobs = _list_image_blobs_for_prefix(bucket, pages_prefix, allowed)
-        return _apply_fp_mode_to_blobs(
+        selected = _apply_fp_mode_to_blobs(
             all_blobs,
             pages_prefix=pages_prefix,
             fp_mode=str(config.fp_mode or "all"),
             fp_suffix=str(config.fp_suffix or "_fp"),
         )
+        return _apply_year_filter_to_blobs(
+            selected,
+            pages_prefix=pages_prefix,
+            log=log,
+        )
 
     local_pdf_paths = _list_local_pdf_paths(config.target_folder)
     if not local_pdf_paths:
         all_blobs = _list_image_blobs_for_prefix(bucket, pages_prefix, allowed)
-        return _apply_fp_mode_to_blobs(
+        selected = _apply_fp_mode_to_blobs(
             all_blobs,
             pages_prefix=pages_prefix,
             fp_mode=str(config.fp_mode or "all"),
             fp_suffix=str(config.fp_suffix or "_fp"),
+        )
+        return _apply_year_filter_to_blobs(
+            selected,
+            pages_prefix=pages_prefix,
+            log=log,
         )
 
     collected: list[storage.Blob] = []
@@ -257,7 +481,11 @@ def _list_input_blobs(bucket: storage.Bucket) -> list[storage.Blob]:
             f"{config.gcs_bucket_name}. Missing prefixes: {missing_text}"
         )
 
-    return sorted(collected, key=lambda b: b.name)
+    return _apply_year_filter_to_blobs(
+        collected,
+        pages_prefix=pages_prefix,
+        log=log,
+    )
 
 
 def _assert_gcs_input_source(source: str) -> None:
@@ -281,7 +509,9 @@ def _is_fp_pdf_path(path: Path, root: Path, fp_suffix: str) -> bool:
     except ValueError:
         rel = path
     parent_parts = rel.parts[:-1]
-    return any(part.endswith(fp_suffix) for part in parent_parts) or path.stem.endswith(fp_suffix)
+    return any(part.endswith(fp_suffix) for part in parent_parts) or path.stem.endswith(
+        fp_suffix
+    )
 
 
 def _apply_fp_mode_to_pdf_paths(
@@ -332,7 +562,7 @@ def _ensure_unique_pdf_names(paths: list[Path]) -> None:
 def _is_fp_blob_name(blob_name: str, pages_prefix: str, fp_suffix: str) -> bool:
     relative = blob_name
     if pages_prefix and blob_name.startswith(pages_prefix):
-        relative = blob_name[len(pages_prefix):]
+        relative = blob_name[len(pages_prefix) :]
     parts = Path(relative).parts
     if len(parts) < 2:
         return False
@@ -385,8 +615,7 @@ def _list_local_pdf_paths(target_folder: str | None) -> list[Path]:
     fp_suffix = str(config.fp_suffix or "_fp")
     candidates = folder.rglob("*") if recursive else folder.glob("*")
     pdfs = sorted(
-        path for path in candidates
-        if path.is_file() and path.suffix.lower() == ".pdf"
+        path for path in candidates if path.is_file() and path.suffix.lower() == ".pdf"
     )
     selected = _apply_fp_mode_to_pdf_paths(
         pdfs,
@@ -400,7 +629,9 @@ def _list_local_pdf_paths(target_folder: str | None) -> list[Path]:
 
 def _allowed_extensions() -> set[str]:
     allowed = {ext.lower().lstrip(".") for ext in config.batch_input_extensions}
-    output_format = str((config.image_settings or {}).get("output_format", "PNG")).strip().lower()
+    output_format = (
+        str((config.image_settings or {}).get("output_format", "PNG")).strip().lower()
+    )
     if output_format in {"jpeg", "jpg"}:
         allowed.add("jpg")
     elif output_format in {"tif", "tiff"}:
@@ -423,7 +654,9 @@ def _ensure_uploaded_sources(bucket: storage.Bucket, log) -> list[str]:
         if local_pdf_paths:
             uploaded = upload_missing_pdfs(pdf_paths=local_pdf_paths, bucket=bucket)
             if uploaded:
-                log(f"Uploaded missing page images for PDF folders: {', '.join(uploaded)}")
+                log(
+                    f"Uploaded missing page images for PDF folders: {', '.join(uploaded)}"
+                )
             return uploaded
 
     if not prefer_images:
@@ -486,7 +719,9 @@ def _resolve_json_pointer(root: object, pointer: str) -> object | None:
     return current
 
 
-def _inline_json_refs(node: object, root: object, stack: set[str] | None = None) -> object:
+def _inline_json_refs(
+    node: object, root: object, stack: set[str] | None = None
+) -> object:
     if stack is None:
         stack = set()
 
@@ -806,14 +1041,18 @@ def _write_requests_file(
             "signed image URLs are generated at submit time."
         )
     if provider == "gemini" and for_vertex and not config.batch_include_response_schema:
-        log("Vertex batch input omits response schema (config.batch_include_response_schema=False).")
+        log(
+            "Vertex batch input omits response schema (config.batch_include_response_schema=False)."
+        )
     if (
         provider == "gemini"
         and for_vertex
         and config.batch_include_response_schema
         and _schema_has_refs(config.output_schema)
     ):
-        log("Vertex batch input inlines schema refs and strips $-keys for compatibility.")
+        log(
+            "Vertex batch input inlines schema refs and strips $-keys for compatibility."
+        )
     return count, total_bytes
 
 
@@ -839,6 +1078,91 @@ def _read_batch_job_payload(path: Path) -> dict:
     return payload
 
 
+def _read_batch_job_payload_if_exists(path: Path) -> dict | None:
+    if not path.exists() or not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+    if isinstance(payload, dict):
+        return payload
+    return None
+
+
+def _parse_chunk_file_name(file_name: str, *, base_name: str) -> tuple[int, int] | None:
+    base = Path(base_name)
+    suffix = base.suffix or ".jsonl"
+    stem = base.stem
+    pattern = re.compile(
+        rf"^{re.escape(stem)}\.part(?P<index>\d+)-of-(?P<total>\d+){re.escape(suffix)}$"
+    )
+    match = pattern.fullmatch(file_name)
+    if not match:
+        return None
+    try:
+        chunk_index = int(match.group("index"))
+        total_chunks = int(match.group("total"))
+    except Exception:
+        return None
+    if chunk_index <= 0 or total_chunks <= 0:
+        return None
+    return chunk_index, total_chunks
+
+
+def _discover_request_files_in_run_dir(run_dir: Path) -> tuple[dict[int, str], int]:
+    by_index: dict[int, str] = {}
+    inferred_total = 0
+    base_name = config.batch_requests_file_name
+
+    candidate = run_dir / base_name
+    if candidate.exists() and candidate.is_file():
+        by_index[1] = base_name
+        inferred_total = max(inferred_total, 1)
+
+    for path in sorted(run_dir.glob("*.jsonl")):
+        parsed = _parse_chunk_file_name(path.name, base_name=base_name)
+        if not parsed:
+            continue
+        chunk_index, total_chunks = parsed
+        by_index[chunk_index] = path.name
+        inferred_total = max(inferred_total, total_chunks)
+
+    if by_index:
+        inferred_total = max(inferred_total, max(by_index))
+    return by_index, inferred_total
+
+
+def _submitted_batch_ids_by_chunk_from_run_log(
+    run_dir: Path,
+) -> tuple[dict[int, str], int]:
+    path = run_dir / "run.log"
+    if not path.exists() or not path.is_file():
+        return {}, 0
+
+    by_index: dict[int, str] = {}
+    inferred_total = 0
+    pattern = re.compile(
+        r"\[(chunk_(?P<index>\d+)_of_(?P<total>\d+))\].*batch_id=(?P<batch_id>\S+)"
+    )
+    with open(path, "r", encoding="utf-8") as handle:
+        for line in handle:
+            match = pattern.search(line)
+            if not match:
+                continue
+            try:
+                chunk_index = int(match.group("index"))
+                total_chunks = int(match.group("total"))
+            except Exception:
+                continue
+            batch_id = str(match.group("batch_id") or "").strip()
+            if chunk_index <= 0 or total_chunks <= 0 or not batch_id:
+                continue
+            by_index[chunk_index] = batch_id
+            inferred_total = max(inferred_total, total_chunks)
+    return by_index, inferred_total
+
+
 def _latest_submit_run_dir(output_root: str) -> Path | None:
     root = Path(output_root).expanduser()
     if not root.exists() or not root.is_dir():
@@ -851,20 +1175,16 @@ def _latest_submit_run_dir(output_root: str) -> Path | None:
         ),
         reverse=True,
     )
-    for run_dir in run_dirs:
-        candidate = run_dir / "batch_job.json"
-        if candidate.exists() and candidate.is_file():
-            return run_dir
-    return None
+    return run_dirs[0] if run_dirs else None
 
 
 def _resolve_rerun_run_dir(args: argparse.Namespace) -> Path:
     if args.run_dir:
         run_dir = Path(args.run_dir).expanduser()
         if not run_dir.exists() or not run_dir.is_dir():
-            raise FileNotFoundError(f"--run-dir not found or not a directory: {run_dir}")
-        if not (run_dir / "batch_job.json").exists():
-            raise FileNotFoundError(f"No batch_job.json found in {run_dir}")
+            raise FileNotFoundError(
+                f"--run-dir not found or not a directory: {run_dir}"
+            )
         return run_dir
 
     latest = _latest_submit_run_dir(config.output_root)
@@ -914,6 +1234,237 @@ def _normalize_job_entries(payload: dict) -> list[dict]:
     return []
 
 
+def _infer_rerun_total_chunks(
+    *,
+    payload: dict | None,
+    payload_entries: list[dict],
+    request_files_total: int,
+    run_log_total: int,
+) -> int:
+    totals: list[int] = []
+    if payload is not None:
+        try:
+            value = int(payload.get("num_batches_requested") or 0)
+        except Exception:
+            value = 0
+        if value > 0:
+            totals.append(value)
+
+    if payload_entries:
+        for entry in payload_entries:
+            try:
+                value = int(entry.get("total_chunks") or 0)
+            except Exception:
+                value = 0
+            if value > 0:
+                totals.append(value)
+
+    if request_files_total > 0:
+        totals.append(int(request_files_total))
+    if run_log_total > 0:
+        totals.append(int(run_log_total))
+
+    return max(totals) if totals else 0
+
+
+def _extract_downscale_from_run_log(run_dir: Path) -> float | None:
+    path = run_dir / "run.log"
+    if not path.exists() or not path.is_file():
+        return None
+    pattern = re.compile(r"Downscaled input set with fraction=(?P<value>[0-9eE+\-.]+)")
+    with open(path, "r", encoding="utf-8") as handle:
+        for line in handle:
+            match = pattern.search(line)
+            if not match:
+                continue
+            try:
+                value = float(match.group("value"))
+            except Exception:
+                continue
+            if value > 0.0 and value <= 1.0:
+                return value
+    return None
+
+
+def _ensure_requests_files_for_rerun(
+    *,
+    run_dir: Path,
+    total_chunks: int,
+    existing_files_by_index: dict[int, str],
+    bucket: storage.Bucket,
+    provider: str,
+    client,
+    log,
+) -> dict[int, str]:
+    if total_chunks <= 0:
+        return dict(existing_files_by_index)
+
+    expected_missing = [
+        index
+        for index in range(1, total_chunks + 1)
+        if index not in existing_files_by_index
+    ]
+    if not expected_missing:
+        return dict(existing_files_by_index)
+
+    downscale = _extract_downscale_from_run_log(run_dir)
+    if downscale is not None and downscale < 1.0:
+        raise ValueError(
+            "Cannot safely regenerate missing chunk request files for a downscaled run. "
+            "Please rerun submit with the same --downscale value and stable input set, "
+            "or manually recover from existing request files."
+        )
+
+    blobs = _list_input_blobs(bucket, log=log)
+    if not blobs:
+        raise FileNotFoundError(
+            f"No input images found in bucket {config.gcs_bucket_name} "
+            f"with prefix '{config.batch_input_prefix}'."
+        )
+
+    chunks = _split_blobs_evenly(blobs, total_chunks)
+    if len(chunks) != total_chunks:
+        raise RuntimeError(
+            "Unable to regenerate missing request files for rerun because chunk "
+            "reconstruction did not match expected total chunks."
+        )
+
+    files_by_index = dict(existing_files_by_index)
+    for chunk_index in expected_missing:
+        requests_file_name = (
+            config.batch_requests_file_name
+            if total_chunks == 1
+            else _chunk_requests_file_name(
+                config.batch_requests_file_name,
+                chunk_index=chunk_index,
+                total_chunks=total_chunks,
+            )
+        )
+        requests_path = run_dir / requests_file_name
+        _write_requests_file(
+            blobs=chunks[chunk_index - 1],
+            bucket_name=config.gcs_bucket_name,
+            output_path=requests_path,
+            log=log,
+            for_vertex=bool(getattr(client, "vertexai", False)),
+            provider=provider,
+        )
+        files_by_index[chunk_index] = requests_file_name
+        log(
+            f"Regenerated missing request file for rerun: "
+            f"chunk={chunk_index}/{total_chunks} file={requests_file_name}"
+        )
+
+    return files_by_index
+
+
+def _build_rerun_entries(
+    *,
+    run_dir: Path,
+    provider: str,
+    payload_entries: list[dict],
+    total_chunks: int,
+    files_by_index: dict[int, str],
+    submitted_by_chunk: dict[int, str],
+) -> list[dict]:
+    if total_chunks <= 0:
+        return []
+
+    by_chunk_payload: dict[int, dict] = {}
+    for fallback_index, entry in enumerate(payload_entries, start=1):
+        try:
+            index = int(entry.get("chunk_index") or fallback_index)
+        except Exception:
+            index = fallback_index
+        if index <= 0:
+            continue
+        by_chunk_payload[index] = dict(entry)
+
+    entries: list[dict] = []
+    for chunk_index in range(1, total_chunks + 1):
+        entry = by_chunk_payload.get(chunk_index, {})
+
+        requests_file = files_by_index.get(chunk_index)
+        if not requests_file:
+            requests_file = (
+                config.batch_requests_file_name
+                if total_chunks == 1
+                else _chunk_requests_file_name(
+                    config.batch_requests_file_name,
+                    chunk_index=chunk_index,
+                    total_chunks=total_chunks,
+                )
+            )
+
+        requests_path = run_dir / requests_file
+        if not requests_path.exists() or not requests_path.is_file():
+            raise FileNotFoundError(
+                f"Missing request file while preparing rerun metadata: {requests_path}"
+            )
+
+        request_count, request_bytes = _count_requests_file(requests_path)
+        previous_name = str(entry.get("batch_job_name") or "").strip()
+        if not previous_name:
+            previous_name = submitted_by_chunk.get(chunk_index, "")
+
+        input_source = str(entry.get("input_source") or "").strip()
+        if not input_source:
+            input_source = "anthropic_manifest" if provider == "anthropic" else "gcs"
+
+        input_file = str(entry.get("input_file") or "").strip()
+        if not input_file:
+            input_file = requests_file if provider == "anthropic" else ""
+
+        output_destination = entry.get("output_destination")
+        if isinstance(output_destination, str):
+            output_destination = output_destination.strip() or None
+
+        rebuilt = _build_chunk_entry(
+            chunk_index=chunk_index,
+            total_chunks=total_chunks,
+            requests_file=requests_file,
+            request_count=request_count,
+            request_bytes=request_bytes,
+            batch_job_name=previous_name,
+            input_file=input_file,
+            input_source=input_source,
+            output_destination=output_destination,
+            provider=provider,
+        )
+        history = entry.get("rerun_history")
+        if isinstance(history, list):
+            rebuilt["rerun_history"] = history
+
+        entries.append(rebuilt)
+
+    return entries
+
+
+def _entries_with_replacement(
+    entries: list[dict],
+    *,
+    chunk_index: int,
+    replacement: dict,
+) -> list[dict]:
+    updated: list[dict] = []
+    replaced = False
+    for item in entries:
+        try:
+            current_index = int(item.get("chunk_index") or 0)
+        except Exception:
+            current_index = 0
+        if current_index == chunk_index:
+            updated.append(dict(replacement))
+            replaced = True
+        else:
+            updated.append(dict(item))
+
+    if not replaced:
+        updated.append(dict(replacement))
+
+    return sorted(updated, key=lambda item: int(item.get("chunk_index") or 0))
+
+
 def _build_chunk_entry(
     *,
     chunk_index: int,
@@ -961,7 +1512,9 @@ def _write_batch_job_meta(
     meta = {
         "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "batch_job_name": first.get("batch_job_name"),
-        "batch_job_names": [item.get("batch_job_name") for item in jobs if item.get("batch_job_name")],
+        "batch_job_names": [
+            item.get("batch_job_name") for item in jobs if item.get("batch_job_name")
+        ],
         "batch_jobs": jobs,
         "request_count": total_request_count,
         "request_bytes": total_request_bytes,
@@ -1059,9 +1612,7 @@ def _submit_chunk_job(
     batch_job = client.batches.create(
         model=config.model,
         src=uploaded_file.name,
-        config=types.CreateBatchJobConfig(
-            display_name=display_name
-        ),
+        config=types.CreateBatchJobConfig(display_name=display_name),
     )
     return batch_job.name, input_source, input_ref, None
 
@@ -1074,7 +1625,11 @@ def _batch_state_and_success(
 ) -> tuple[str, bool]:
     if provider == "anthropic":
         batch_job = client.messages.batches.retrieve(batch_job_name)
-        status = str(getattr(batch_job, "processing_status", "") or "unknown").strip().lower()
+        status = (
+            str(getattr(batch_job, "processing_status", "") or "unknown")
+            .strip()
+            .lower()
+        )
         counts = getattr(batch_job, "request_counts", None)
         succeeded = int(getattr(counts, "succeeded", 0) or 0)
         errored = int(getattr(counts, "errored", 0) or 0)
@@ -1113,18 +1668,13 @@ def submit_batch() -> None:
             "Set the GCS bucket used for batch request/input/output files."
         )
 
-    service_account_path = resolve_service_account_path(
-        config.service_account_file
-    )
-    storage_client = storage.Client.from_service_account_json(
-        str(service_account_path)
-    )
+    service_account_path = resolve_service_account_path(config.service_account_file)
+    storage_client = storage.Client.from_service_account_json(str(service_account_path))
     bucket = storage_client.bucket(config.gcs_bucket_name)
 
-    vertex_location = (
-        (config.vertex_model_location or "").strip()
-        or (config.gcp_location or "").strip()
-    )
+    vertex_location = (config.vertex_model_location or "").strip() or (
+        config.gcp_location or ""
+    ).strip()
     if provider == "anthropic":
         client = _get_anthropic_client()
         backend_name = "anthropic"
@@ -1140,8 +1690,8 @@ def submit_batch() -> None:
         run_dir = _resolve_rerun_run_dir(args)
         log = get_run_logger(run_dir)
         _warn_if_confidence_scores_unsupported(provider=provider, log=log)
-        payload = _read_batch_job_payload(run_dir / "batch_job.json")
-        payload_provider = str(payload.get("provider") or "").strip().lower()
+        payload = _read_batch_job_payload_if_exists(run_dir / "batch_job.json")
+        payload_provider = str((payload or {}).get("provider") or "").strip().lower()
         if payload_provider in {"gemini", "anthropic"} and payload_provider != provider:
             provider = payload_provider
             if provider == "anthropic":
@@ -1149,22 +1699,82 @@ def submit_batch() -> None:
                 backend_name = "anthropic"
             else:
                 client = get_batch_client(location=vertex_location)
-                backend_name = "vertex" if getattr(client, "vertexai", False) else "mldev"
+                backend_name = (
+                    "vertex" if getattr(client, "vertexai", False) else "mldev"
+                )
             log(
                 f"Rerun provider override from metadata: provider={provider} "
                 f"(model in config is '{config.model}')."
             )
             _warn_if_confidence_scores_unsupported(provider=provider, log=log)
-        entries = _normalize_job_entries(payload)
-        if not entries:
+
+        payload_entries = _normalize_job_entries(payload or {})
+        files_by_index, files_total = _discover_request_files_in_run_dir(run_dir)
+        submitted_by_chunk, run_log_total = _submitted_batch_ids_by_chunk_from_run_log(
+            run_dir
+        )
+        total_chunks = _infer_rerun_total_chunks(
+            payload=payload,
+            payload_entries=payload_entries,
+            request_files_total=files_total,
+            run_log_total=run_log_total,
+        )
+        if total_chunks <= 0:
             raise ValueError(
-                f"No batch job entries found in {run_dir / 'batch_job.json'}."
+                "Could not infer rerun chunk layout. Expected batch_job.json, "
+                "chunked request files, or chunk submission lines in run.log."
             )
 
+        files_by_index = _ensure_requests_files_for_rerun(
+            run_dir=run_dir,
+            total_chunks=total_chunks,
+            existing_files_by_index=files_by_index,
+            bucket=bucket,
+            provider=provider,
+            client=client,
+            log=log,
+        )
+        entries = _build_rerun_entries(
+            run_dir=run_dir,
+            provider=provider,
+            payload_entries=payload_entries,
+            total_chunks=total_chunks,
+            files_by_index=files_by_index,
+            submitted_by_chunk=submitted_by_chunk,
+        )
+        if not entries:
+            raise ValueError(f"No batch job entries found or derived in {run_dir}.")
+
+        log(
+            f"Rerun preparation complete for {run_dir.name}: "
+            f"total_chunks={total_chunks}, discovered_request_files={len(files_by_index)}, "
+            f"known_submitted_chunks={len(submitted_by_chunk)}."
+        )
+        print(
+            f"Rerun prepared: {total_chunks} chunk(s), "
+            f"{len(submitted_by_chunk)} with known batch IDs."
+        )
+
+        _write_batch_job_meta(
+            run_dir=run_dir,
+            jobs=entries,
+            num_batches_requested=int(
+                (payload or {}).get("num_batches_requested") or total_chunks
+            ),
+            client_backend=backend_name,
+            vertex_location=vertex_location
+            if getattr(client, "vertexai", False)
+            else None,
+            provider=provider,
+        )
+
         rerun_attempt_tag = datetime.now().strftime("rerun_%Y%m%d_%H%M%S")
-        updated_entries: list[dict] = []
+        current_entries = sorted(
+            [dict(item) for item in entries],
+            key=lambda item: int(item.get("chunk_index") or 0),
+        )
         rerun_count = 0
-        for fallback_index, entry in enumerate(entries, start=1):
+        for fallback_index, entry in enumerate(current_entries, start=1):
             try:
                 chunk_index = int(entry.get("chunk_index") or fallback_index)
             except Exception:
@@ -1174,6 +1784,7 @@ def submit_batch() -> None:
             except Exception:
                 total_chunks = len(entries)
             label = _chunk_label(chunk_index=chunk_index, total_chunks=total_chunks)
+            print(f"Checking {label} ({fallback_index}/{len(current_entries)})...")
 
             requests_file = entry.get("requests_file")
             if not isinstance(requests_file, str) or not requests_file.strip():
@@ -1209,10 +1820,30 @@ def submit_batch() -> None:
                     )
 
             if was_successful:
-                updated_entries.append(dict(entry))
+                log(
+                    f"[{label}] Already successful. Keeping existing batch id {previous_name}."
+                )
+                _write_batch_job_meta(
+                    run_dir=run_dir,
+                    jobs=current_entries,
+                    num_batches_requested=int(
+                        (payload or {}).get("num_batches_requested") or total_chunks
+                    ),
+                    client_backend=backend_name,
+                    vertex_location=vertex_location
+                    if getattr(client, "vertexai", False)
+                    else None,
+                    provider=provider,
+                )
                 continue
             if previous_name:
-                log(f"[{label}] Previous job not successful: {previous_name} state={state_text}")
+                log(
+                    f"[{label}] Previous job not successful: {previous_name} state={state_text}"
+                )
+            else:
+                log(f"[{label}] No previous batch id recorded; submitting chunk.")
+
+            print(f"Submitting {label}...")
 
             request_count, request_bytes = _count_requests_file(requests_path)
             batch_job_name, input_source, input_ref, dest_ref = _submit_chunk_job(
@@ -1244,18 +1875,35 @@ def submit_batch() -> None:
                 if not isinstance(history, list):
                     history = []
                 rebuilt["rerun_history"] = [*history, previous_name]
-            updated_entries.append(rebuilt)
+            current_entries = _entries_with_replacement(
+                current_entries,
+                chunk_index=chunk_index,
+                replacement=rebuilt,
+            )
 
-        updated_entries = sorted(
-            updated_entries,
-            key=lambda item: int(item.get("chunk_index") or 0),
-        )
+            _write_batch_job_meta(
+                run_dir=run_dir,
+                jobs=current_entries,
+                num_batches_requested=int(
+                    (payload or {}).get("num_batches_requested") or total_chunks
+                ),
+                client_backend=backend_name,
+                vertex_location=vertex_location
+                if getattr(client, "vertexai", False)
+                else None,
+                provider=provider,
+            )
+
         _write_batch_job_meta(
             run_dir=run_dir,
-            jobs=updated_entries,
-            num_batches_requested=int(payload.get("num_batches_requested") or len(entries)),
+            jobs=current_entries,
+            num_batches_requested=int(
+                (payload or {}).get("num_batches_requested") or total_chunks
+            ),
             client_backend=backend_name,
-            vertex_location=vertex_location if getattr(client, "vertexai", False) else None,
+            vertex_location=vertex_location
+            if getattr(client, "vertexai", False)
+            else None,
             provider=provider,
         )
         if rerun_count == 0:
@@ -1265,7 +1913,7 @@ def submit_batch() -> None:
 
         job_names = ", ".join(
             str(item.get("batch_job_name"))
-            for item in updated_entries
+            for item in current_entries
             if item.get("batch_job_name")
         )
         log(f"Rerun submitted {rerun_count} chunk job(s). Active jobs: {job_names}")
@@ -1277,7 +1925,7 @@ def submit_batch() -> None:
     _warn_if_confidence_scores_unsupported(provider=provider, log=log)
     _ensure_uploaded_sources(bucket, log)
 
-    blobs = _list_input_blobs(bucket)
+    blobs = _list_input_blobs(bucket, log=log)
     if not blobs:
         raise FileNotFoundError(
             f"No input images found in bucket {config.gcs_bucket_name} "
@@ -1351,6 +1999,18 @@ def submit_batch() -> None:
                 output_destination=dest_ref,
                 provider=provider,
             )
+        )
+
+        # Persist progress immediately so batch IDs are not lost on mid-run failure.
+        _write_batch_job_meta(
+            run_dir=run_dir,
+            jobs=chunk_jobs,
+            num_batches_requested=num_batches_requested,
+            client_backend=backend_name,
+            vertex_location=vertex_location
+            if getattr(client, "vertexai", False)
+            else None,
+            provider=provider,
         )
 
     _write_batch_job_meta(
