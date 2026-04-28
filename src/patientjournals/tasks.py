@@ -99,6 +99,7 @@ def submit(
     num_batches: int | None = None,
     rerun: bool = False,
     run_dir: str | None = None,
+    continue_dataset: str | None = None,
     downscale: float | None = None,
     extra: str = "",
 ) -> None:
@@ -106,6 +107,7 @@ def submit(
     _add_option(args, "--num-batches", num_batches)
     _add_flag(args, "--rerun", rerun)
     _add_option(args, "--run-dir", run_dir)
+    _add_option(args, "--continue-dataset", continue_dataset)
     _add_option(args, "--downscale", downscale)
     args.extend(_split_extra(extra))
     _run_module(context, "patientjournals.batch.submit", args)
@@ -149,6 +151,26 @@ def retrieve(
     _add_flag(args, "--submit-failed", submit_failed)
     args.extend(_split_extra(extra))
     _run_module(context, "patientjournals.batch.retrieve", args)
+
+
+@task(name="collect-outputs")
+def collect_outputs(
+    context,
+    bucket_name: str | None = None,
+    outputs_prefix: str | None = None,
+    pages_prefix: str | None = None,
+    continue_dataset: str | None = None,
+    output_format: str | None = None,
+    extra: str = "",
+) -> None:
+    args: list[str] = []
+    _add_option(args, "--bucket-name", bucket_name)
+    _add_option(args, "--outputs-prefix", outputs_prefix)
+    _add_option(args, "--pages-prefix", pages_prefix)
+    _add_option(args, "--continue-dataset", continue_dataset)
+    _add_option(args, "--output-format", output_format)
+    args.extend(_split_extra(extra))
+    _run_module(context, "patientjournals.batch.collect_outputs", args)
 
 
 @task(name="check-models")
@@ -231,6 +253,7 @@ batch.add_task(upload)
 batch.add_task(submit)
 batch.add_task(status)
 batch.add_task(retrieve)
+batch.add_task(collect_outputs)
 batch.add_task(check_models)
 
 validation = Collection("validation")

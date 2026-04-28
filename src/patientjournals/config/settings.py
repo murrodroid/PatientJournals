@@ -58,7 +58,7 @@ class Config:
     output_model: type[BaseModel] = FrontPage  # change to correct schema in schemas.py
     target_folder: str = "/Volumes/Expansion/patientjournaler_1889-1897_jpg"
     fp_mode: Literal["all", "only_fp", "exclude_fp"] = "all"
-    output_format: str = "csv"
+    output_format: str = "jsonl"
     csv_sep: str = "$"
 
     model_temperature: float = 0.0
@@ -66,6 +66,7 @@ class Config:
     thinking_level: Optional[Literal["low", "medium", "high"]] = "high"
     include_thoughts: bool = False
     include_confidence_scores: bool = False
+    include_response_avg_logprobs: bool = True
     provider_api_keys: dict[str, str] = field(default_factory=_load_provider_api_keys)
     api_key: str = field(default_factory=_default_api_key)
     api_concurrent_tasks: int = 8

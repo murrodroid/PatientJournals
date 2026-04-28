@@ -80,6 +80,14 @@ def extract_response_thoughts(response: object) -> str | None:
     return "\n\n".join(thoughts)
 
 
+def extract_response_avg_logprobs(response: object) -> float | None:
+    candidate = _first_candidate(response)
+    value = _pick_value(candidate, "avg_logprobs", "avgLogprobs")
+    if isinstance(value, (int, float)):
+        return float(value)
+    return None
+
+
 def _chosen_token_logprobs(candidate: object | None) -> list[tuple[str, float]]:
     if candidate is None:
         return []
@@ -374,6 +382,7 @@ def extract_response_metadata(response: object) -> dict[str, Any]:
     return {
         "text": text,
         "thoughts": extract_response_thoughts(response),
+        "avg_logprobs": extract_response_avg_logprobs(response),
         "field_confidence_by_pointer": extract_field_confidence_by_pointer(
             response=response,
             payload_text=text,

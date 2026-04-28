@@ -15,6 +15,10 @@ from google.genai import types
 from tqdm import tqdm
 
 from patientjournals.batch.client import get_batch_client, resolve_service_account_path
+from patientjournals.batch.output_records import (
+    add_response_metadata_columns,
+    parse_gemini_output_record,
+)
 from patientjournals.batch.retry import (
     _collect_failed_retry_keys,
     _submit_failed_pages_as_batch,
@@ -62,8 +66,9 @@ def _parse_args() -> argparse.Namespace:
         dest="allow_partial",
         action="store_true",
         help=(
-            "Retrieve only completed (succeeded) batch jobs and skip chunks "
-            "that are still running/failed/cancelled."
+            "Permit partial retrieval. For Gemini/Vertex, this also parses "
+            "available output files from non-succeeded jobs and skips jobs "
+            "without downloadable outputs."
         ),
     )
     parser.add_argument(
@@ -364,8 +369,7 @@ def _recover_missing_pages_via_api_key(
             file_name=key,
             field_confidence_by_pointer=metadata.get("field_confidence_by_pointer"),
         )
-        for row in rows:
-            row["thoughts"] = metadata.get("thoughts") or None
+        add_response_metadata_columns(rows, metadata)
         rows_to_flush.extend(rows)
 
     if recovered:
@@ -647,17 +651,71 @@ def _resolve_anthropic_custom_id_to_key(
     return mapping
 
 
+def _output_destinations_from_submit_run(
+    submit_run_dir: Path | None,
+) -> dict[str, str]:
+    if submit_run_dir is None:
+        return {}
+    payload = _read_batch_job_payload(submit_run_dir / "batch_job.json")
+    if not payload:
+        return {}
+
+    destinations: dict[str, str] = {}
+    jobs = payload.get("batch_jobs")
+    if not isinstance(jobs, list):
+        return destinations
+
+    for item in jobs:
+        if not isinstance(item, dict):
+            continue
+        batch_name = _normalize_key(item.get("batch_job_name"))
+        destination = _normalize_key(item.get("output_destination"))
+        if batch_name and destination:
+            destinations[batch_name] = destination
+    return destinations
+
+
+def _gemini_output_reference(
+    batch_job: object,
+    *,
+    metadata_destination: str | None = None,
+) -> tuple[str, str] | None:
+    dest = getattr(batch_job, "dest", None)
+    file_name = getattr(dest, "file_name", None) if dest else None
+    dest_gcs_uri = getattr(dest, "gcs_uri", None) if dest else None
+
+    if isinstance(dest_gcs_uri, str) and dest_gcs_uri.strip():
+        return "gcs", dest_gcs_uri.strip()
+    if isinstance(file_name, str) and file_name.strip():
+        return "file", file_name.strip()
+    if metadata_destination:
+        return "gcs", metadata_destination
+    return None
+
+
 def _validate_page_completeness(
     *,
     expected_keys: set[str],
     observed_output_keys: set[str],
     successful_keys: set[str],
     failures: dict[str, str],
+    require_all_expected_pages: bool | None = None,
+    require_all_pages_successful: bool | None = None,
     log,
 ) -> None:
     sample_size = max(1, int(config.page_validation_sample_size or 1))
+    require_expected = (
+        config.require_all_expected_pages
+        if require_all_expected_pages is None
+        else require_all_expected_pages
+    )
+    require_success = (
+        config.require_all_pages_successful
+        if require_all_pages_successful is None
+        else require_all_pages_successful
+    )
 
-    if expected_keys and config.require_all_expected_pages:
+    if expected_keys and require_expected:
         missing_from_output = expected_keys - observed_output_keys
         if missing_from_output:
             samples = _sample_keys(missing_from_output, sample_size)
@@ -669,7 +727,7 @@ def _validate_page_completeness(
                 "Disable with config.require_all_expected_pages=False if needed."
             )
 
-    if not config.require_all_pages_successful:
+    if not require_success:
         return
 
     expected_success = expected_keys if expected_keys else observed_output_keys
@@ -1046,8 +1104,10 @@ def retrieve_batch() -> Path:
         )
         client = get_batch_client(location=client_location)
 
-    batch_jobs: list[tuple[str, object]] = []
+    output_destinations_by_name = _output_destinations_from_submit_run(submit_run_dir)
+    batch_jobs: list[tuple[str, object, bool, tuple[str, str] | None]] = []
     incomplete_batches: list[tuple[str, str]] = []
+    partial_output_batches: list[tuple[str, str]] = []
     for batch_name in batch_names:
         batch_job = _get_batch_job(client, batch_name, provider)
         state = _batch_job_state(batch_job, provider)
@@ -1061,10 +1121,23 @@ def retrieve_batch() -> Path:
                 )
                 state = _batch_job_state(batch_job, provider)
 
-        if not _batch_job_successful(batch_job, provider):
+        is_successful = _batch_job_successful(batch_job, provider)
+        output_ref: tuple[str, str] | None = None
+        if provider != "anthropic":
+            output_ref = _gemini_output_reference(
+                batch_job,
+                metadata_destination=output_destinations_by_name.get(batch_name),
+            )
+
+        if not is_successful:
+            if provider == "gemini" and output_ref is not None:
+                partial_output_batches.append((batch_name, state))
+                if args.allow_partial:
+                    batch_jobs.append((batch_name, batch_job, True, output_ref))
+                    continue
             incomplete_batches.append((batch_name, state))
             continue
-        batch_jobs.append((batch_name, batch_job))
+        batch_jobs.append((batch_name, batch_job, False, output_ref))
 
     if incomplete_batches and not args.allow_partial:
         examples = ", ".join(
@@ -1074,13 +1147,25 @@ def retrieve_batch() -> Path:
         raise RuntimeError(
             "Not all batch jobs are complete/succeeded. "
             f"Incomplete jobs={len(incomplete_batches)} [{examples}{suffix}]. "
-            "Re-run with --wait, or use --allow-partial to retrieve only finished chunks."
+            "Re-run with --wait, or use --allow-partial to retrieve available "
+            "output rows from non-succeeded chunks."
         )
 
     if not batch_jobs:
         raise RuntimeError(
-            "No succeeded batch jobs available to retrieve. "
+            "No batch jobs with downloadable outputs are available to retrieve. "
             "Use --wait to block until completion."
+        )
+
+    if partial_output_batches:
+        examples = ", ".join(
+            f"{name} ({state})" for name, state in partial_output_batches[:5]
+        )
+        suffix = "..." if len(partial_output_batches) > 5 else ""
+        log(
+            f"Partial retrieval enabled: including available output files from "
+            f"{len(partial_output_batches)} non-succeeded Gemini job(s): "
+            f"{examples}{suffix}"
         )
 
     if incomplete_batches:
@@ -1094,11 +1179,15 @@ def retrieve_batch() -> Path:
         )
         print(
             f"Partial retrieval: using {len(batch_jobs)}/{len(batch_names)} "
-            "succeeded batch job(s)."
+            "batch job(s) with downloadable outputs."
         )
 
     raw_outputs: list[tuple[str, Path]] = []
-    for index, (batch_name, batch_job) in enumerate(batch_jobs, start=1):
+    skipped_output_batches: list[tuple[str, str]] = []
+    for index, (batch_name, batch_job, is_partial_output, output_ref) in enumerate(
+        batch_jobs,
+        start=1,
+    ):
         raw_path = run_dir / f"batch_output_{index:03d}.jsonl"
 
         if provider == "anthropic":
@@ -1109,32 +1198,54 @@ def retrieve_batch() -> Path:
                 log=log,
             )
         else:
-            dest = getattr(batch_job, "dest", None)
-            file_name = getattr(dest, "file_name", None) if dest else None
-            dest_gcs_uri = getattr(dest, "gcs_uri", None) if dest else None
-
-            if dest_gcs_uri:
-                raw_path = _download_from_vertex_gcs_output(
-                    dest_gcs_uri=dest_gcs_uri,
-                    output_path=raw_path,
-                    log=log,
-                )
-            elif file_name:
-                raw_path = _download_from_mldev_output(
-                    client=client,
-                    file_name=file_name,
-                    output_path=raw_path,
-                )
-            else:
+            if output_ref is None:
                 raise RuntimeError(f"Batch {batch_name} missing output destination.")
+            ref_kind, ref_value = output_ref
+            try:
+                if ref_kind == "gcs":
+                    raw_path = _download_from_vertex_gcs_output(
+                        dest_gcs_uri=ref_value,
+                        output_path=raw_path,
+                        log=log,
+                    )
+                elif ref_kind == "file":
+                    raw_path = _download_from_mldev_output(
+                        client=client,
+                        file_name=ref_value,
+                        output_path=raw_path,
+                    )
+                else:
+                    raise RuntimeError(
+                        f"Unsupported output destination type '{ref_kind}' "
+                        f"for batch {batch_name}."
+                    )
+            except RuntimeError as exc:
+                if is_partial_output and args.allow_partial:
+                    skipped_output_batches.append((batch_name, str(exc)))
+                    log(
+                        f"Skipping partial-output batch with no downloadable JSONL: "
+                        f"{batch_name}",
+                        exc=exc,
+                    )
+                    continue
+                raise
         raw_outputs.append((batch_name, raw_path))
+
+    if skipped_output_batches:
+        print(
+            "Skipped partial-output batch job(s) without JSONL files: "
+            f"{len(skipped_output_batches)}"
+        )
+
+    if not raw_outputs:
+        raise RuntimeError("No output JSONL files were downloaded.")
 
     anthropic_custom_id_to_key: dict[str, str] = {}
     if provider == "anthropic":
         anthropic_custom_id_to_key = _resolve_anthropic_custom_id_to_key(
             submit_run_dir=submit_run_dir,
             batch_names=batch_names,
-            selected_batch_names=[name for name, _ in batch_jobs],
+            selected_batch_names=[name for name, _ in raw_outputs],
             log=log,
         )
 
@@ -1179,6 +1290,9 @@ def retrieve_batch() -> Path:
                     )
                     continue
 
+                key: str | None = None
+                metadata: dict[str, object] = {}
+                parsed_model = None
                 if provider == "anthropic":
                     custom_id = (
                         _normalize_key(record.get("custom_id"))
@@ -1190,26 +1304,19 @@ def retrieve_batch() -> Path:
                         if custom_id
                         else None
                     )
-                else:
-                    key = (
-                        _normalize_key(record.get("key"))
-                        if isinstance(record, dict)
-                        else None
-                    )
-                if key:
-                    output_keys_seen.add(key)
+                    if key:
+                        output_keys_seen.add(key)
 
-                if not isinstance(record, dict):
-                    error_rows += 1
-                    _record_failure(
-                        failures,
-                        key=key,
-                        line_number=global_line_number,
-                        reason="invalid_record_type",
-                    )
-                    continue
+                    if not isinstance(record, dict):
+                        error_rows += 1
+                        _record_failure(
+                            failures,
+                            key=key,
+                            line_number=global_line_number,
+                            reason="invalid_record_type",
+                        )
+                        continue
 
-                if provider == "anthropic":
                     result = record.get("result")
                     if not isinstance(result, dict):
                         error_rows += 1
@@ -1246,54 +1353,69 @@ def retrieve_batch() -> Path:
                         )
                         continue
                     metadata = _extract_anthropic_response_metadata(response)
+
+                    text_payload = metadata.get("text")
+                    if not text_payload:
+                        error_rows += 1
+                        log(f"Empty response text for key={key}")
+                        _record_failure(
+                            failures,
+                            key=key,
+                            line_number=global_line_number,
+                            reason="empty_response_text",
+                        )
+                        continue
+
+                    try:
+                        parsed_model = config.output_model.model_validate_json(
+                            text_payload
+                        )
+                    except Exception as exc:
+                        error_rows += 1
+                        log(f"Schema validation failed for key={key}", exc=exc)
+                        _record_failure(
+                            failures,
+                            key=key,
+                            line_number=global_line_number,
+                            reason="schema_validation_failed",
+                        )
+                        continue
                 else:
-                    if record.get("error"):
-                        error_rows += 1
-                        log(f"Batch error for key={key}: {record.get('error')}")
-                        _record_failure(
-                            failures,
-                            key=key,
-                            line_number=global_line_number,
-                            reason="batch_error",
-                        )
-                        continue
-
-                    response = record.get("response")
-                    if response is None:
-                        error_rows += 1
-                        log(f"Missing response for key={key}")
-                        _record_failure(
-                            failures,
-                            key=key,
-                            line_number=global_line_number,
-                            reason="missing_response",
-                        )
-                        continue
-
-                    metadata = extract_response_metadata(response)
-
-                text_payload = metadata.get("text")
-                if not text_payload:
-                    error_rows += 1
-                    log(f"Empty response text for key={key}")
-                    _record_failure(
-                        failures,
-                        key=key,
-                        line_number=global_line_number,
-                        reason="empty_response_text",
+                    parse_result = parse_gemini_output_record(
+                        record,
+                        source=batch_name,
+                        line_number=line_number,
                     )
-                    continue
+                    key = parse_result.key
+                    if key:
+                        output_keys_seen.add(key)
+                    if not parse_result.is_valid:
+                        reason = parse_result.reason or "unknown"
+                        error_rows += 1
+                        if parse_result.detail:
+                            log(
+                                f"Gemini output rejected for key={key}: "
+                                f"{reason} ({parse_result.detail})"
+                            )
+                        else:
+                            log(f"Gemini output rejected for key={key}: {reason}")
+                        _record_failure(
+                            failures,
+                            key=key,
+                            line_number=global_line_number,
+                            reason=reason,
+                        )
+                        continue
+                    metadata = parse_result.metadata
+                    parsed_model = parse_result.parsed_model
 
-                try:
-                    parsed_model = config.output_model.model_validate_json(text_payload)
-                except Exception as exc:
+                if parsed_model is None:
                     error_rows += 1
-                    log(f"Schema validation failed for key={key}", exc=exc)
                     _record_failure(
                         failures,
                         key=key,
                         line_number=global_line_number,
-                        reason="schema_validation_failed",
+                        reason="missing_parsed_model",
                     )
                     continue
 
@@ -1308,8 +1430,7 @@ def retrieve_batch() -> Path:
                         "field_confidence_by_pointer"
                     ),
                 )
-                for row in rows:
-                    row["thoughts"] = metadata.get("thoughts") or None
+                add_response_metadata_columns(rows, metadata)
                 rows_to_flush.extend(rows)
 
                 if len(rows_to_flush) >= flush_every:
@@ -1324,7 +1445,7 @@ def retrieve_batch() -> Path:
     expected_keys = _resolve_expected_request_keys(
         submit_run_dir=submit_run_dir,
         batch_names=batch_names,
-        selected_batch_names=[name for name, _ in batch_jobs],
+        selected_batch_names=[name for name, _ in raw_outputs],
         log=log,
     )
     expected_success = _expected_success_keys(
@@ -1420,11 +1541,22 @@ def retrieve_batch() -> Path:
             print("No failed keys detected; retry batch was not submitted.")
 
     try:
+        if args.allow_partial:
+            log(
+                "Partial retrieval enabled: expected-page and successful-page "
+                "coverage checks will be reported without failing the run."
+            )
         _validate_page_completeness(
             expected_keys=expected_keys,
             observed_output_keys=output_keys_seen,
             successful_keys=successful_page_keys,
             failures=failures,
+            require_all_expected_pages=(
+                bool(config.require_all_expected_pages) and not args.allow_partial
+            ),
+            require_all_pages_successful=(
+                bool(config.require_all_pages_successful) and not args.allow_partial
+            ),
             log=log,
         )
     except RuntimeError as exc:

@@ -24,6 +24,11 @@ from patientjournals.batch.submit_inputs import (
     _ensure_uploaded_sources,
     _list_input_blobs,
 )
+from patientjournals.shared.dataset_coverage import (
+    load_dataset_key_coverage,
+    normalize_gcs_file_key,
+    resolve_continue_dataset_path,
+)
 from patientjournals.shared.tools import create_subfolder, get_run_logger
 
 
@@ -54,6 +59,15 @@ def _parse_args() -> argparse.Namespace:
         help=(
             "Submit run directory to resume. "
             "Used with --rerun to choose which run to resume."
+        ),
+    )
+    parser.add_argument(
+        "--continue-dataset",
+        "--missing-from-dataset",
+        dest="continue_dataset",
+        help=(
+            "Submit only GCS input pages not already covered by this dataset "
+            "(by file_name), or pass 'newest'."
         ),
     )
     parser.add_argument(
@@ -141,6 +155,31 @@ def _downscale_blobs_randomly(
 
     sampled = random.sample(blobs, k=target)
     return sorted(sampled, key=lambda item: item.name)
+
+
+def _filter_blobs_missing_from_dataset(
+    blobs: list[storage.Blob],
+    *,
+    dataset_path: Path,
+    bucket_name: str,
+    log,
+) -> tuple[list[storage.Blob], int, int]:
+    _, covered_keys, dataset_rows = load_dataset_key_coverage(
+        dataset_path,
+        csv_sep=config.csv_sep,
+        bucket_name=bucket_name,
+    )
+    missing = [
+        blob
+        for blob in blobs
+        if normalize_gcs_file_key(blob.name, bucket_name=bucket_name) not in covered_keys
+    ]
+    covered_inputs = len(blobs) - len(missing)
+    log(
+        f"Continuing from dataset {dataset_path}: rows={dataset_rows}, "
+        f"covered_inputs={covered_inputs}/{len(blobs)}, missing={len(missing)}."
+    )
+    return missing, covered_inputs, dataset_rows
 
 
 def _split_blobs_evenly(
@@ -772,6 +811,9 @@ def _batch_state_and_success(
 
 def submit_batch() -> None:
     args = _parse_args()
+    if args.rerun and args.continue_dataset:
+        raise ValueError("--continue-dataset cannot be combined with --rerun.")
+
     provider = _validate_batch_model_support()
     if not (config.service_account_file or "").strip():
         raise ValueError(
@@ -1047,6 +1089,32 @@ def submit_batch() -> None:
             f"No input images found in bucket {config.gcs_bucket_name} "
             f"with prefix '{config.batch_input_prefix}'."
         )
+    if args.continue_dataset:
+        continue_dataset_path = resolve_continue_dataset_path(
+            args.continue_dataset,
+            run_root=config.output_root,
+            dataset_name=config.dataset_file_name,
+        )
+        original_count = len(blobs)
+        blobs, covered_inputs, _ = _filter_blobs_missing_from_dataset(
+            blobs,
+            dataset_path=continue_dataset_path,
+            bucket_name=config.gcs_bucket_name,
+            log=log,
+        )
+        print(
+            "Continue dataset coverage: "
+            f"{covered_inputs}/{original_count} input page(s) already covered; "
+            f"submitting {len(blobs)} missing page(s)."
+        )
+        if not blobs:
+            log(
+                f"Continue dataset {continue_dataset_path} covers all "
+                f"{original_count} selected input page(s); no batch submitted."
+            )
+            print("No missing pages to submit; dataset already covers selected inputs.")
+            return
+
     downscale = _resolve_downscale(args)
     if downscale is not None:
         original_count = len(blobs)

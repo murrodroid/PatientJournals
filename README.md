@@ -107,18 +107,26 @@ uv run invoke batch.upload
 uv run invoke batch.submit
 uv run invoke batch.status --watch
 uv run invoke batch.retrieve --wait
+uv run invoke batch.collect-outputs --continue-dataset runs/.../dataset.jsonl
 ```
 
 Useful batch commands:
 
 ```bash
 uv run invoke batch.submit --num-batches 10
+uv run invoke batch.submit --continue-dataset runs/.../dataset.jsonl
 uv run invoke batch.submit --rerun --run-dir runs/submit_YYYYMMDD_HHMMSS
 uv run invoke batch.retrieve --run-dir runs/submit_YYYYMMDD_HHMMSS --allow-partial
 uv run invoke batch.retrieve --wait --submit-failed
+uv run invoke batch.collect-outputs --continue-dataset newest
 uv run invoke batch.status --simple --watch
 uv run invoke batch.check-models --contains gemini
 ```
+
+`batch.collect-outputs` scans `batch/outputs` for `*predictions.jsonl`, keeps the first schema-valid non-empty response per unique key, writes a recovered dataset, and reports coverage against `pages/`.
+For Vertex retrieval, `batch.retrieve --allow-partial` also parses available output files from non-succeeded jobs instead of dropping the whole chunk.
+Use `batch.submit --continue-dataset DATASET` to submit only pages whose GCS key is not present in the dataset `file_name` column, then use `batch.collect-outputs --continue-dataset DATASET` to produce a total dataset with the existing rows plus newly collected outputs.
+Set `include_response_avg_logprobs` in `settings.py` to control whether Gemini `avgLogprobs` is written as `avg_logprobs` in batch datasets.
 
 For Vertex, configure `service_account_file`, `gcp_project_id`, `gcp_location`, `gcs_bucket_name`, and related GCS prefixes in `settings.py`.
 
