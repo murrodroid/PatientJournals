@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime
-from pathlib import Path
 
+from patientjournals.config import config
+from patientjournals.data.bucket import summarize_bucket_data, validate_bucket_data
 from patientjournals.data.inspection import (
     default_glob_pattern,
     default_recursive,
@@ -16,7 +17,7 @@ from patientjournals.data.inspection import (
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Summarize and validate local batch image data."
+        description="Summarize and validate local or GCS batch image data."
     )
     parser.add_argument("--summary", action="store_true", help="Write a data summary report.")
     parser.add_argument(
@@ -27,6 +28,20 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--root",
         help="Data root to inspect. Defaults to configured batch/local image folder.",
+    )
+    parser.add_argument(
+        "--bucket",
+        action="store_true",
+        help="Inspect the configured GCS bucket instead of a local folder.",
+    )
+    parser.add_argument(
+        "--bucket-name",
+        help="GCS bucket name to inspect. Defaults to config.gcs_bucket_name.",
+    )
+    parser.add_argument(
+        "--prefix",
+        default="",
+        help="Optional GCS object prefix to inspect when --bucket is set.",
     )
     parser.add_argument(
         "--glob",
@@ -88,28 +103,47 @@ def main() -> None:
     args = _parse_args()
     if not args.summary and not args.validate:
         raise SystemExit("Choose at least one operation: --summary or --validate.")
+    if args.bucket and args.root:
+        raise SystemExit("--root is only valid for local inspection; use --prefix for bucket inspection.")
 
     recursive = default_recursive() and not args.no_recursive
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    bucket_name = args.bucket_name or config.gcs_bucket_name
 
     if args.summary:
-        report = summarize_batch_data(
-            args.root,
-            glob_pattern=args.glob_pattern,
-            recursive=recursive,
-        )
-        stem = f"data_batch_summary_{timestamp}"
+        if args.bucket:
+            report = summarize_bucket_data(
+                bucket_name=bucket_name,
+                prefix=args.prefix,
+                glob_pattern=args.glob_pattern,
+            )
+            stem = f"data_bucket_summary_{timestamp}"
+        else:
+            report = summarize_batch_data(
+                args.root,
+                glob_pattern=args.glob_pattern,
+                recursive=recursive,
+            )
+            stem = f"data_batch_summary_{timestamp}"
         path = write_json_report(report, args.summaries_dir, stem)
         _print_summary(report)
         print(f"Summary report: {path}")
 
     if args.validate:
-        report = validate_batch_data(
-            args.root,
-            glob_pattern=args.glob_pattern,
-            recursive=recursive,
-        )
-        stem = f"data_batch_validation_{timestamp}"
+        if args.bucket:
+            report = validate_bucket_data(
+                bucket_name=bucket_name,
+                prefix=args.prefix,
+                glob_pattern=args.glob_pattern,
+            )
+            stem = f"data_bucket_validation_{timestamp}"
+        else:
+            report = validate_batch_data(
+                args.root,
+                glob_pattern=args.glob_pattern,
+                recursive=recursive,
+            )
+            stem = f"data_batch_validation_{timestamp}"
         json_path = write_json_report(report, args.validations_dir, stem)
         csv_path = write_validation_csv(report, args.validations_dir, stem)
         _print_validation(report)
@@ -121,4 +155,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

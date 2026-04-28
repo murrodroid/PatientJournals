@@ -317,10 +317,13 @@ def write_validation_csv(report: dict[str, Any], output_dir: str | Path, stem: s
     output_path.mkdir(parents=True, exist_ok=True)
     path = output_path / f"{stem}.csv"
     records = list(report.get("records") or [])
-    fieldnames = [
+    preferred = [
         "status",
         "issues",
         "warnings",
+        "source",
+        "bucket",
+        "blob_name",
         "file_name",
         "relative_path",
         "parent_folder",
@@ -331,6 +334,16 @@ def write_validation_csv(report: dict[str, Any], output_dir: str | Path, stem: s
         "format",
         "mode",
     ]
+    extra = sorted(
+        {
+            key
+            for record in records
+            if isinstance(record, dict)
+            for key in record
+            if key not in preferred
+        }
+    )
+    fieldnames = preferred + extra
     with open(path, "w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()

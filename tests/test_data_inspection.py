@@ -1,13 +1,52 @@
 import json
+from io import BytesIO
 
 from PIL import Image
 
+from patientjournals.data.bucket import summarize_bucket_data, validate_bucket_data
 from patientjournals.data.inspection import (
     summarize_batch_data,
     validate_batch_data,
     write_json_report,
     write_validation_csv,
 )
+
+
+class FakeBlob:
+    def __init__(
+        self,
+        name: str,
+        payload: bytes,
+        *,
+        content_type: str = "image/png",
+    ) -> None:
+        self.name = name
+        self._payload = payload
+        self.size = len(payload)
+        self.content_type = content_type
+
+    def download_as_bytes(self) -> bytes:
+        return self._payload
+
+
+class FakeBucket:
+    name = "test-bucket"
+
+    def __init__(self, blobs: list[FakeBlob]) -> None:
+        self._blobs = blobs
+
+    def list_blobs(self, prefix: str | None = None):
+        return [
+            blob
+            for blob in self._blobs
+            if prefix is None or blob.name.startswith(prefix)
+        ]
+
+
+def png_bytes(size: tuple[int, int] = (2, 3)) -> bytes:
+    buffer = BytesIO()
+    Image.new("RGB", size, "white").save(buffer, format="PNG")
+    return buffer.getvalue()
 
 
 def test_summarize_batch_data_counts_files_and_folders(tmp_path) -> None:
@@ -31,6 +70,32 @@ def test_summarize_batch_data_counts_files_and_folders(tmp_path) -> None:
     assert report["folder_count"] == 2
     assert report["files_by_extension"] == {"jpg": 1, "png": 1}
     assert report["image_size_bytes"]["total"] == 7
+
+
+def test_summarize_bucket_data_counts_prefix_blobs() -> None:
+    bucket = FakeBucket(
+        [
+            FakeBlob("pages/a/page_0001.png", b"abc"),
+            FakeBlob("pages/b/page_0002.jpg", b"abcd", content_type="image/jpeg"),
+            FakeBlob("pages/readme.txt", b"ignore", content_type="text/plain"),
+            FakeBlob("other/page_0003.png", b"ignored"),
+        ]
+    )
+
+    report = summarize_bucket_data(
+        bucket,
+        prefix="pages",
+        glob_pattern="*",
+        allowed_extensions={"png", "jpg"},
+    )
+
+    assert report["source"] == "gcs"
+    assert report["bucket"] == "test-bucket"
+    assert report["total_files"] == 3
+    assert report["image_files"] == 2
+    assert report["non_image_files"] == 1
+    assert report["files_by_extension"] == {"jpg": 1, "png": 1}
+    assert report["folders_with_images"] == 2
 
 
 def test_summarize_batch_data_can_skip_nested_files(tmp_path) -> None:
@@ -72,6 +137,33 @@ def test_validate_batch_data_detects_corrupt_images(tmp_path) -> None:
     assert report["error_count"] == 1
     assert records["valid.png"]["width"] == 10
     assert records["valid.png"]["height"] == 12
+    assert records["corrupt.png"]["status"] == "error"
+    assert "image_open_failed" in records["corrupt.png"]["issues"]
+
+
+def test_validate_bucket_data_detects_corrupt_blob() -> None:
+    bucket = FakeBucket(
+        [
+            FakeBlob("pages/valid.png", png_bytes((5, 6))),
+            FakeBlob("pages/corrupt.png", b"not an image"),
+        ]
+    )
+
+    report = validate_bucket_data(
+        bucket,
+        prefix="pages",
+        glob_pattern="*.png",
+        allowed_extensions={"png"},
+    )
+    records = {record["file_name"]: record for record in report["records"]}
+
+    assert report["status"] == "error"
+    assert report["total_images"] == 2
+    assert report["ok_count"] == 1
+    assert report["error_count"] == 1
+    assert records["valid.png"]["width"] == 5
+    assert records["valid.png"]["height"] == 6
+    assert records["valid.png"]["bucket"] == "test-bucket"
     assert records["corrupt.png"]["status"] == "error"
     assert "image_open_failed" in records["corrupt.png"]["issues"]
 

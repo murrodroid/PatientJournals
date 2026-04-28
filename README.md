@@ -39,6 +39,7 @@ uv run invoke batch.status --watch
 uv run invoke batch.retrieve --wait
 uv run invoke data.batch --summary
 uv run invoke data.batch --validate
+uv run invoke data.batch --summary --bucket
 uv run invoke validation.validate --user lucas --images data --results runs/.../dataset.jsonl --corrections
 uv run invoke validation.report --input-path validations --out validation_reports --min-n 1
 ```
@@ -82,6 +83,16 @@ By default, this reads the configured batch image folder and glob. Override the 
 ```bash
 uv run invoke data.batch --summary --validate --root data --glob '*.png'
 ```
+
+To inspect the online GCS bucket instead of local files:
+
+```bash
+uv run invoke data.batch --summary --bucket
+uv run invoke data.batch --validate --bucket
+uv run invoke data.batch --summary --bucket --bucket-name data-blegdamsjournaler --prefix pages
+```
+
+Bucket summary lists object metadata only. Bucket validation downloads each matching image object and verifies it with Pillow, so it can take time on large buckets.
 
 Summary JSON reports are written to `summaries/`. Validation JSON and CSV reports are written to `validations/`. Validation checks include empty files, unreadable/corrupt images, invalid dimensions, extension/format mismatches, and duplicate basenames.
 

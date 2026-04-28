@@ -46,6 +46,9 @@ def data_batch(
     summary: bool = False,
     validate: bool = False,
     root: str | None = None,
+    bucket: bool = False,
+    bucket_name: str | None = None,
+    prefix: str | None = None,
     glob: str | None = None,
     no_recursive: bool = False,
     summaries_dir: str | None = None,
@@ -57,6 +60,9 @@ def data_batch(
     _add_flag(args, "--summary", summary)
     _add_flag(args, "--validate", validate)
     _add_option(args, "--root", root)
+    _add_flag(args, "--bucket", bucket)
+    _add_option(args, "--bucket-name", bucket_name)
+    _add_option(args, "--prefix", prefix)
     _add_option(args, "--glob", glob)
     _add_flag(args, "--no-recursive", no_recursive)
     _add_option(args, "--summaries-dir", summaries_dir)
