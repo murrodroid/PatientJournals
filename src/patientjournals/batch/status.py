@@ -6,9 +6,9 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from batch_client import get_batch_client
-from config import config
-from models import resolve_model_spec
+from patientjournals.batch.client import get_batch_client
+from patientjournals.config import config
+from patientjournals.config.models import resolve_model_spec
 
 
 _GEMINI_TERMINAL_STATES = {

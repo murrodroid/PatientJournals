@@ -4,7 +4,7 @@ from typing import Callable
 
 from pydantic import BaseModel
 
-from schemas import FrontPage, TextPage
+from patientjournals.config.schemas import FrontPage, TextPage
 
 
 FieldConfidenceByPointer = dict[str, dict[str, float | None]]

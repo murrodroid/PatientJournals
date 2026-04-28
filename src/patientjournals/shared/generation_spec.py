@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from google.genai import types
 
-from config import config
+from patientjournals.config import config
 
 
 def prompt_text() -> str:

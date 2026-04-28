@@ -12,7 +12,7 @@ import pandas as pd
 from PIL import Image, ImageTk
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
-from schemas import FrontPage
+from patientjournals.config.schemas import FrontPage
 
 _COLUMNS_NOT_INCLUDED = ['generation_seconds','file_name']
 

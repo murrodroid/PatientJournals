@@ -10,9 +10,9 @@ import traceback
 from dataclasses import asdict, is_dataclass
 from pydantic import BaseModel
 
-import config as config_module
-from config import config
-from output_handler import data_to_rows as schema_data_to_rows
+import patientjournals.config.settings as config_module
+from patientjournals.config import config
+from patientjournals.shared.output_handler import data_to_rows as schema_data_to_rows
 
 
 def data_to_rows(

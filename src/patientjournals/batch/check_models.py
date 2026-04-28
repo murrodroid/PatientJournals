@@ -6,8 +6,8 @@ from typing import Iterable
 
 from google.genai.errors import ClientError
 
-from batch_client import get_batch_client
-from config import config
+from patientjournals.batch.client import get_batch_client
+from patientjournals.config import config
 
 
 @dataclass

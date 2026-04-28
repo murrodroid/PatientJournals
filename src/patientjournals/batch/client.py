@@ -7,7 +7,7 @@ from google import genai
 from google.genai import types
 from google.oauth2 import service_account
 
-from config import config
+from patientjournals.config import config
 
 _CLOUD_PLATFORM_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
 

@@ -1,7 +1,9 @@
 from dataclasses import dataclass, field
 from typing import Any, Literal, Optional
+
 from pydantic import BaseModel
-from schemas import *
+
+from patientjournals.config.schemas import FrontPage
 
 
 _PROVIDER_NAMES: tuple[str, ...] = ("gemini", "openai", "anthropic")

@@ -4,10 +4,10 @@ import random
 from typing import Any
 from pydantic import BaseModel
 
-from preprocess import preprocess_image
-from config import config
-from local_model_client import LocalModelClient
-from tools import data_to_rows
+from patientjournals.shared.preprocess import preprocess_image
+from patientjournals.config import config
+from patientjournals.local.model_client import LocalModelClient
+from patientjournals.shared.tools import data_to_rows
 
 
 async def generate_data(

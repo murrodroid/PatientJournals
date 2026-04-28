@@ -5,10 +5,10 @@ import inspect
 from dataclasses import dataclass
 from typing import Any
 
-from config import config
-from generation_spec import build_live_generation_config, build_live_request_contents
-from models import ModelSpec, ProviderName, resolve_model_spec
-from response_parsing import extract_response_metadata
+from patientjournals.config import config
+from patientjournals.shared.generation_spec import build_live_generation_config, build_live_request_contents
+from patientjournals.config.models import ModelSpec, ProviderName, resolve_model_spec
+from patientjournals.shared.response_parsing import extract_response_metadata
 
 
 def _pick_value(obj: object, *names: str) -> object | None:

@@ -10,15 +10,15 @@ from PIL import Image, UnidentifiedImageError
 import pypdfium2 as pdfium
 from tqdm import tqdm
 
-from config import config
-from preprocess import (
+from patientjournals.config import config
+from patientjournals.shared.preprocess import (
     resize_image,
     crop_margins,
     enhance_contrast,
     image_to_bytes,
 )
-from tools import list_input_files
-from upload_tuning import UploadAutoTuner, build_upload_tuner
+from patientjournals.shared.tools import list_input_files
+from patientjournals.batch.upload_tuning import UploadAutoTuner, build_upload_tuner
 
 
 _PAGE_NAME_PATTERN = re.compile(r"^page_(\d+)\.([A-Za-z0-9]+)$")

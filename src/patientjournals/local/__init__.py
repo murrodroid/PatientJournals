@@ -1,0 +1,2 @@
+"""Local transcription generation commands."""
+

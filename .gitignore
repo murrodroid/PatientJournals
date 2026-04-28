@@ -202,7 +202,7 @@ cython_debug/
 # Data
 /data/*
 !/data/.gitkeep
-.cursorindexingignore
+!/data/README.md
 
 # Marimo
 marimo/_static/
@@ -210,11 +210,13 @@ marimo/_lsp/
 __marimo__/
 
 api_keys.py
-data
 .DS_Store
 
 # local runs and dataset stuff
 runs/
+summaries/
+validations/
+validation_reports/
 *.jsonl
 service-account.json
 check_data.ipynb
