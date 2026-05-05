@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 from collections import Counter, defaultdict
+from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from statistics import mean, median
 from typing import Any
 
 from PIL import Image
+from tqdm import tqdm
 
 from patientjournals.config import config
 
@@ -178,6 +181,7 @@ def summarize_batch_data(
         "child_folder_count": child_folder_count,
         "empty_folder_count": empty_folder_count,
         "folders_with_images": len(folder_file_counts),
+        "folders_without_images": all_folder_count - len(folder_file_counts),
         "total_files": len(all_files),
         "image_files": len(image_files),
         "non_image_files": len(non_image_files),
@@ -259,12 +263,60 @@ def validate_image(path: Path, root: Path, duplicate_basenames: set[str]) -> dic
     }
 
 
+def _resolve_validation_cores(cores: int | None) -> int:
+    requested = 1 if cores is None else int(cores)
+    if requested < 0:
+        raise ValueError("--cores must be 0 or greater.")
+    if requested == 0:
+        requested = os.process_cpu_count() or os.cpu_count() or 1
+    return max(1, requested)
+
+
+def _validate_image_worker(args: tuple[Path, Path, set[str]]) -> dict[str, Any]:
+    path, root, duplicate_basenames = args
+    return validate_image(path, root, duplicate_basenames)
+
+
+def _validate_images(
+    image_files: list[Path],
+    root_path: Path,
+    duplicate_basenames: set[str],
+    *,
+    cores: int | None = None,
+) -> tuple[list[dict[str, Any]], int]:
+    worker_count = min(_resolve_validation_cores(cores), max(1, len(image_files)))
+    desc = (
+        "Validating local images"
+        if worker_count == 1
+        else f"Validating local images ({worker_count} cores)"
+    )
+    if worker_count == 1:
+        records = [
+            validate_image(path, root_path, duplicate_basenames)
+            for path in tqdm(image_files, desc=desc, unit="img")
+        ]
+        return records, worker_count
+
+    worker_args = ((path, root_path, duplicate_basenames) for path in image_files)
+    with ProcessPoolExecutor(max_workers=worker_count) as executor:
+        records = list(
+            tqdm(
+                executor.map(_validate_image_worker, worker_args, chunksize=32),
+                total=len(image_files),
+                desc=desc,
+                unit="img",
+            )
+        )
+    return records, worker_count
+
+
 def validate_batch_data(
     root: str | Path | None = None,
     *,
     glob_pattern: str | None = None,
     recursive: bool | None = None,
     allowed_extensions: set[str] | None = None,
+    cores: int | None = None,
 ) -> dict[str, Any]:
     root_path, _all_files, image_files = collect_files(
         root,
@@ -274,10 +326,12 @@ def validate_batch_data(
     )
     basename_counts = Counter(path.name for path in image_files)
     duplicate_basenames = {name for name, count in basename_counts.items() if count > 1}
-    records = [
-        validate_image(path, root_path, duplicate_basenames)
-        for path in image_files
-    ]
+    records, worker_count = _validate_images(
+        image_files,
+        root_path,
+        duplicate_basenames,
+        cores=cores,
+    )
     status_counts = Counter(record["status"] for record in records)
     report_status = "ok"
     if status_counts.get("error", 0) > 0 or not image_files:
@@ -290,6 +344,7 @@ def validate_batch_data(
         "root": str(root_path),
         "glob": glob_pattern or default_glob_pattern(),
         "recursive": default_recursive() if recursive is None else bool(recursive),
+        "validation_cores": worker_count,
         "status": report_status,
         "total_images": len(image_files),
         "ok_count": status_counts.get("ok", 0),

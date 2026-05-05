@@ -3,6 +3,7 @@ from io import BytesIO
 
 from PIL import Image
 
+from patientjournals.data import inspection as inspection_module
 from patientjournals.data import batch as batch_cli
 from patientjournals.data.bucket import summarize_bucket_data, validate_bucket_data
 from patientjournals.data.inspection import (
@@ -69,6 +70,8 @@ def test_summarize_batch_data_counts_files_and_folders(tmp_path) -> None:
     assert report["image_files"] == 2
     assert report["non_image_files"] == 1
     assert report["folder_count"] == 2
+    assert report["folders_with_images"] == 2
+    assert report["folders_without_images"] == 0
     assert report["files_by_extension"] == {"jpg": 1, "png": 1}
     assert report["image_size_bytes"]["total"] == 7
 
@@ -97,6 +100,7 @@ def test_summarize_bucket_data_counts_prefix_blobs() -> None:
     assert report["non_image_files"] == 1
     assert report["files_by_extension"] == {"jpg": 1, "png": 1}
     assert report["folders_with_images"] == 2
+    assert report["folders_without_images"] == 1
 
 
 def test_summarize_batch_data_can_skip_nested_files(tmp_path) -> None:
@@ -140,6 +144,31 @@ def test_validate_batch_data_detects_corrupt_images(tmp_path) -> None:
     assert records["valid.png"]["height"] == 12
     assert records["corrupt.png"]["status"] == "error"
     assert "image_open_failed" in records["corrupt.png"]["issues"]
+
+
+def test_validate_batch_data_can_use_multiple_cores(tmp_path) -> None:
+    root = tmp_path / "images"
+    root.mkdir()
+    Image.new("RGB", (10, 12), "white").save(root / "valid_1.png")
+    Image.new("RGB", (8, 9), "white").save(root / "valid_2.png")
+
+    report = validate_batch_data(
+        root,
+        glob_pattern="*.png",
+        recursive=True,
+        allowed_extensions={"png"},
+        cores=2,
+    )
+
+    assert report["status"] == "ok"
+    assert report["total_images"] == 2
+    assert report["validation_cores"] == 2
+
+
+def test_validate_batch_data_auto_cores_uses_detected_cpu_count(monkeypatch) -> None:
+    monkeypatch.setattr(inspection_module.os, "process_cpu_count", lambda: 4)
+
+    assert inspection_module._resolve_validation_cores(0) == 4
 
 
 def test_validate_bucket_data_detects_corrupt_blob() -> None:
@@ -223,3 +252,30 @@ def test_data_batch_validate_writes_run_subfolder(tmp_path, monkeypatch) -> None
     assert run_dirs[0].name.startswith("data_batch_validation_")
     assert list(run_dirs[0].glob("*.json"))
     assert list(run_dirs[0].glob("*.csv"))
+
+
+def test_data_batch_summary_writes_run_subfolder(tmp_path, monkeypatch) -> None:
+    root = tmp_path / "images"
+    summaries_dir = tmp_path / "summaries"
+    root.mkdir()
+    Image.new("RGB", (10, 12), "white").save(root / "valid.png")
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "patientjournals.data.batch",
+            "--summary",
+            "--root",
+            str(root),
+            "--glob",
+            "*.png",
+            "--summaries-dir",
+            str(summaries_dir),
+        ],
+    )
+
+    batch_cli.main()
+
+    run_dirs = [path for path in summaries_dir.iterdir() if path.is_dir()]
+    assert len(run_dirs) == 1
+    assert run_dirs[0].name.startswith("data_batch_summary_")
+    assert list(run_dirs[0].glob("*.json"))

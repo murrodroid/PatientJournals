@@ -54,6 +54,7 @@ def data_batch(
     summaries_dir: str | None = None,
     validations_dir: str | None = None,
     allow_failures: bool = False,
+    cores: int | None = None,
     extra: str = "",
 ) -> None:
     args: list[str] = []
@@ -68,6 +69,7 @@ def data_batch(
     _add_option(args, "--summaries-dir", summaries_dir)
     _add_option(args, "--validations-dir", validations_dir)
     _add_flag(args, "--allow-failures", allow_failures)
+    _add_option(args, "--cores", cores)
     args.extend(_split_extra(extra))
     _run_module(context, "patientjournals.data.batch", args)
 

@@ -84,6 +84,13 @@ By default, this reads the configured batch image folder and glob. Override the 
 uv run invoke data.batch --summary --validate --root data --glob '*.png'
 ```
 
+Local validation runs single-core by default. Use more CPU cores for large folders:
+
+```bash
+uv run invoke data.batch --validate --root data --cores 8
+uv run invoke data.batch --validate --root data --cores 0  # auto-detect cores
+```
+
 To inspect the online GCS bucket instead of local files:
 
 ```bash

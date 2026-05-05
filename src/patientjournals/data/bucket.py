@@ -199,6 +199,7 @@ def summarize_bucket_data(
         folders.update(_folder_names_from_blob(str(getattr(blob, "name", "") or ""), normalized_prefix))
 
     root_uri = f"gs://{resolved_bucket_name}/{normalized_prefix}".rstrip("/")
+    folder_count = len(folders) + 1
     return {
         "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "source": "gcs",
@@ -206,11 +207,12 @@ def summarize_bucket_data(
         "bucket": resolved_bucket_name,
         "prefix": normalized_prefix,
         "glob": glob_pattern or "*",
-        "folder_count": len(folders) + 1,
+        "folder_count": folder_count,
         "child_folder_count": len(folders),
         "empty_folder_count": 0,
         "folder_placeholder_blobs": len(folder_placeholders),
         "folders_with_images": len(folder_file_counts),
+        "folders_without_images": folder_count - len(folder_file_counts),
         "total_files": len(non_placeholder_blobs),
         "total_blobs": len(blobs),
         "image_files": len(image_blobs),
@@ -346,4 +348,3 @@ def validate_bucket_data(
         "duplicate_basenames": sorted(duplicate_basenames),
         "records": records,
     }
-

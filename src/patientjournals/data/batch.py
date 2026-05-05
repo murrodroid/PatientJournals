@@ -16,6 +16,16 @@ from patientjournals.data.inspection import (
 )
 
 
+def _nonnegative_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be an integer") from exc
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("must be 0 or greater")
+    return parsed
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Summarize and validate local or GCS batch image data."
@@ -70,6 +80,12 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Exit successfully even if validation finds corrupt or invalid images.",
     )
+    parser.add_argument(
+        "--cores",
+        type=_nonnegative_int,
+        default=1,
+        help="CPU cores for local image validation. Use 0 to auto-detect.",
+    )
     return parser.parse_args()
 
 
@@ -80,7 +96,9 @@ def _print_summary(report: dict) -> None:
     print(
         "Folders: "
         f"{report['folder_count']} "
-        f"(with images={report['folders_with_images']}, empty={report['empty_folder_count']})"
+        f"(with image files={report['folders_with_images']}, "
+        f"without image files={report.get('folders_without_images', 0)}, "
+        f"empty={report['empty_folder_count']})"
     )
     print(f"Extensions: {report['files_by_extension']}")
     print(
@@ -91,11 +109,15 @@ def _print_summary(report: dict) -> None:
 
 def _print_validation(report: dict) -> None:
     print(f"Root: {report['root']}")
-    print(
+    line = (
         "Validation: "
         f"status={report['status']} total={report['total_images']} "
-        f"ok={report['ok_count']} warnings={report['warning_count']} errors={report['error_count']}"
+        f"ok={report['ok_count']} warnings={report['warning_count']} "
+        f"errors={report['error_count']}"
     )
+    if "validation_cores" in report:
+        line = f"{line} cores={report['validation_cores']}"
+    print(line)
     if report["duplicate_basename_count"]:
         print(f"Duplicate basenames: {report['duplicate_basename_count']}")
 
@@ -126,7 +148,8 @@ def main() -> None:
                 recursive=recursive,
             )
             stem = f"data_batch_summary_{timestamp}"
-        path = write_json_report(report, args.summaries_dir, stem)
+        run_dir = Path(args.summaries_dir) / stem
+        path = write_json_report(report, run_dir, stem)
         _print_summary(report)
         print(f"Summary report: {path}")
 
@@ -143,6 +166,7 @@ def main() -> None:
                 args.root,
                 glob_pattern=args.glob_pattern,
                 recursive=recursive,
+                cores=args.cores,
             )
             stem = f"data_batch_validation_{timestamp}"
         run_dir = Path(args.validations_dir) / stem
