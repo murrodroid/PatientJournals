@@ -122,6 +122,32 @@ def test_summarize_batch_data_can_skip_nested_files(tmp_path) -> None:
     assert report["files_by_folder"] == {".": 1}
 
 
+def test_local_data_ignores_appledouble_artifacts(tmp_path) -> None:
+    root = tmp_path / "images"
+    root.mkdir()
+    Image.new("RGB", (10, 12), "white").save(root / "page_0001.jpg")
+    (root / "._page_0001.jpg").write_bytes(b"appledouble sidecar")
+
+    summary = summarize_batch_data(
+        root,
+        glob_pattern="*.jpg",
+        recursive=True,
+        allowed_extensions={"jpg"},
+    )
+    validation = validate_batch_data(
+        root,
+        glob_pattern="*.jpg",
+        recursive=True,
+        allowed_extensions={"jpg"},
+    )
+
+    assert summary["total_files"] == 1
+    assert summary["image_files"] == 1
+    assert validation["total_images"] == 1
+    assert validation["error_count"] == 0
+    assert validation["records"][0]["file_name"] == "page_0001.jpg"
+
+
 def test_validate_batch_data_detects_corrupt_images(tmp_path) -> None:
     root = tmp_path / "images"
     root.mkdir()

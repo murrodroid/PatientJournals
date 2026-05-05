@@ -53,7 +53,7 @@ def _default_api_key() -> str:
 
 @dataclass
 class Config:
-    model: str = "claude-opus-4-7"  # gemini-3.1-pro-preview
+    model: str = "gemini-3.1-pro-preview"  # gemini-3.1-pro-preview
     input_prompt_name: str = "frontpage"  # change to correct prompt
     output_model: type[BaseModel] = FrontPage  # change to correct schema in schemas.py
     target_folder: str = "/Volumes/Expansion/patientjournaler_1889-1897_jpg"

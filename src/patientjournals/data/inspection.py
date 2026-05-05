@@ -67,6 +67,10 @@ def resolve_root(root: str | Path | None = None) -> Path:
     return path.resolve()
 
 
+def _is_appledouble_artifact(path: Path) -> bool:
+    return path.name.startswith("._")
+
+
 def collect_files(
     root: str | Path | None = None,
     *,
@@ -80,12 +84,18 @@ def collect_files(
     extensions = allowed_extensions or configured_image_extensions()
 
     all_candidates = root_path.rglob("*") if use_recursive else root_path.glob("*")
-    all_files = sorted(path for path in all_candidates if path.is_file())
+    all_files = sorted(
+        path
+        for path in all_candidates
+        if path.is_file() and not _is_appledouble_artifact(path)
+    )
     candidates = root_path.rglob(pattern) if use_recursive else root_path.glob(pattern)
     selected = sorted(
         path
         for path in candidates
-        if path.is_file() and path.suffix.lower().lstrip(".") in extensions
+        if path.is_file()
+        and not _is_appledouble_artifact(path)
+        and path.suffix.lower().lstrip(".") in extensions
     )
     return root_path, all_files, selected
 
