@@ -3,10 +3,11 @@ from __future__ import annotations
 import argparse
 import json
 import time
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from patientjournals.batch.client import get_batch_client
+from patientjournals.batch.client import get_batch_client, resolve_service_account_path
 from patientjournals.config import config
 from patientjournals.config.models import resolve_model_spec
 
@@ -17,6 +18,13 @@ _GEMINI_TERMINAL_STATES = {
     "JOB_STATE_CANCELLED",
 }
 _ANTHROPIC_TERMINAL_STATES = {"ended"}
+
+
+@dataclass(frozen=True)
+class ModelProgress:
+    processed: int | None
+    total: int | None
+    detail: str = ""
 
 
 def _parse_args() -> argparse.Namespace:
@@ -104,6 +112,27 @@ def _read_batch_names_from_job_file(path: Path) -> list[str]:
     if not payload:
         return []
     return _extract_batch_names_from_payload(payload)
+
+
+def _request_count_from_payload(payload: dict | None) -> int | None:
+    if not payload:
+        return None
+    value = payload.get("request_count")
+    if isinstance(value, int):
+        return value
+    jobs = payload.get("batch_jobs")
+    if not isinstance(jobs, list):
+        return None
+    total = 0
+    found = False
+    for item in jobs:
+        if not isinstance(item, dict):
+            continue
+        count = item.get("request_count")
+        if isinstance(count, int):
+            total += count
+            found = True
+    return total if found else None
 
 
 def _latest_batch_job_file(output_root: str) -> Path | None:
@@ -210,6 +239,156 @@ def _aggregate_state_lines(states: list[str], provider: str) -> tuple[list[str],
         tuple(ordered_state_pairs),
     )
     return lines, digest
+
+
+def _parse_gcs_uri(gcs_uri: str) -> tuple[str, str]:
+    cleaned = gcs_uri.strip()
+    if not cleaned.startswith("gs://"):
+        raise ValueError(f"Invalid GCS URI: {gcs_uri}")
+    remainder = cleaned[5:]
+    if "/" not in remainder:
+        return remainder, ""
+    bucket_name, object_path = remainder.split("/", 1)
+    return bucket_name, object_path
+
+
+def _normalize_gcs_prefix(prefix: str) -> str:
+    value = prefix.strip()
+    if not value:
+        return ""
+    return f"{value.strip('/')}/"
+
+
+def _output_destinations_from_submit_run(run_dir: Path | None) -> dict[str, str]:
+    if run_dir is None:
+        return {}
+    payload = _read_batch_job_payload(run_dir / "batch_job.json")
+    if not payload:
+        return {}
+    jobs = payload.get("batch_jobs")
+    if not isinstance(jobs, list):
+        return {}
+
+    destinations: dict[str, str] = {}
+    for item in jobs:
+        if not isinstance(item, dict):
+            continue
+        batch_name = item.get("batch_job_name")
+        destination = item.get("output_destination")
+        if isinstance(batch_name, str) and isinstance(destination, str):
+            if batch_name.strip() and destination.strip():
+                destinations[batch_name.strip()] = destination.strip()
+    return destinations
+
+
+def _gemini_output_gcs_uri(
+    batch_job: object,
+    *,
+    metadata_destination: str | None = None,
+) -> str | None:
+    dest = getattr(batch_job, "dest", None)
+    dest_gcs_uri = getattr(dest, "gcs_uri", None) if dest else None
+    if isinstance(dest_gcs_uri, str) and dest_gcs_uri.strip():
+        return dest_gcs_uri.strip()
+    if isinstance(metadata_destination, str) and metadata_destination.strip():
+        return metadata_destination.strip()
+    return None
+
+
+def _count_jsonl_blob_lines(blob: object) -> int:
+    count = 0
+    with blob.open("rt", encoding="utf-8") as handle:
+        for line in handle:
+            if line.strip():
+                count += 1
+    return count
+
+
+def _count_gemini_prediction_rows(gcs_uris: list[str]) -> tuple[int, int]:
+    if not gcs_uris:
+        return 0, 0
+
+    from google.cloud import storage
+
+    service_account_path = resolve_service_account_path(config.service_account_file)
+    storage_client = storage.Client.from_service_account_json(str(service_account_path))
+    processed = 0
+    file_count = 0
+    seen: set[tuple[str, str]] = set()
+    for gcs_uri in gcs_uris:
+        bucket_name, object_prefix = _parse_gcs_uri(gcs_uri)
+        prefix = _normalize_gcs_prefix(object_prefix)
+        bucket = storage_client.bucket(bucket_name)
+        blobs = sorted(bucket.list_blobs(prefix=prefix), key=lambda item: item.name)
+        for blob in blobs:
+            if blob.name.endswith("/") or not blob.name.endswith(".jsonl"):
+                continue
+            key = (bucket_name, blob.name)
+            if key in seen:
+                continue
+            seen.add(key)
+            processed += _count_jsonl_blob_lines(blob)
+            file_count += 1
+    return processed, file_count
+
+
+def _anthropic_model_progress(batch_jobs: list[object], total: int | None) -> ModelProgress:
+    processed = 0
+    found_counts = False
+    for batch_job in batch_jobs:
+        counts = getattr(batch_job, "request_counts", None)
+        if counts is None:
+            continue
+        found_counts = True
+        succeeded = int(getattr(counts, "succeeded", 0) or 0)
+        errored = int(getattr(counts, "errored", 0) or 0)
+        canceled = int(getattr(counts, "canceled", 0) or 0)
+        expired = int(getattr(counts, "expired", 0) or 0)
+        processed += succeeded + errored + canceled + expired
+    if not found_counts:
+        return ModelProgress(None, total, "request counts unavailable")
+    return ModelProgress(processed, total, "Anthropic request counts")
+
+
+def _gemini_model_progress(
+    batch_jobs_by_name: dict[str, object],
+    *,
+    run_dir: Path | None,
+    total: int | None,
+) -> ModelProgress:
+    metadata_destinations = _output_destinations_from_submit_run(run_dir)
+    gcs_uris = [
+        uri
+        for batch_name, batch_job in batch_jobs_by_name.items()
+        if (
+            uri := _gemini_output_gcs_uri(
+                batch_job,
+                metadata_destination=metadata_destinations.get(batch_name),
+            )
+        )
+    ]
+    if not gcs_uris:
+        return ModelProgress(None, total, "prediction output destination unavailable")
+    try:
+        processed, file_count = _count_gemini_prediction_rows(gcs_uris)
+    except Exception as exc:
+        return ModelProgress(None, total, f"prediction count unavailable: {type(exc).__name__}")
+    return ModelProgress(processed, total, f"{file_count} prediction file(s)")
+
+
+def _model_progress_line(progress: ModelProgress) -> str:
+    if progress.processed is None:
+        suffix = f" ({progress.detail})" if progress.detail else ""
+        return f"Model outputs: unavailable{suffix}"
+    if progress.total and progress.total > 0:
+        ratio = (progress.processed / progress.total) * 100.0
+        suffix = f" ({progress.detail})" if progress.detail else ""
+        return (
+            f"Model outputs: {progress.processed}/{progress.total} "
+            f"({ratio:.2f}%){suffix}"
+        )
+    suffix = f" ({progress.detail})" if progress.detail else ""
+    return f"Model outputs: {progress.processed}{suffix}"
 
 
 def _fmt_time(value: object) -> str:
@@ -359,6 +538,8 @@ def main() -> None:
     provider = _provider_from_batch_names(batch_names, run_dir=run_dir)
     client = _get_client(provider, batch_names)
     terminal_states = _terminal_states(provider)
+    submit_payload = _read_batch_job_payload(run_dir / "batch_job.json") if run_dir else None
+    request_count = _request_count_from_payload(submit_payload)
 
     if args.cancel:
         cancelled = 0
@@ -381,15 +562,35 @@ def main() -> None:
         last_digest: tuple | None = None
         while True:
             states: list[str] = []
+            batch_jobs_by_name: dict[str, object] = {}
             all_terminal = True
             for batch_name in batch_names:
                 batch_job = _get_batch_job(client, batch_name, provider)
+                batch_jobs_by_name[batch_name] = batch_job
                 state = _batch_state(batch_job, provider)
                 states.append(state)
                 if state not in terminal_states:
                     all_terminal = False
 
             lines, digest = _aggregate_state_lines(states, provider)
+            if provider == "anthropic":
+                progress = _anthropic_model_progress(
+                    list(batch_jobs_by_name.values()),
+                    request_count,
+                )
+            else:
+                progress = _gemini_model_progress(
+                    batch_jobs_by_name,
+                    run_dir=run_dir,
+                    total=request_count,
+                )
+            lines.append(_model_progress_line(progress))
+            digest = (
+                *digest,
+                progress.processed,
+                progress.total,
+                progress.detail,
+            )
             if digest != last_digest:
                 print("\n".join(lines))
                 print("")
