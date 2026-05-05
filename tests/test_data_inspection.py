@@ -3,6 +3,7 @@ from io import BytesIO
 
 from PIL import Image
 
+from patientjournals.data import batch as batch_cli
 from patientjournals.data.bucket import summarize_bucket_data, validate_bucket_data
 from patientjournals.data.inspection import (
     summarize_batch_data,
@@ -194,3 +195,31 @@ def test_validation_reports_are_written(tmp_path) -> None:
 
     assert json.loads(json_path.read_text(encoding="utf-8"))["status"] == "ok"
     assert "page.png" in csv_path.read_text(encoding="utf-8")
+
+
+def test_data_batch_validate_writes_run_subfolder(tmp_path, monkeypatch) -> None:
+    root = tmp_path / "images"
+    validations_dir = tmp_path / "validations"
+    root.mkdir()
+    Image.new("RGB", (10, 12), "white").save(root / "valid.png")
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "patientjournals.data.batch",
+            "--validate",
+            "--root",
+            str(root),
+            "--glob",
+            "*.png",
+            "--validations-dir",
+            str(validations_dir),
+        ],
+    )
+
+    batch_cli.main()
+
+    run_dirs = [path for path in validations_dir.iterdir() if path.is_dir()]
+    assert len(run_dirs) == 1
+    assert run_dirs[0].name.startswith("data_batch_validation_")
+    assert list(run_dirs[0].glob("*.json"))
+    assert list(run_dirs[0].glob("*.csv"))

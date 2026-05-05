@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime
+from pathlib import Path
 
 from patientjournals.config import config
 from patientjournals.data.bucket import summarize_bucket_data, validate_bucket_data
@@ -144,8 +145,9 @@ def main() -> None:
                 recursive=recursive,
             )
             stem = f"data_batch_validation_{timestamp}"
-        json_path = write_json_report(report, args.validations_dir, stem)
-        csv_path = write_validation_csv(report, args.validations_dir, stem)
+        run_dir = Path(args.validations_dir) / stem
+        json_path = write_json_report(report, run_dir, stem)
+        csv_path = write_validation_csv(report, run_dir, stem)
         _print_validation(report)
         print(f"Validation report: {json_path}")
         print(f"Validation records: {csv_path}")
