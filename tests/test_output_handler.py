@@ -17,12 +17,14 @@ def test_text_page_expands_to_one_row_per_line() -> None:
             "text": "first",
             "metadata": "1/1",
             "page_line_number": 1,
+            "image_name": "page_0001.png",
             "file_name": "page_0001.png",
         },
         {
             "text": "second",
             "metadata": None,
             "page_line_number": 2,
+            "image_name": "page_0001.png",
             "file_name": "page_0001.png",
         },
     ]
@@ -46,4 +48,3 @@ def test_text_page_preserves_field_confidence_by_line() -> None:
         "field_confidence_logprobs": -0.1,
         "field_confidence_ratio": 0.9,
     }
-

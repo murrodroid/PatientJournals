@@ -101,6 +101,7 @@ def test_write_collected_dataset_sorts_by_key(monkeypatch, tmp_path) -> None:
         json.loads(line)
         for line in out_path.read_text(encoding="utf-8").splitlines()
     ]
+    assert [line["image_name"] for line in lines] == ["a.png", "b.png"]
     assert [line["file_name"] for line in lines] == ["pages/a.png", "pages/b.png"]
     assert lines[0]["avg_logprobs"] == -0.25
 
@@ -128,7 +129,7 @@ def test_write_collected_dataset_can_append_only_new_keys(monkeypatch, tmp_path)
         collected,
         out_path=out_path,
         output_format="jsonl",
-        keys={"pages/b.png"},
+        keys={"b.png"},
         header_written=True,
     )
 
@@ -137,4 +138,5 @@ def test_write_collected_dataset_can_append_only_new_keys(monkeypatch, tmp_path)
         json.loads(line)
         for line in out_path.read_text(encoding="utf-8").splitlines()
     ]
+    assert [line.get("image_name") for line in lines] == [None, "b.png"]
     assert [line["file_name"] for line in lines] == ["pages/a.png", "pages/b.png"]

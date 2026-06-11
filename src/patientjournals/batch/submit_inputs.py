@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import json
 import re
 from pathlib import Path
 
@@ -8,11 +9,19 @@ from google.cloud import storage
 
 from patientjournals.batch.upload import upload_missing_images, upload_missing_pdfs
 from patientjournals.config import config
+from patientjournals.shared.identity import image_name_from_gcs_object
+from patientjournals.shared.processing_metrics import (
+    MANIFEST_FILE_NAME,
+    append_processing_record,
+    base_image_record,
+)
 
 
 _ALLOWED_FP_MODES = {"all", "only_fp", "exclude_fp"}
 _ALLOWED_UPLOAD_SOURCES = {"pdf", "images", "auto"}
 _SBID_TOKEN_PATTERN = re.compile(r"(\d{5,})")
+INPUT_DUPLICATES_JSONL_NAME = "input_duplicate_blobs.jsonl"
+INPUT_DUPLICATES_CSV_NAME = "input_duplicate_blobs.csv"
 
 
 def _pages_prefix() -> str:
@@ -245,16 +254,198 @@ def _apply_year_filter_to_blobs(
     return sorted(filtered, key=lambda item: item.name)
 
 
-def _list_input_blobs(bucket: storage.Bucket, *, log) -> list[storage.Blob]:
+def _write_input_duplicate_report(
+    audit_dir: str | Path,
+    records: list[dict[str, object]],
+) -> tuple[Path, Path]:
+    root = Path(audit_dir)
+    root.mkdir(parents=True, exist_ok=True)
+
+    jsonl_path = root / INPUT_DUPLICATES_JSONL_NAME
+    with open(jsonl_path, "w", encoding="utf-8") as handle:
+        for record in records:
+            handle.write(json.dumps(record, ensure_ascii=False, default=str))
+            handle.write("\n")
+
+    csv_path = root / INPUT_DUPLICATES_CSV_NAME
+    fieldnames = [
+        "image_name",
+        "duplicate_action",
+        "kept_object",
+        "skipped_object",
+        "kept_index",
+        "skipped_index",
+    ]
+    with open(csv_path, "w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for record in records:
+            writer.writerow({field: record.get(field, "") for field in fieldnames})
+
+    manifest_path = root / MANIFEST_FILE_NAME
+    for record in records:
+        append_processing_record(
+            manifest_path,
+            base_image_record(
+                image_reference=str(record.get("skipped_object") or ""),
+                source="batch_input_selection",
+                status="duplicate_skipped",
+                extra={
+                    "duplicate_action": "skipped_input_duplicate",
+                    "duplicate_reason": "duplicate_image_name",
+                    "kept_image_reference": str(record.get("kept_object") or ""),
+                    "skipped_image_reference": str(record.get("skipped_object") or ""),
+                    "kept_input_index": record.get("kept_index"),
+                    "skipped_input_index": record.get("skipped_index"),
+                },
+            ),
+        )
+
+    return jsonl_path, csv_path
+
+
+def _dedupe_blob_image_names(
+    blobs: list[storage.Blob],
+    *,
+    log,
+    audit_dir: str | Path | None = None,
+) -> list[storage.Blob]:
+    kept_by_image_name: dict[str, tuple[int, storage.Blob]] = {}
+    selected: list[storage.Blob] = []
+    duplicate_records: list[dict[str, object]] = []
+
+    for index, blob in enumerate(blobs, start=1):
+        image_name = image_name_from_gcs_object(blob.name)
+        kept = kept_by_image_name.get(image_name)
+        if kept is None:
+            kept_by_image_name[image_name] = (index, blob)
+            selected.append(blob)
+            continue
+
+        kept_index, kept_blob = kept
+        duplicate_records.append(
+            {
+                "image_name": image_name,
+                "duplicate_action": "skipped_input_duplicate",
+                "kept_object": kept_blob.name,
+                "skipped_object": blob.name,
+                "kept_index": kept_index,
+                "skipped_index": index,
+            }
+        )
+
+    if not duplicate_records:
+        return selected
+
+    duplicate_names = sorted({str(record["image_name"]) for record in duplicate_records})
+    examples = ", ".join(duplicate_names[:10])
+    suffix = "..." if len(duplicate_names) > 10 else ""
+    log(
+        "Skipped duplicate GCS input image_name values: "
+        f"{len(duplicate_records)} object(s) across {len(duplicate_names)} name(s). "
+        f"Examples: {examples}{suffix}"
+    )
+    if audit_dir is not None:
+        jsonl_path, csv_path = _write_input_duplicate_report(audit_dir, duplicate_records)
+        log(
+            "Wrote duplicate input audit files: "
+            f"{jsonl_path.name}, {csv_path.name}"
+        )
+    return selected
+
+
+def _apply_image_name_restriction(
+    blobs: list[storage.Blob],
+    *,
+    log,
+) -> list[storage.Blob]:
+    """Restrict the resolved blobs to a fixed set of image names, if configured.
+
+    This is the safety scope that keeps a submission tied to exactly the images
+    the caller intended (e.g. a selected local folder) instead of every object
+    under the bucket prefix.
+    """
+    restrict = {
+        str(name).strip()
+        for name in (getattr(config, "batch_restrict_image_names", ()) or ())
+        if str(name).strip()
+    }
+    if not restrict:
+        return blobs
+
+    selected = [
+        blob for blob in blobs if image_name_from_gcs_object(blob.name) in restrict
+    ]
+    matched_names = {image_name_from_gcs_object(blob.name) for blob in selected}
+    missing = sorted(restrict - matched_names)
+    log(
+        "Applied image-name restriction: "
+        f"selected {len(selected)}/{len(blobs)} object(s) "
+        f"matching {len(restrict)} requested image name(s)."
+    )
+    if missing:
+        examples = ", ".join(missing[:10])
+        suffix = "..." if len(missing) > 10 else ""
+        log(
+            f"Image-name restriction: {len(missing)} requested name(s) "
+            f"were not found in the bucket. Examples: {examples}{suffix}"
+        )
+    if not selected:
+        raise FileNotFoundError(
+            "Image-name restriction removed all input blobs. None of the "
+            f"{len(restrict)} requested image name(s) were found under the "
+            "configured prefix. Check that the images were uploaded."
+        )
+    return selected
+
+
+def _list_input_blobs(
+    bucket: storage.Bucket,
+    *,
+    log,
+    audit_dir: str | Path | None = None,
+) -> list[storage.Blob]:
+    return _apply_image_name_restriction(
+        _resolve_input_blobs(bucket, log=log, audit_dir=audit_dir),
+        log=log,
+    )
+
+
+def _resolve_input_blobs(
+    bucket: storage.Bucket,
+    *,
+    log,
+    audit_dir: str | Path | None = None,
+) -> list[storage.Blob]:
     _assert_gcs_input_source(config.batch_input_source)
     upload_source = _resolved_upload_source()
-    override_prefix = _normalize_prefix(config.batch_input_prefix or "")
+    override_prefixes = [
+        _normalize_prefix(prefix)
+        for prefix in (getattr(config, "batch_input_prefixes", ()) or ())
+        if str(prefix).strip()
+    ]
+    if not override_prefixes:
+        override_prefix = _normalize_prefix(config.batch_input_prefix or "")
+        if override_prefix:
+            override_prefixes = [override_prefix]
     pages_prefix = _pages_prefix()
     allowed = _allowed_extensions()
 
-    if override_prefix:
-        blobs = _list_image_blobs_for_prefix(bucket, override_prefix, allowed)
-        return _apply_year_filter_to_blobs(blobs, pages_prefix=pages_prefix, log=log)
+    if override_prefixes:
+        blobs_by_name: dict[str, storage.Blob] = {}
+        for override_prefix in override_prefixes:
+            for blob in _list_image_blobs_for_prefix(bucket, override_prefix, allowed):
+                blobs_by_name.setdefault(blob.name, blob)
+        blobs = sorted(blobs_by_name.values(), key=lambda item: item.name)
+        log(
+            "Selected GCS input prefixes: "
+            f"{', '.join(override_prefixes)} ({len(blobs)} image object(s))."
+        )
+        return _dedupe_blob_image_names(
+            _apply_year_filter_to_blobs(blobs, pages_prefix=pages_prefix, log=log),
+            log=log,
+            audit_dir=audit_dir,
+        )
 
     prefer_pdf_folders = bool(config.batch_use_local_pdf_folders) and upload_source in {
         "pdf",
@@ -268,10 +459,14 @@ def _list_input_blobs(bucket: storage.Bucket, *, log) -> list[storage.Blob]:
             fp_mode=str(config.fp_mode or "all"),
             fp_suffix=str(config.fp_suffix or "_fp"),
         )
-        return _apply_year_filter_to_blobs(
-            selected,
-            pages_prefix=pages_prefix,
+        return _dedupe_blob_image_names(
+            _apply_year_filter_to_blobs(
+                selected,
+                pages_prefix=pages_prefix,
+                log=log,
+            ),
             log=log,
+            audit_dir=audit_dir,
         )
 
     local_pdf_paths = _list_local_pdf_paths(config.target_folder)
@@ -283,10 +478,14 @@ def _list_input_blobs(bucket: storage.Bucket, *, log) -> list[storage.Blob]:
             fp_mode=str(config.fp_mode or "all"),
             fp_suffix=str(config.fp_suffix or "_fp"),
         )
-        return _apply_year_filter_to_blobs(
-            selected,
-            pages_prefix=pages_prefix,
+        return _dedupe_blob_image_names(
+            _apply_year_filter_to_blobs(
+                selected,
+                pages_prefix=pages_prefix,
+                log=log,
+            ),
             log=log,
+            audit_dir=audit_dir,
         )
 
     collected: list[storage.Blob] = []
@@ -306,10 +505,14 @@ def _list_input_blobs(bucket: storage.Bucket, *, log) -> list[storage.Blob]:
             f"{config.gcs_bucket_name}. Missing prefixes: {missing_text}"
         )
 
-    return _apply_year_filter_to_blobs(
-        collected,
-        pages_prefix=pages_prefix,
+    return _dedupe_blob_image_names(
+        _apply_year_filter_to_blobs(
+            collected,
+            pages_prefix=pages_prefix,
+            log=log,
+        ),
         log=log,
+        audit_dir=audit_dir,
     )
 
 
@@ -513,4 +716,3 @@ def _list_image_blobs_for_prefix(
         if suffix in allowed_extensions:
             filtered.append(blob)
     return filtered
-

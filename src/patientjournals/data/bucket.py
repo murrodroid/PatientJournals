@@ -35,8 +35,9 @@ def build_storage_bucket(bucket_name: str | None = None):
     from google.cloud import storage
 
     resolved_name = resolve_bucket_name(bucket_name)
+    auth_mode = str(getattr(config, "gcp_auth_mode", "service_account") or "").strip().lower()
     service_account_file = str(config.service_account_file or "").strip()
-    if service_account_file:
+    if auth_mode == "service_account" and service_account_file:
         candidate = Path(service_account_file).expanduser()
         if not candidate.is_absolute():
             candidate = Path.cwd() / candidate
@@ -44,9 +45,9 @@ def build_storage_bucket(bucket_name: str | None = None):
             service_account_path = resolve_service_account_path(service_account_file)
             client = storage.Client.from_service_account_json(str(service_account_path))
         else:
-            client = storage.Client()
+            client = storage.Client(project=(config.gcp_project_id or None))
     else:
-        client = storage.Client()
+        client = storage.Client(project=(config.gcp_project_id or None))
     return client.bucket(resolved_name)
 
 
@@ -266,8 +267,9 @@ def validate_bucket_image(
     except Exception as exc:
         issues.append(f"image_open_failed:{type(exc).__name__}")
 
-    if Path(name).name in duplicate_basenames:
-        warnings.append("duplicate_basename")
+    image_name = Path(name).name
+    if image_name in duplicate_basenames:
+        issues.append("duplicate_image_name")
 
     status = "ok"
     if issues:
@@ -283,7 +285,8 @@ def validate_bucket_image(
         "source": "gcs",
         "bucket": bucket_name,
         "blob_name": name,
-        "file_name": Path(name).name,
+        "image_name": image_name,
+        "file_name": image_name,
         "relative_path": relative_name,
         "parent_folder": _bucket_parent(name, prefix),
         "extension": _blob_extension(blob),

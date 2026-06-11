@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import google.auth
 from google import genai
 from google.genai import types
 from google.oauth2 import service_account
@@ -44,24 +45,6 @@ def get_batch_client(*, location: str | None = None) -> genai.Client:
             )
         return genai.Client(api_key=api_key)
 
-    if not (config.service_account_file or "").strip():
-        raise ValueError(
-            "config.service_account_file is empty. "
-            "Set it to your GCP service account JSON path for Vertex batch jobs."
-        )
-
-    service_account_path = resolve_service_account_path(
-        config.service_account_file
-    )
-    project_id = config.gcp_project_id or infer_project_id_from_service_account(
-        service_account_path
-    )
-    if not project_id:
-        raise ValueError(
-            "Unable to resolve GCP project id. Set config.gcp_project_id "
-            "or ensure project_id exists in service_account_file."
-        )
-
     vertex_location = (
         (location or "").strip()
         or (config.vertex_model_location or "").strip()
@@ -73,10 +56,41 @@ def get_batch_client(*, location: str | None = None) -> genai.Client:
             "or config.gcp_location."
         )
 
-    credentials = service_account.Credentials.from_service_account_file(
-        str(service_account_path),
-        scopes=[_CLOUD_PLATFORM_SCOPE],
-    )
+    auth_mode = str(getattr(config, "gcp_auth_mode", "service_account") or "").strip().lower()
+    if auth_mode == "adc":
+        credentials, default_project_id = google.auth.default(
+            scopes=[_CLOUD_PLATFORM_SCOPE],
+        )
+        project_id = (config.gcp_project_id or "").strip() or default_project_id
+    elif auth_mode == "service_account":
+        if not (config.service_account_file or "").strip():
+            raise ValueError(
+                "config.service_account_file is empty. "
+                "Set it to your GCP service account JSON path for Vertex batch jobs "
+                "or set config.gcp_auth_mode='adc'."
+            )
+        service_account_path = resolve_service_account_path(
+            config.service_account_file
+        )
+        project_id = config.gcp_project_id or infer_project_id_from_service_account(
+            service_account_path
+        )
+        credentials = service_account.Credentials.from_service_account_file(
+            str(service_account_path),
+            scopes=[_CLOUD_PLATFORM_SCOPE],
+        )
+    else:
+        raise ValueError(
+            f"Unsupported gcp_auth_mode for Vertex batch jobs: {auth_mode!r}. "
+            "Use 'service_account' or 'adc'."
+        )
+
+    if not project_id:
+        raise ValueError(
+            "Unable to resolve GCP project id. Set config.gcp_project_id, "
+            "ensure project_id exists in service_account_file, or configure ADC "
+            "with a default project."
+        )
 
     return genai.Client(
         vertexai=True,

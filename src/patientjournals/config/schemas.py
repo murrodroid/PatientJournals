@@ -236,3 +236,44 @@ class TextPage(BaseModel):
         for index, line in enumerate(self.page_lines, start=1):
             line.page_line_number = index
         return self
+
+
+OUTPUT_SCHEMA_REGISTRY: dict[str, type[BaseModel]] = {
+    "FrontPage": FrontPage,
+    "TextPage": TextPage,
+}
+
+OUTPUT_SCHEMA_ALIASES: dict[str, str] = {
+    "frontpage": "FrontPage",
+    "front_page": "FrontPage",
+    "front-page": "FrontPage",
+    "textpage": "TextPage",
+    "text_page": "TextPage",
+    "text-page": "TextPage",
+}
+
+
+def list_output_schemas() -> dict[str, type[BaseModel]]:
+    return dict(OUTPUT_SCHEMA_REGISTRY)
+
+
+def resolve_output_schema(name: str) -> type[BaseModel]:
+    value = str(name or "").strip()
+    if not value:
+        raise ValueError("Output schema name is empty.")
+    canonical = OUTPUT_SCHEMA_ALIASES.get(value, value)
+    canonical = OUTPUT_SCHEMA_ALIASES.get(value.lower(), canonical)
+    try:
+        return OUTPUT_SCHEMA_REGISTRY[canonical]
+    except KeyError as exc:
+        available = ", ".join(sorted(OUTPUT_SCHEMA_REGISTRY))
+        raise ValueError(
+            f"Unknown output schema '{name}'. Available schemas: {available}"
+        ) from exc
+
+
+def output_schema_name(schema: type[BaseModel]) -> str:
+    for name, schema_type in OUTPUT_SCHEMA_REGISTRY.items():
+        if schema_type is schema:
+            return name
+    return schema.__name__

@@ -64,6 +64,55 @@ def image_to_bytes(img, format_hint="PNG"):
     return data, mime_type
 
 
+def preprocess_image_with_metadata(
+    path,
+    max_dim=3000,
+    margins=(0, 0, 0, 0),
+    contrast_factor=1.0,
+    output_format="PNG",
+):
+    path = Path(path)
+    with Image.open(path) as source:
+        original_format = source.format
+        original_mode = source.mode
+        original_size = source.size
+        img = source.convert("RGB")
+
+    img = resize_image(img, max_dim=max_dim)
+    resized_size = img.size
+
+    left, top, right, bottom = margins
+    img = crop_margins(img, left=left, top=top, right=right, bottom=bottom)
+    cropped_size = img.size
+
+    img = enhance_contrast(img, factor=contrast_factor)
+    image_bytes, mime_type = image_to_bytes(img, format_hint=output_format)
+    metadata = {
+        "source_path": str(path),
+        "source_bytes": path.stat().st_size if path.exists() else None,
+        "original_width": original_size[0],
+        "original_height": original_size[1],
+        "original_mode": original_mode,
+        "original_format": original_format,
+        "max_dim": max_dim,
+        "resized_width": resized_size[0],
+        "resized_height": resized_size[1],
+        "margins": {
+            "left": int(left),
+            "top": int(top),
+            "right": int(right),
+            "bottom": int(bottom),
+        },
+        "cropped_width": cropped_size[0],
+        "cropped_height": cropped_size[1],
+        "contrast_factor": contrast_factor,
+        "output_format": output_format,
+        "mime_type": mime_type,
+        "output_bytes": len(image_bytes),
+    }
+    return image_bytes, mime_type, metadata
+
+
 def preprocess_image(
     path,
     max_dim=3000,
@@ -71,14 +120,13 @@ def preprocess_image(
     contrast_factor=1.0,
     output_format="PNG",
 ):
-    img = load_image(path)
-    img = resize_image(img, max_dim=max_dim)
-
-    left, top, right, bottom = margins
-    img = crop_margins(img, left=left, top=top, right=right, bottom=bottom)
-
-    img = enhance_contrast(img, factor=contrast_factor)
-    image_bytes, mime_type = image_to_bytes(img, format_hint=output_format)
+    image_bytes, mime_type, _metadata = preprocess_image_with_metadata(
+        path,
+        max_dim=max_dim,
+        margins=margins,
+        contrast_factor=contrast_factor,
+        output_format=output_format,
+    )
     return image_bytes, mime_type
 
 if __name__ == "__main__":

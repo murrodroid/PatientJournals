@@ -16,6 +16,7 @@ from patientjournals.batch.output_records import (
     add_response_metadata_columns,
     iter_gemini_jsonl_results,
 )
+from patientjournals.batch.results import CollectOutputsResult
 from patientjournals.config import config
 from patientjournals.data.bucket import (
     build_storage_bucket,
@@ -25,9 +26,13 @@ from patientjournals.data.bucket import (
 )
 from patientjournals.shared.output_handler import data_to_rows
 from patientjournals.shared.dataset_coverage import (
-    copy_dataset_rows_for_keys,
-    load_dataset_key_coverage,
+    copy_dataset_rows_for_image_names,
+    load_dataset_image_coverage,
     resolve_continue_dataset_path,
+)
+from patientjournals.shared.identity import (
+    build_image_name_set,
+    image_name_from_reference,
 )
 from patientjournals.shared.tools import create_subfolder, flush_rows, get_run_logger
 
@@ -241,7 +246,8 @@ def write_collected_dataset(
     flush_every = max(1, int(config.flush_every or config.batch_size))
 
     for key in sorted(collected.selected):
-        if keys is not None and key not in keys:
+        image_name = image_name_from_reference(key)
+        if keys is not None and image_name not in keys:
             continue
         result = collected.selected[key]
         if result.parsed_model is None:
@@ -297,6 +303,21 @@ def _list_page_keys(
     return {str(getattr(blob, "name", "") or "") for blob in image_blobs}
 
 
+def _list_page_image_names(
+    bucket,
+    *,
+    pages_prefix: str,
+    pages_glob: str,
+) -> set[str]:
+    return build_image_name_set(
+        _list_page_keys(
+            bucket,
+            pages_prefix=pages_prefix,
+            pages_glob=pages_glob,
+        )
+    )
+
+
 def _ratio(numerator: int, denominator: int) -> float | None:
     if denominator <= 0:
         return None
@@ -307,8 +328,8 @@ def _counter_to_dict(counter: Counter[str]) -> dict[str, int]:
     return dict(sorted((str(key), int(value)) for key, value in counter.items()))
 
 
-def collect_outputs() -> Path:
-    args = _parse_args()
+def collect_outputs(args: argparse.Namespace | None = None) -> CollectOutputsResult:
+    args = args or _parse_args()
     if args.skip_gcs_outputs and not args.local_output:
         raise ValueError(
             "--skip-gcs-outputs requires at least one --local-output path."
@@ -359,12 +380,13 @@ def collect_outputs() -> Path:
             close()
 
     selected_keys = set(collected.selected)
+    selected_image_names = build_image_name_set(selected_keys)
     pages_checked = not args.skip_pages
-    page_keys: set[str] = set()
+    page_image_names: set[str] = set()
     if pages_checked:
         if bucket is None:
             bucket = build_storage_bucket(args.bucket_name)
-        page_keys = _list_page_keys(
+        page_image_names = _list_page_image_names(
             bucket,
             pages_prefix=args.pages_prefix,
             pages_glob=args.pages_glob,
@@ -372,7 +394,7 @@ def collect_outputs() -> Path:
 
     output_format = args.output_format.strip().lower().lstrip(".")
     continue_dataset_path: Path | None = None
-    existing_dataset_keys: set[str] = set()
+    existing_dataset_image_names: set[str] = set()
     existing_dataset_rows = 0
     kept_existing_rows = 0
     if args.continue_dataset:
@@ -381,8 +403,8 @@ def collect_outputs() -> Path:
             run_root=args.run_root,
             dataset_name=config.dataset_file_name,
         )
-        existing_format, existing_dataset_keys, existing_dataset_rows = (
-            load_dataset_key_coverage(
+        existing_format, existing_dataset_image_names, existing_dataset_rows = (
+            load_dataset_image_coverage(
                 continue_dataset_path,
                 csv_sep=config.csv_sep,
                 bucket_name=getattr(bucket, "name", args.bucket_name or None),
@@ -396,17 +418,18 @@ def collect_outputs() -> Path:
             output_format = existing_format
         log(
             f"Continuing dataset {continue_dataset_path}: "
-            f"rows={existing_dataset_rows}, unique_keys={len(existing_dataset_keys)}."
+            f"rows={existing_dataset_rows}, "
+            f"unique_image_names={len(existing_dataset_image_names)}."
         )
 
     out_path = run_dir / f"{run_dir.name}_{config.dataset_file_name}.{output_format}"
     header_written = False
     dataset_rows = 0
     if continue_dataset_path is not None:
-        kept_existing_rows = copy_dataset_rows_for_keys(
+        kept_existing_rows = copy_dataset_rows_for_image_names(
             continue_dataset_path,
             out_path,
-            keys=page_keys if pages_checked else None,
+            image_names=page_image_names if pages_checked else None,
             output_format=output_format,
             csv_sep=config.csv_sep,
             bucket_name=getattr(bucket, "name", args.bucket_name or None),
@@ -416,23 +439,35 @@ def collect_outputs() -> Path:
         )
         dataset_rows += kept_existing_rows
 
-    existing_covered_keys = (
-        existing_dataset_keys & page_keys if pages_checked else existing_dataset_keys
+    existing_covered_image_names = (
+        existing_dataset_image_names & page_image_names
+        if pages_checked
+        else existing_dataset_image_names
     )
-    keys_to_append = selected_keys - existing_covered_keys
+    keys_to_append = {
+        key
+        for key in selected_keys
+        if image_name_from_reference(key) not in existing_covered_image_names
+    }
     header_written, added_rows = write_collected_dataset(
         collected,
         out_path=out_path,
         output_format=output_format,
-        keys=keys_to_append,
+        keys=build_image_name_set(keys_to_append),
         header_written=header_written,
     )
     dataset_rows += added_rows
 
-    final_dataset_keys = existing_covered_keys | selected_keys
-    covered_page_keys = final_dataset_keys & page_keys if pages_checked else set()
-    missing_page_keys = page_keys - final_dataset_keys if pages_checked else set()
-    extra_output_keys = final_dataset_keys - page_keys if pages_checked else set()
+    final_dataset_image_names = existing_covered_image_names | selected_image_names
+    covered_page_image_names = (
+        final_dataset_image_names & page_image_names if pages_checked else set()
+    )
+    missing_page_image_names = (
+        page_image_names - final_dataset_image_names if pages_checked else set()
+    )
+    extra_output_image_names = (
+        final_dataset_image_names - page_image_names if pages_checked else set()
+    )
 
     manifest_path = run_dir / "selected_outputs.jsonl"
     _write_jsonl(
@@ -440,6 +475,7 @@ def collect_outputs() -> Path:
         (
             {
                 "key": key,
+                "image_name": image_name_from_reference(key),
                 "source": collected.selected[key].source,
                 "line_number": collected.selected[key].line_number,
             }
@@ -454,6 +490,7 @@ def collect_outputs() -> Path:
         (
             {
                 "key": key,
+                "image_name": image_name_from_reference(key),
                 "reasons": _counter_to_dict(
                     collected.rejected_reasons_by_key.get(key, Counter())
                 ),
@@ -466,7 +503,7 @@ def collect_outputs() -> Path:
     if pages_checked:
         _write_jsonl(
             missing_path,
-            ({"key": key} for key in sorted(missing_page_keys)),
+            ({"image_name": name} for name in sorted(missing_page_image_names)),
         )
 
     report = {
@@ -484,25 +521,29 @@ def collect_outputs() -> Path:
             str(continue_dataset_path) if continue_dataset_path is not None else None
         ),
         "existing_dataset_rows": existing_dataset_rows,
-        "existing_dataset_keys": len(existing_dataset_keys),
+        "existing_dataset_image_names": len(existing_dataset_image_names),
         "kept_existing_rows": kept_existing_rows,
-        "new_output_keys_added": len(keys_to_append),
+        "new_output_image_names_added": len(build_image_name_set(keys_to_append)),
         "new_output_rows_added": added_rows,
-        "final_dataset_keys": len(final_dataset_keys),
+        "final_dataset_image_names": len(final_dataset_image_names),
         "dataset_rows": dataset_rows,
-        "pages_total": len(page_keys) if pages_checked else None,
-        "pages_covered": len(covered_page_keys) if pages_checked else None,
+        "pages_total": len(page_image_names) if pages_checked else None,
+        "pages_covered": len(covered_page_image_names) if pages_checked else None,
         "coverage_ratio": (
-            _ratio(len(covered_page_keys), len(page_keys)) if pages_checked else None
+            _ratio(len(covered_page_image_names), len(page_image_names))
+            if pages_checked
+            else None
         ),
-        "missing_pages": len(missing_page_keys) if pages_checked else None,
-        "extra_output_keys": len(extra_output_keys) if pages_checked else None,
+        "missing_pages": len(missing_page_image_names) if pages_checked else None,
+        "extra_output_image_names": (
+            len(extra_output_image_names) if pages_checked else None
+        ),
         "dataset_path": str(out_path),
         "selected_outputs_path": str(manifest_path),
         "rejected_output_keys_path": str(rejected_path),
         "missing_page_keys_path": str(missing_path) if pages_checked else None,
-        "missing_page_key_samples": sorted(missing_page_keys)[:10],
-        "extra_output_key_samples": sorted(extra_output_keys)[:10],
+        "missing_page_image_name_samples": sorted(missing_page_image_names)[:10],
+        "extra_output_image_name_samples": sorted(extra_output_image_names)[:10],
     }
     report_path = run_dir / "coverage_report.json"
     report_path.write_text(
@@ -515,17 +556,28 @@ def collect_outputs() -> Path:
         percentage = f"{ratio * 100:.2f}%" if isinstance(ratio, float) else "n/a"
         print(
             "Coverage: "
-            f"{len(covered_page_keys)}/{len(page_keys)} pages ({percentage}); "
-            f"missing={len(missing_page_keys)}."
+            f"{len(covered_page_image_names)}/{len(page_image_names)} pages "
+            f"({percentage}); missing={len(missing_page_image_names)}."
         )
     print(
         f"Collected {len(selected_keys)} unique valid output key(s), "
-        f"added {len(keys_to_append)} new key(s), "
+        f"added {len(build_image_name_set(keys_to_append))} new image(s), "
         f"into {out_path} ({dataset_rows} dataset row(s))."
     )
     print(f"Coverage report: {report_path}")
     log(f"Collected outputs into {out_path}; report={report_path}.")
-    return out_path
+    return CollectOutputsResult(
+        dataset_path=out_path,
+        report_path=report_path,
+        selected_outputs_path=manifest_path,
+        rejected_output_keys_path=rejected_path,
+        missing_page_keys_path=missing_path if pages_checked else None,
+        dataset_rows=dataset_rows,
+        new_output_rows_added=added_rows,
+        pages_total=len(page_image_names) if pages_checked else None,
+        pages_covered=len(covered_page_image_names) if pages_checked else None,
+        missing_pages=len(missing_page_image_names) if pages_checked else None,
+    )
 
 
 if __name__ == "__main__":

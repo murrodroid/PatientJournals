@@ -25,10 +25,10 @@ from patientjournals.batch.submit_inputs import (
     _list_input_blobs,
 )
 from patientjournals.shared.dataset_coverage import (
-    load_dataset_key_coverage,
-    normalize_gcs_file_key,
+    load_dataset_image_coverage,
     resolve_continue_dataset_path,
 )
+from patientjournals.shared.identity import image_name_from_gcs_object
 from patientjournals.shared.tools import create_subfolder, get_run_logger
 
 
@@ -67,7 +67,7 @@ def _parse_args() -> argparse.Namespace:
         dest="continue_dataset",
         help=(
             "Submit only GCS input pages not already covered by this dataset "
-            "(by file_name), or pass 'newest'."
+            "(by image_name), or pass 'newest'."
         ),
     )
     parser.add_argument(
@@ -164,7 +164,7 @@ def _filter_blobs_missing_from_dataset(
     bucket_name: str,
     log,
 ) -> tuple[list[storage.Blob], int, int]:
-    _, covered_keys, dataset_rows = load_dataset_key_coverage(
+    _, covered_image_names, dataset_rows = load_dataset_image_coverage(
         dataset_path,
         csv_sep=config.csv_sep,
         bucket_name=bucket_name,
@@ -172,7 +172,7 @@ def _filter_blobs_missing_from_dataset(
     missing = [
         blob
         for blob in blobs
-        if normalize_gcs_file_key(blob.name, bucket_name=bucket_name) not in covered_keys
+        if image_name_from_gcs_object(blob.name) not in covered_image_names
     ]
     covered_inputs = len(blobs) - len(missing)
     log(
@@ -470,11 +470,14 @@ def _ensure_requests_files_for_rerun(
             "or manually recover from existing request files."
         )
 
-    blobs = _list_input_blobs(bucket, log=log)
+    blobs = _list_input_blobs(bucket, log=log, audit_dir=run_dir)
     if not blobs:
+        prefix_display = ", ".join(
+            getattr(config, "batch_input_prefixes", ()) or ()
+        ) or config.batch_input_prefix
         raise FileNotFoundError(
             f"No input images found in bucket {config.gcs_bucket_name} "
-            f"with prefix '{config.batch_input_prefix}'."
+            f"with prefix '{prefix_display}'."
         )
 
     chunks = _split_blobs_evenly(blobs, total_chunks)
@@ -809,8 +812,8 @@ def _batch_state_and_success(
     return state, state == "JOB_STATE_SUCCEEDED"
 
 
-def submit_batch() -> None:
-    args = _parse_args()
+def submit_batch(args: argparse.Namespace | None = None) -> Path | None:
+    args = args or _parse_args()
     if args.rerun and args.continue_dataset:
         raise ValueError("--continue-dataset cannot be combined with --rerun.")
 
@@ -1067,7 +1070,7 @@ def submit_batch() -> None:
         if rerun_count == 0:
             log("Rerun requested, but all chunk jobs were already successful.")
             print("No chunks needed rerun; all jobs already succeeded.")
-            return
+            return run_dir
 
         job_names = ", ".join(
             str(item.get("batch_job_name"))
@@ -1076,18 +1079,21 @@ def submit_batch() -> None:
         )
         log(f"Rerun submitted {rerun_count} chunk job(s). Active jobs: {job_names}")
         print(f"Resubmitted {rerun_count} chunk job(s).")
-        return
+        return run_dir
 
     run_dir = create_subfolder(config.output_root, prefix="submit_")
     log = get_run_logger(run_dir)
     _warn_if_confidence_scores_unsupported(provider=provider, log=log)
     _ensure_uploaded_sources(bucket, log)
 
-    blobs = _list_input_blobs(bucket, log=log)
+    blobs = _list_input_blobs(bucket, log=log, audit_dir=run_dir)
     if not blobs:
+        prefix_display = ", ".join(
+            getattr(config, "batch_input_prefixes", ()) or ()
+        ) or config.batch_input_prefix
         raise FileNotFoundError(
             f"No input images found in bucket {config.gcs_bucket_name} "
-            f"with prefix '{config.batch_input_prefix}'."
+            f"with prefix '{prefix_display}'."
         )
     if args.continue_dataset:
         continue_dataset_path = resolve_continue_dataset_path(
@@ -1113,7 +1119,7 @@ def submit_batch() -> None:
                 f"{original_count} selected input page(s); no batch submitted."
             )
             print("No missing pages to submit; dataset already covers selected inputs.")
-            return
+            return run_dir
 
     downscale = _resolve_downscale(args)
     if downscale is not None:
@@ -1220,6 +1226,7 @@ def submit_batch() -> None:
             if item.get("batch_job_name")
         )
     )
+    return run_dir
 
 
 if __name__ == "__main__":

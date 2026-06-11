@@ -249,7 +249,7 @@ def validate_image(path: Path, root: Path, duplicate_basenames: set[str]) -> dic
         issues.append(f"image_open_failed:{type(exc).__name__}")
 
     if path.name in duplicate_basenames:
-        warnings.append("duplicate_basename")
+        issues.append("duplicate_image_name")
 
     status = "ok"
     if issues:
@@ -261,6 +261,7 @@ def validate_image(path: Path, root: Path, duplicate_basenames: set[str]) -> dic
         "status": status,
         "issues": ";".join(issues),
         "warnings": ";".join(warnings),
+        "image_name": path.name,
         "file_name": path.name,
         "relative_path": str(path.relative_to(root)),
         "parent_folder": _relative_parent(path, root),
@@ -389,6 +390,7 @@ def write_validation_csv(report: dict[str, Any], output_dir: str | Path, stem: s
         "source",
         "bucket",
         "blob_name",
+        "image_name",
         "file_name",
         "relative_path",
         "parent_folder",

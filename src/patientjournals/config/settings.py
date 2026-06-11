@@ -1,4 +1,7 @@
+import json
+import os
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Literal, Optional
 
 from pydantic import BaseModel
@@ -92,6 +95,11 @@ class Config:
     batch_num_chunks: int = 1
     batch_input_source: Literal["gcs"] = "gcs"
     batch_input_prefix: str = ""
+    batch_input_prefixes: tuple[str, ...] = ()
+    # When non-empty, restrict batch input selection to exactly these image
+    # names (basenames). Used to scope a submission to a specific local folder
+    # so it cannot accidentally fan out to the entire bucket prefix.
+    batch_restrict_image_names: tuple[str, ...] = ()
     batch_input_extensions: tuple[str, ...] = ("png", "jpg", "jpeg", "webp", "tiff")
     batch_date_mapping_file: str = "date_mapping.csv"
     batch_year_filter: tuple[int | str, ...] = ()
@@ -116,8 +124,12 @@ class Config:
     api_recovery_max_missing_pages: int = 50
     api_recovery_model: str = ""
     batch_submit_failed_pages: bool = False
+    batch_duplicate_strategy: Literal["first_successful", "provide_all"] = (
+        "first_successful"
+    )
 
     # GCP/GCS settings
+    gcp_auth_mode: Literal["service_account", "adc"] = "service_account"
     service_account_file: str = "service-account.json"
     gcp_project_id: str = "gen-lang-client-0854332640"
     gcp_location: str = "europe-north1"
@@ -207,6 +219,22 @@ class Config:
             for provider, value in (self.provider_api_keys or {}).items()
             if str(provider).strip()
         }
+        raw_prefixes = self.batch_input_prefixes or ()
+        if isinstance(raw_prefixes, str):
+            raw_prefixes = (raw_prefixes,)
+        self.batch_input_prefixes = tuple(
+            str(prefix).strip()
+            for prefix in raw_prefixes
+            if str(prefix).strip()
+        )
+        raw_restrict = self.batch_restrict_image_names or ()
+        if isinstance(raw_restrict, str):
+            raw_restrict = (raw_restrict,)
+        self.batch_restrict_image_names = tuple(
+            str(name).strip()
+            for name in raw_restrict
+            if str(name).strip()
+        )
         if not (self.api_key or "").strip():
             self.api_key = self.provider_api_keys.get("gemini", "")
         self.output_schema = self.output_model.model_json_schema()
@@ -240,5 +268,68 @@ class Config:
             )
         return prompt
 
-
 config = Config()
+
+
+def _apply_external_json_config(cfg: Config) -> None:
+    config_path = os.getenv("PATIENTJOURNALS_CONFIG_JSON", "").strip()
+    if not config_path:
+        return
+
+    path = Path(config_path).expanduser()
+    if not path.exists() or not path.is_file():
+        raise FileNotFoundError(f"PATIENTJOURNALS_CONFIG_JSON not found: {path}")
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Invalid PATIENTJOURNALS_CONFIG_JSON: {path}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError(f"Invalid PATIENTJOURNALS_CONFIG_JSON payload: {path}")
+
+    direct_fields = {
+        "batch_backend",
+        "gcp_auth_mode",
+        "service_account_file",
+        "gcp_project_id",
+        "gcp_location",
+        "vertex_model_location",
+        "gcs_bucket_name",
+        "gcs_pages_prefix",
+        "batch_requests_gcs_prefix",
+        "batch_outputs_gcs_prefix",
+        "batch_input_prefix",
+        "batch_input_prefixes",
+        "target_folder",
+        "upload_images_folder",
+        "model",
+        "output_format",
+        "batch_duplicate_strategy",
+    }
+    aliases = {
+        "auth_mode": "gcp_auth_mode",
+        "local_runs_root": "output_root",
+    }
+    for key in direct_fields:
+        if key in payload and payload[key] is not None:
+            setattr(cfg, key, payload[key])
+    for source_key, target_key in aliases.items():
+        if source_key in payload and payload[source_key] is not None:
+            setattr(cfg, target_key, payload[source_key])
+
+    schema_name = payload.get("schema_name")
+    if isinstance(schema_name, str) and schema_name.strip():
+        from patientjournals.config.schemas import resolve_output_schema
+
+        cfg.output_model = resolve_output_schema(schema_name)
+
+    api_key_env = payload.get("gemini_api_key_env")
+    if isinstance(api_key_env, str) and api_key_env.strip():
+        api_key = os.getenv(api_key_env.strip(), "").strip()
+        if api_key:
+            cfg.provider_api_keys["gemini"] = api_key
+            cfg.api_key = api_key
+
+    cfg.__post_init__()
+
+
+_apply_external_json_config(config)

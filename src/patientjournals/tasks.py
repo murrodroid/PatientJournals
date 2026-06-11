@@ -139,18 +139,26 @@ def status(
 def retrieve(
     context,
     batch_name: str | None = None,
+    batch_names: str | None = None,
     run_dir: str | None = None,
     wait: bool = False,
     allow_partial: bool = False,
     submit_failed: bool = False,
+    recover_missing_with_api: bool = False,
+    duplicate_strategy: str | None = None,
     extra: str = "",
 ) -> None:
     args: list[str] = []
     _add_option(args, "--batch-name", batch_name)
+    if batch_names:
+        for name in str(batch_names).split(","):
+            _add_option(args, "--batch-name", name)
     _add_option(args, "--run-dir", run_dir)
     _add_flag(args, "--wait", wait)
     _add_flag(args, "--allow-partial", allow_partial)
     _add_flag(args, "--submit-failed", submit_failed)
+    _add_flag(args, "--recover-missing-with-api", recover_missing_with_api)
+    _add_option(args, "--duplicate-strategy", duplicate_strategy)
     args.extend(_split_extra(extra))
     _run_module(context, "patientjournals.batch.retrieve", args)
 
@@ -244,6 +252,11 @@ def config_show(_context) -> None:
     print(json.dumps(payload, indent=2, ensure_ascii=False, default=str))
 
 
+@task(name="run")
+def app_run(context) -> None:
+    _run_module(context, "patientjournals.app.ui", [])
+
+
 local = Collection("local")
 local.add_task(local_run, "run")
 
@@ -266,7 +279,11 @@ config_tasks = Collection("config")
 config_tasks.add_task(config_path)
 config_tasks.add_task(config_show)
 
+app = Collection("app")
+app.add_task(app_run, "run")
+
 ns = Collection()
+ns.add_collection(app)
 ns.add_collection(data)
 ns.add_collection(local)
 ns.add_collection(batch)

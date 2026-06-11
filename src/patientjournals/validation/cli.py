@@ -13,8 +13,9 @@ from PIL import Image, ImageTk
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from patientjournals.config.schemas import FrontPage
+from patientjournals.shared.identity import row_image_name
 
-_COLUMNS_NOT_INCLUDED = ['generation_seconds','file_name']
+_COLUMNS_NOT_INCLUDED = ['generation_seconds','image_name','file_name']
 
 def build_image_index(root_dir: Path) -> dict[str, Path]:
     index: dict[str, Path] = {}
@@ -116,10 +117,14 @@ def _parse_corrected_value(field_name: str, text: str) -> object:
 
 
 def resolve_image_path(row: dict, image_index: dict[str, Path]) -> Path | None:
-    file_name = row.get("file_name")
-    if not file_name:
+    image_name = row_image_name(row)
+    if not image_name:
         return None
-    return image_index.get(Path(file_name).name)
+    return image_index.get(image_name)
+
+
+def display_image_name(row: dict) -> str:
+    return row_image_name(row) or ""
 
 
 class ValidatorApp:
@@ -316,7 +321,7 @@ class ValidatorApp:
     def _count_total_pairs(self) -> int:
         total = 0
         for row in self.rows:
-            file_name = Path(row.get("file_name", "")).name
+            file_name = display_image_name(row)
             if not file_name:
                 continue
             flat = flatten_row(row)
@@ -418,7 +423,7 @@ class ValidatorApp:
             image_path = resolve_image_path(row, self.image_index)
             field = pick_flat_field(row, self.rng)
             if image_path and field:
-                file_name = Path(row.get("file_name", "")).name
+                file_name = display_image_name(row)
                 pair = (file_name, field[0])
                 if pair in self.validated_pairs:
                     continue
@@ -441,7 +446,7 @@ class ValidatorApp:
         self.reset_zoom()
 
         field_name, field_value = self.current_field
-        file_name = Path(self.current_row.get("file_name", "")).name
+        file_name = display_image_name(self.current_row)
         self.field_text.set(f"{file_name}\n{field_name}: {field_value}")
         self.original_field_raw = field_value
         self.original_field_value = _stringify_value(field_value)
@@ -486,7 +491,7 @@ class ValidatorApp:
             messagebox.showinfo("Corrections disabled", "Run with --corrections to enable edits.")
             return
         field_name, _ = self.current_field
-        file_name = Path(self.current_row.get("file_name", "")).name
+        file_name = display_image_name(self.current_row)
         dataset_name = self.dataset_path.name
         decided_at = datetime.now().isoformat(timespec="seconds")
         corrected_field = None
@@ -504,6 +509,7 @@ class ValidatorApp:
             {
                 "label": label,
                 "column_name": field_name,
+                "image_name": file_name,
                 "file_name": file_name,
                 "dataset_file": dataset_name,
                 "validator_id": self.username,
@@ -546,6 +552,7 @@ class ValidatorApp:
                 fieldnames=[
                     "label",
                     "column_name",
+                    "image_name",
                     "file_name",
                     "dataset_file",
                     "validator_id",

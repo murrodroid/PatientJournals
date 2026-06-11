@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import hashlib
 import json
 import mimetypes
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed as futures_as_completed
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -19,6 +22,7 @@ from patientjournals.batch.output_records import (
     add_response_metadata_columns,
     parse_gemini_output_record,
 )
+from patientjournals.batch.results import RetrieveBatchResult
 from patientjournals.batch.retry import (
     _collect_failed_retry_keys,
     _submit_failed_pages_as_batch,
@@ -28,7 +32,18 @@ from patientjournals.shared.generation_spec import (
     build_live_generation_config,
 )
 from patientjournals.config.models import resolve_model_spec
+from patientjournals.shared.api_retry import (
+    is_retryable_api_error,
+    retry_delay_seconds,
+)
 from patientjournals.shared.output_handler import data_to_rows
+from patientjournals.shared.processing_metrics import (
+    MANIFEST_FILE_NAME,
+    append_processing_record,
+    base_image_record,
+    utc_now_iso,
+    write_processing_summary,
+)
 from patientjournals.shared.response_parsing import extract_response_metadata
 from patientjournals.shared.tools import create_subfolder, flush_rows, get_run_logger
 
@@ -48,7 +63,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--batch-name",
         dest="batch_name",
-        help="Batch job name (overrides config.batch_job_name).",
+        action="append",
+        help=(
+            "Batch job name. Repeat to retrieve selected chunks from one run. "
+            "Overrides config.batch_job_name when supplied."
+        ),
     )
     parser.add_argument(
         "--run-dir",
@@ -80,6 +99,25 @@ def _parse_args() -> argparse.Namespace:
             "that errored or failed JSON/schema validation."
         ),
     )
+    parser.add_argument(
+        "--recover-missing-with-api",
+        dest="recover_missing_with_api",
+        action="store_true",
+        help=(
+            "For Gemini retrieval, send missing expected pages through the live API "
+            "after partial batch output parsing. This is parallelized with "
+            "config.api_concurrent_tasks."
+        ),
+    )
+    parser.add_argument(
+        "--duplicate-strategy",
+        choices=("first_successful", "provide_all"),
+        default=None,
+        help=(
+            "How to handle duplicate successful output keys across chunks. "
+            "Default comes from config.batch_duplicate_strategy."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -94,6 +132,46 @@ def _normalize_key(value: object) -> str | None:
     if not normalized:
         return None
     return normalized
+
+
+def _arg_batch_names(args: argparse.Namespace) -> list[str]:
+    raw = getattr(args, "batch_name", None)
+    values: list[object]
+    if isinstance(raw, list | tuple):
+        values = list(raw)
+    elif raw:
+        values = [raw]
+    else:
+        values = []
+
+    names: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        name = _normalize_key(value)
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        names.append(name)
+    return names
+
+
+def _effective_duplicate_strategy(args: argparse.Namespace) -> str:
+    strategy = (
+        getattr(args, "duplicate_strategy", None)
+        or getattr(config, "batch_duplicate_strategy", "first_successful")
+        or "first_successful"
+    )
+    strategy = str(strategy).strip().lower()
+    if strategy not in {"first_successful", "provide_all"}:
+        raise ValueError(
+            "Unsupported duplicate strategy: "
+            f"{strategy!r}. Expected first_successful or provide_all."
+        )
+    return strategy
+
+
+def _parallel_worker_count(total: int) -> int:
+    return max(1, min(max(1, total), int(config.api_concurrent_tasks or 1)))
 
 
 def _normalize_job_state(value: object) -> str:
@@ -273,6 +351,178 @@ def _resolve_recovery_api_key() -> str:
     )
 
 
+@dataclass
+class _RecoveryResult:
+    key: str
+    line_number: int
+    parsed_model: Any | None = None
+    metadata: dict[str, Any] | None = None
+    failure_reason: str | None = None
+    exception: BaseException | None = None
+    attempts: int = 0
+    generation_seconds: float | None = None
+    total_seconds: float | None = None
+    downloaded_bytes: int | None = None
+    mime_type: str | None = None
+
+
+async def _generate_recovery_response(
+    *,
+    recovery_client,
+    recovery_model: str,
+    image_bytes: bytes,
+    mime_type: str,
+    generation_config: dict,
+) -> object:
+    aio_client = getattr(recovery_client, "aio", None)
+    aio_models = getattr(aio_client, "models", None)
+    async_generate = getattr(aio_models, "generate_content", None)
+    if callable(async_generate):
+        return await async_generate(
+            model=recovery_model,
+            contents=[
+                types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
+                config.input_prompt,
+            ],
+            config=generation_config,
+        )
+
+    return await asyncio.to_thread(
+        recovery_client.models.generate_content,
+        model=recovery_model,
+        contents=[
+            types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
+            config.input_prompt,
+        ],
+        config=generation_config,
+    )
+
+
+async def _recover_one_missing_page_via_api_key(
+    *,
+    key: str,
+    line_number: int,
+    bucket,
+    recovery_client,
+    recovery_model: str,
+    generation_config: dict,
+    log,
+) -> _RecoveryResult:
+    blob = bucket.blob(key)
+    max_attempts = max(1, int(config.api_max_attempts))
+    total_started = time.perf_counter()
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            exists = await asyncio.to_thread(blob.exists)
+            if not exists:
+                return _RecoveryResult(
+                    key=key,
+                    line_number=line_number,
+                    failure_reason="recovery_blob_not_found",
+                    attempts=attempt,
+                    total_seconds=time.perf_counter() - total_started,
+                )
+
+            image_bytes = await asyncio.to_thread(blob.download_as_bytes)
+            mime_type = _guess_blob_mime_type(blob, key)
+            generation_started = time.perf_counter()
+            response = await _generate_recovery_response(
+                recovery_client=recovery_client,
+                recovery_model=recovery_model,
+                image_bytes=image_bytes,
+                mime_type=mime_type,
+                generation_config=generation_config,
+            )
+            generation_seconds = time.perf_counter() - generation_started
+
+            metadata = extract_response_metadata(response)
+            text_payload = metadata.get("text")
+            if not isinstance(text_payload, str) or not text_payload.strip():
+                raise ValueError("Empty response text from API key recovery.")
+
+            parsed_model = config.output_model.model_validate_json(text_payload)
+            return _RecoveryResult(
+                key=key,
+                line_number=line_number,
+                parsed_model=parsed_model,
+                metadata=metadata,
+                attempts=attempt,
+                generation_seconds=generation_seconds,
+                total_seconds=time.perf_counter() - total_started,
+                downloaded_bytes=len(image_bytes),
+                mime_type=mime_type,
+            )
+        except Exception as exc:
+            retryable = is_retryable_api_error(exc)
+            if retryable and attempt < max_attempts:
+                delay = retry_delay_seconds(attempt)
+                log(
+                    f"Transient API key recovery error for key={key} "
+                    f"(attempt {attempt}/{max_attempts}). "
+                    f"Retrying in {delay:.1f}s. Error: {exc}"
+                )
+                await asyncio.sleep(delay)
+                continue
+
+            return _RecoveryResult(
+                key=key,
+                line_number=line_number,
+                failure_reason=f"api_key_recovery_failed:{type(exc).__name__}",
+                exception=exc,
+                attempts=attempt,
+                total_seconds=time.perf_counter() - total_started,
+            )
+
+    return _RecoveryResult(
+        key=key,
+        line_number=line_number,
+        failure_reason="api_key_recovery_failed:unknown",
+        attempts=max_attempts,
+        total_seconds=time.perf_counter() - total_started,
+    )
+
+
+async def _recover_missing_pages_via_api_key_async(
+    *,
+    missing_keys: set[str],
+    bucket,
+    recovery_client,
+    recovery_model: str,
+    generation_config: dict,
+    log,
+) -> list[_RecoveryResult]:
+    concurrency = max(1, int(config.api_concurrent_tasks or 1))
+    semaphore = asyncio.Semaphore(concurrency)
+    base_line_number = 1_000_000
+
+    async def run_one(offset: int, key: str) -> _RecoveryResult:
+        async with semaphore:
+            return await _recover_one_missing_page_via_api_key(
+                key=key,
+                line_number=base_line_number + offset,
+                bucket=bucket,
+                recovery_client=recovery_client,
+                recovery_model=recovery_model,
+                generation_config=generation_config,
+                log=log,
+            )
+
+    tasks = [
+        asyncio.create_task(run_one(offset, key))
+        for offset, key in enumerate(sorted(missing_keys), start=1)
+    ]
+    results: list[_RecoveryResult] = []
+    for task in tqdm(
+        asyncio.as_completed(tasks),
+        total=len(tasks),
+        desc="Recovering pages via API key",
+        unit="page",
+    ):
+        results.append(await task)
+    return sorted(results, key=lambda result: result.line_number)
+
+
 def _recover_missing_pages_via_api_key(
     *,
     missing_keys: set[str],
@@ -282,6 +532,7 @@ def _recover_missing_pages_via_api_key(
     rows_to_flush: list[dict],
     log,
     force: bool = False,
+    manifest_path: Path | None = None,
 ) -> int:
     if not missing_keys:
         return 0
@@ -312,51 +563,69 @@ def _recover_missing_pages_via_api_key(
     recovery_model = (config.api_recovery_model or "").strip() or config.model
     recovery_client = genai.Client(api_key=_resolve_recovery_api_key())
     generation_config = _build_api_key_generation_config()
+    concurrency = max(1, int(config.api_concurrent_tasks or 1))
+    max_attempts = max(1, int(config.api_max_attempts))
 
     recovered = 0
-    base_line_number = 1_000_000
+    log(
+        f"Starting API key recovery for {len(missing_keys)} page(s) "
+        f"using model {recovery_model} "
+        f"(concurrency={concurrency}, max_attempts={max_attempts})."
+    )
+    results = asyncio.run(
+        _recover_missing_pages_via_api_key_async(
+            missing_keys=missing_keys,
+            bucket=bucket,
+            recovery_client=recovery_client,
+            recovery_model=recovery_model,
+            generation_config=generation_config,
+            log=log,
+        )
+    )
 
-    for offset, key in enumerate(
-        tqdm(sorted(missing_keys), desc="Recovering pages via API key", unit="page"),
-        start=1,
-    ):
-        blob = bucket.blob(key)
-        if not blob.exists():
+    for result in results:
+        key = result.key
+        if result.parsed_model is None:
+            reason = result.failure_reason or "api_key_recovery_failed:unknown"
+            if manifest_path is not None:
+                append_processing_record(
+                    manifest_path,
+                    base_image_record(
+                        image_reference=key,
+                        source="api_recovery",
+                        status="failed",
+                        model=recovery_model,
+                        provider="gemini",
+                        attempts=result.attempts,
+                        max_attempts=max_attempts,
+                        total_seconds=result.total_seconds,
+                        rows_written=0,
+                        failure_reason=reason,
+                        error_type=type(result.exception).__name__
+                        if result.exception
+                        else None,
+                        error_message=str(result.exception)
+                        if result.exception
+                        else None,
+                        extra={
+                            "mime_type": result.mime_type,
+                            "downloaded_bytes": result.downloaded_bytes,
+                        },
+                    ),
+                )
             _record_failure(
                 failures,
                 key=key,
-                line_number=base_line_number + offset,
-                reason="recovery_blob_not_found",
+                line_number=result.line_number,
+                reason=reason,
             )
-            log(f"Recovery skipped for missing GCS object: {key}")
-            continue
-
-        try:
-            image_bytes = blob.download_as_bytes()
-            mime_type = _guess_blob_mime_type(blob, key)
-            response = recovery_client.models.generate_content(
-                model=recovery_model,
-                contents=[
-                    types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
-                    config.input_prompt,
-                ],
-                config=generation_config,
-            )
-
-            metadata = extract_response_metadata(response)
-            text_payload = metadata.get("text")
-            if not isinstance(text_payload, str) or not text_payload.strip():
-                raise ValueError("Empty response text from API key recovery.")
-
-            parsed_model = config.output_model.model_validate_json(text_payload)
-        except Exception as exc:
-            _record_failure(
-                failures,
-                key=key,
-                line_number=base_line_number + offset,
-                reason=f"api_key_recovery_failed:{type(exc).__name__}",
-            )
-            log(f"API key recovery failed for key={key}", exc=exc)
+            if reason == "recovery_blob_not_found":
+                log(f"Recovery skipped for missing GCS object: {key}")
+            else:
+                log(
+                    f"API key recovery failed for key={key}",
+                    exc=result.exception,
+                )
             continue
 
         recovered += 1
@@ -364,13 +633,34 @@ def _recover_missing_pages_via_api_key(
         observed_output_keys.add(key)
         failures.pop(key, None)
 
+        metadata = result.metadata or {}
         rows = data_to_rows(
-            parsed_model,
+            result.parsed_model,
             file_name=key,
             field_confidence_by_pointer=metadata.get("field_confidence_by_pointer"),
         )
         add_response_metadata_columns(rows, metadata)
         rows_to_flush.extend(rows)
+        if manifest_path is not None:
+            append_processing_record(
+                manifest_path,
+                base_image_record(
+                    image_reference=key,
+                    source="api_recovery",
+                    status="success",
+                    model=recovery_model,
+                    provider="gemini",
+                    attempts=result.attempts,
+                    max_attempts=max_attempts,
+                    generation_seconds=result.generation_seconds,
+                    total_seconds=result.total_seconds,
+                    rows_written=len(rows),
+                    extra={
+                        "mime_type": result.mime_type,
+                        "downloaded_bytes": result.downloaded_bytes,
+                    },
+                ),
+            )
 
     if recovered:
         log(
@@ -1023,9 +1313,10 @@ def _latest_batch_job_file(output_root: str) -> Path | None:
 
 
 def _resolve_batch_targets(args: argparse.Namespace) -> tuple[list[str], Path | None]:
-    if args.batch_name:
+    cli_batch_names = _arg_batch_names(args)
+    if cli_batch_names:
         submit_run_dir = Path(args.run_dir).expanduser() if args.run_dir else None
-        return [args.batch_name], submit_run_dir
+        return cli_batch_names, submit_run_dir
 
     if args.run_dir:
         candidate = Path(args.run_dir).expanduser() / "batch_job.json"
@@ -1078,8 +1369,8 @@ def _flush_rows(
     return header_written, count
 
 
-def retrieve_batch() -> Path:
-    args = _parse_args()
+def retrieve_batch(args: argparse.Namespace | None = None) -> RetrieveBatchResult:
+    args = args or _parse_args()
     submit_failed_requested = _should_submit_failed_batch(args)
     batch_names, submit_run_dir = _resolve_batch_targets(args)
     if not batch_names:
@@ -1104,15 +1395,20 @@ def retrieve_batch() -> Path:
         )
         client = get_batch_client(location=client_location)
 
+    duplicate_strategy = _effective_duplicate_strategy(args)
+    recover_missing_with_api = bool(getattr(args, "recover_missing_with_api", False))
+    manifest_path = run_dir / MANIFEST_FILE_NAME
+
     output_destinations_by_name = _output_destinations_from_submit_run(submit_run_dir)
-    batch_jobs: list[tuple[str, object, bool, tuple[str, str] | None]] = []
+    batch_jobs: list[tuple[int, str, object, bool, tuple[str, str] | None]] = []
     incomplete_batches: list[tuple[str, str]] = []
     partial_output_batches: list[tuple[str, str]] = []
-    for batch_name in batch_names:
+
+    def resolve_one(index: int, batch_name: str):
         batch_job = _get_batch_job(client, batch_name, provider)
         state = _batch_job_state(batch_job, provider)
         if not _batch_job_successful(batch_job, provider):
-            if args.wait:
+            if bool(getattr(args, "wait", False)):
                 batch_job = _await_completion(
                     client=client,
                     batch_name=batch_name,
@@ -1131,15 +1427,49 @@ def retrieve_batch() -> Path:
 
         if not is_successful:
             if provider == "gemini" and output_ref is not None:
-                partial_output_batches.append((batch_name, state))
-                if args.allow_partial:
-                    batch_jobs.append((batch_name, batch_job, True, output_ref))
-                    continue
+                return index, batch_name, batch_job, state, True, output_ref, True
+            return index, batch_name, batch_job, state, False, output_ref, False
+        return index, batch_name, batch_job, state, False, output_ref, True
+
+    workers = _parallel_worker_count(len(batch_names))
+    log(
+        f"Resolving {len(batch_names)} batch chunk state(s) in parallel "
+        f"(workers={workers})."
+    )
+    resolved_jobs = []
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = [
+            executor.submit(resolve_one, index, batch_name)
+            for index, batch_name in enumerate(batch_names, start=1)
+        ]
+        for future in tqdm(
+            futures_as_completed(futures),
+            total=len(futures),
+            desc="Resolving batch chunks",
+            unit="chunk",
+        ):
+            resolved_jobs.append(future.result())
+
+    for (
+        index,
+        batch_name,
+        batch_job,
+        state,
+        is_partial_output,
+        output_ref,
+        downloadable,
+    ) in sorted(resolved_jobs, key=lambda item: int(item[0])):
+        if not downloadable:
             incomplete_batches.append((batch_name, state))
             continue
-        batch_jobs.append((batch_name, batch_job, False, output_ref))
+        if is_partial_output:
+            partial_output_batches.append((batch_name, state))
+            if not bool(getattr(args, "allow_partial", False)):
+                incomplete_batches.append((batch_name, state))
+                continue
+        batch_jobs.append((index, batch_name, batch_job, is_partial_output, output_ref))
 
-    if incomplete_batches and not args.allow_partial:
+    if incomplete_batches and not bool(getattr(args, "allow_partial", False)):
         examples = ", ".join(
             f"{name} ({state})" for name, state in incomplete_batches[:5]
         )
@@ -1151,10 +1481,11 @@ def retrieve_batch() -> Path:
             "output rows from non-succeeded chunks."
         )
 
-    if not batch_jobs:
+    if not batch_jobs and not (recover_missing_with_api and provider == "gemini"):
         raise RuntimeError(
             "No batch jobs with downloadable outputs are available to retrieve. "
-            "Use --wait to block until completion."
+            "Use --wait to block until completion, or use "
+            "--allow-partial --recover-missing-with-api for Gemini API recovery."
         )
 
     if partial_output_batches:
@@ -1184,12 +1515,14 @@ def retrieve_batch() -> Path:
 
     raw_outputs: list[tuple[str, Path]] = []
     skipped_output_batches: list[tuple[str, str]] = []
-    for index, (batch_name, batch_job, is_partial_output, output_ref) in enumerate(
-        batch_jobs,
-        start=1,
-    ):
-        raw_path = run_dir / f"batch_output_{index:03d}.jsonl"
-
+    def download_one(
+        output_index: int,
+        batch_name: str,
+        batch_job: object,
+        is_partial_output: bool,
+        output_ref: tuple[str, str] | None,
+    ) -> tuple[int, str, Path | None, str | None]:
+        raw_path = run_dir / f"batch_output_{output_index:03d}.jsonl"
         if provider == "anthropic":
             raw_path = _download_from_anthropic_output(
                 client=client,
@@ -1197,39 +1530,80 @@ def retrieve_batch() -> Path:
                 output_path=raw_path,
                 log=log,
             )
-        else:
-            if output_ref is None:
-                raise RuntimeError(f"Batch {batch_name} missing output destination.")
-            ref_kind, ref_value = output_ref
-            try:
-                if ref_kind == "gcs":
-                    raw_path = _download_from_vertex_gcs_output(
-                        dest_gcs_uri=ref_value,
-                        output_path=raw_path,
-                        log=log,
-                    )
-                elif ref_kind == "file":
-                    raw_path = _download_from_mldev_output(
-                        client=client,
-                        file_name=ref_value,
-                        output_path=raw_path,
-                    )
-                else:
-                    raise RuntimeError(
-                        f"Unsupported output destination type '{ref_kind}' "
-                        f"for batch {batch_name}."
-                    )
-            except RuntimeError as exc:
-                if is_partial_output and args.allow_partial:
-                    skipped_output_batches.append((batch_name, str(exc)))
-                    log(
-                        f"Skipping partial-output batch with no downloadable JSONL: "
-                        f"{batch_name}",
-                        exc=exc,
-                    )
-                    continue
-                raise
-        raw_outputs.append((batch_name, raw_path))
+            return output_index, batch_name, raw_path, None
+
+        if output_ref is None:
+            raise RuntimeError(f"Batch {batch_name} missing output destination.")
+        ref_kind, ref_value = output_ref
+        try:
+            if ref_kind == "gcs":
+                raw_path = _download_from_vertex_gcs_output(
+                    dest_gcs_uri=ref_value,
+                    output_path=raw_path,
+                    log=log,
+                )
+            elif ref_kind == "file":
+                raw_path = _download_from_mldev_output(
+                    client=client,
+                    file_name=ref_value,
+                    output_path=raw_path,
+                )
+            else:
+                raise RuntimeError(
+                    f"Unsupported output destination type '{ref_kind}' "
+                    f"for batch {batch_name}."
+                )
+        except RuntimeError as exc:
+            if is_partial_output and bool(getattr(args, "allow_partial", False)):
+                return output_index, batch_name, None, str(exc)
+            raise
+        return output_index, batch_name, raw_path, None
+
+    if batch_jobs:
+        download_workers = _parallel_worker_count(len(batch_jobs))
+        log(
+            f"Downloading {len(batch_jobs)} batch output chunk(s) in parallel "
+            f"(workers={download_workers})."
+        )
+        downloaded = []
+        with ThreadPoolExecutor(max_workers=download_workers) as executor:
+            futures = [
+                executor.submit(
+                    download_one,
+                    output_index,
+                    batch_name,
+                    batch_job,
+                    is_partial_output,
+                    output_ref,
+                )
+                for output_index, (
+                    _source_index,
+                    batch_name,
+                    batch_job,
+                    is_partial_output,
+                    output_ref,
+                ) in enumerate(batch_jobs, start=1)
+            ]
+            for future in tqdm(
+                futures_as_completed(futures),
+                total=len(futures),
+                desc="Downloading batch outputs",
+                unit="chunk",
+            ):
+                downloaded.append(future.result())
+
+        for _index, batch_name, raw_path, skip_reason in sorted(
+            downloaded,
+            key=lambda item: int(item[0]),
+        ):
+            if raw_path is None:
+                skipped_output_batches.append((batch_name, skip_reason or "unknown"))
+                log(
+                    f"Skipping partial-output batch with no downloadable JSONL: "
+                    f"{batch_name} ({skip_reason or 'unknown'})"
+                )
+                continue
+            raw_outputs.append((batch_name, raw_path))
 
     if skipped_output_batches:
         print(
@@ -1237,7 +1611,7 @@ def retrieve_batch() -> Path:
             f"{len(skipped_output_batches)}"
         )
 
-    if not raw_outputs:
+    if not raw_outputs and not (recover_missing_with_api and provider == "gemini"):
         raise RuntimeError("No output JSONL files were downloaded.")
 
     anthropic_custom_id_to_key: dict[str, str] = {}
@@ -1260,6 +1634,8 @@ def retrieve_batch() -> Path:
     header_written = False
     total_rows = 0
     error_rows = 0
+    duplicate_rows_skipped = 0
+    recovered_pages = 0
 
     output_keys_seen: set[str] = set()
     successful_page_keys: set[str] = set()
@@ -1282,6 +1658,27 @@ def retrieve_batch() -> Path:
                 except json.JSONDecodeError as exc:
                     log(f"Invalid JSONL line in batch output ({batch_name}).", exc=exc)
                     error_rows += 1
+                    append_processing_record(
+                        manifest_path,
+                        base_image_record(
+                            image_reference=None,
+                            source="batch_retrieve",
+                            status="failed",
+                            model=config.model,
+                            provider=provider,
+                            attempts=1,
+                            max_attempts=1,
+                            rows_written=0,
+                            failure_reason="invalid_jsonl_line",
+                            error_type=type(exc).__name__,
+                            error_message=str(exc),
+                            extra={
+                                "batch_name": batch_name,
+                                "raw_output_file": raw_path.name,
+                                "line_number": line_number,
+                            },
+                        ),
+                    )
                     _record_failure(
                         failures,
                         key=None,
@@ -1309,6 +1706,25 @@ def retrieve_batch() -> Path:
 
                     if not isinstance(record, dict):
                         error_rows += 1
+                        append_processing_record(
+                            manifest_path,
+                            base_image_record(
+                                image_reference=key,
+                                source="batch_retrieve",
+                                status="failed",
+                                model=config.model,
+                                provider=provider,
+                                attempts=1,
+                                max_attempts=1,
+                                rows_written=0,
+                                failure_reason="invalid_record_type",
+                                extra={
+                                    "batch_name": batch_name,
+                                    "raw_output_file": raw_path.name,
+                                    "line_number": line_number,
+                                },
+                            ),
+                        )
                         _record_failure(
                             failures,
                             key=key,
@@ -1321,6 +1737,25 @@ def retrieve_batch() -> Path:
                     if not isinstance(result, dict):
                         error_rows += 1
                         log(f"Missing/invalid result payload for key={key}")
+                        append_processing_record(
+                            manifest_path,
+                            base_image_record(
+                                image_reference=key,
+                                source="batch_retrieve",
+                                status="failed",
+                                model=config.model,
+                                provider=provider,
+                                attempts=1,
+                                max_attempts=1,
+                                rows_written=0,
+                                failure_reason="missing_result",
+                                extra={
+                                    "batch_name": batch_name,
+                                    "raw_output_file": raw_path.name,
+                                    "line_number": line_number,
+                                },
+                            ),
+                        )
                         _record_failure(
                             failures,
                             key=key,
@@ -1334,6 +1769,25 @@ def retrieve_batch() -> Path:
                         log(
                             f"Anthropic batch non-success for key={key}: type={result_type}"
                         )
+                        append_processing_record(
+                            manifest_path,
+                            base_image_record(
+                                image_reference=key,
+                                source="batch_retrieve",
+                                status="failed",
+                                model=config.model,
+                                provider=provider,
+                                attempts=1,
+                                max_attempts=1,
+                                rows_written=0,
+                                failure_reason=f"batch_{result_type or 'unknown'}",
+                                extra={
+                                    "batch_name": batch_name,
+                                    "raw_output_file": raw_path.name,
+                                    "line_number": line_number,
+                                },
+                            ),
+                        )
                         _record_failure(
                             failures,
                             key=key,
@@ -1345,6 +1799,25 @@ def retrieve_batch() -> Path:
                     if response is None:
                         error_rows += 1
                         log(f"Missing message in Anthropic result for key={key}")
+                        append_processing_record(
+                            manifest_path,
+                            base_image_record(
+                                image_reference=key,
+                                source="batch_retrieve",
+                                status="failed",
+                                model=config.model,
+                                provider=provider,
+                                attempts=1,
+                                max_attempts=1,
+                                rows_written=0,
+                                failure_reason="missing_response",
+                                extra={
+                                    "batch_name": batch_name,
+                                    "raw_output_file": raw_path.name,
+                                    "line_number": line_number,
+                                },
+                            ),
+                        )
                         _record_failure(
                             failures,
                             key=key,
@@ -1358,6 +1831,25 @@ def retrieve_batch() -> Path:
                     if not text_payload:
                         error_rows += 1
                         log(f"Empty response text for key={key}")
+                        append_processing_record(
+                            manifest_path,
+                            base_image_record(
+                                image_reference=key,
+                                source="batch_retrieve",
+                                status="failed",
+                                model=config.model,
+                                provider=provider,
+                                attempts=1,
+                                max_attempts=1,
+                                rows_written=0,
+                                failure_reason="empty_response_text",
+                                extra={
+                                    "batch_name": batch_name,
+                                    "raw_output_file": raw_path.name,
+                                    "line_number": line_number,
+                                },
+                            ),
+                        )
                         _record_failure(
                             failures,
                             key=key,
@@ -1373,6 +1865,27 @@ def retrieve_batch() -> Path:
                     except Exception as exc:
                         error_rows += 1
                         log(f"Schema validation failed for key={key}", exc=exc)
+                        append_processing_record(
+                            manifest_path,
+                            base_image_record(
+                                image_reference=key,
+                                source="batch_retrieve",
+                                status="failed",
+                                model=config.model,
+                                provider=provider,
+                                attempts=1,
+                                max_attempts=1,
+                                rows_written=0,
+                                failure_reason="schema_validation_failed",
+                                error_type=type(exc).__name__,
+                                error_message=str(exc),
+                                extra={
+                                    "batch_name": batch_name,
+                                    "raw_output_file": raw_path.name,
+                                    "line_number": line_number,
+                                },
+                            ),
+                        )
                         _record_failure(
                             failures,
                             key=key,
@@ -1405,12 +1918,51 @@ def retrieve_batch() -> Path:
                             line_number=global_line_number,
                             reason=reason,
                         )
+                        append_processing_record(
+                            manifest_path,
+                            base_image_record(
+                                image_reference=key,
+                                source="batch_retrieve",
+                                status="failed",
+                                model=config.model,
+                                provider=provider,
+                                attempts=1,
+                                max_attempts=1,
+                                rows_written=0,
+                                failure_reason=reason,
+                                error_message=parse_result.detail,
+                                extra={
+                                    "batch_name": batch_name,
+                                    "raw_output_file": raw_path.name,
+                                    "line_number": line_number,
+                                },
+                            ),
+                        )
                         continue
                     metadata = parse_result.metadata
                     parsed_model = parse_result.parsed_model
 
                 if parsed_model is None:
                     error_rows += 1
+                    append_processing_record(
+                        manifest_path,
+                        base_image_record(
+                            image_reference=key,
+                            source="batch_retrieve",
+                            status="failed",
+                            model=config.model,
+                            provider=provider,
+                            attempts=1,
+                            max_attempts=1,
+                            rows_written=0,
+                            failure_reason="missing_parsed_model",
+                            extra={
+                                "batch_name": batch_name,
+                                "raw_output_file": raw_path.name,
+                                "line_number": line_number,
+                            },
+                        ),
+                    )
                     _record_failure(
                         failures,
                         key=key,
@@ -1420,6 +1972,33 @@ def retrieve_batch() -> Path:
                     continue
 
                 file_key = key or f"<batch:{output_index}-line:{line_number}>"
+                if (
+                    key
+                    and duplicate_strategy == "first_successful"
+                    and key in successful_page_keys
+                ):
+                    duplicate_rows_skipped += 1
+                    append_processing_record(
+                        manifest_path,
+                        base_image_record(
+                            image_reference=key,
+                            source="batch_retrieve",
+                            status="duplicate_skipped",
+                            model=config.model,
+                            provider=provider,
+                            attempts=1,
+                            max_attempts=1,
+                            rows_written=0,
+                            extra={
+                                "batch_name": batch_name,
+                                "raw_output_file": raw_path.name,
+                                "line_number": line_number,
+                                "duplicate_strategy": duplicate_strategy,
+                                "duplicate_action": "kept_first_successful",
+                            },
+                        ),
+                    )
+                    continue
                 if key:
                     successful_page_keys.add(key)
 
@@ -1432,6 +2011,28 @@ def retrieve_batch() -> Path:
                 )
                 add_response_metadata_columns(rows, metadata)
                 rows_to_flush.extend(rows)
+                append_processing_record(
+                    manifest_path,
+                    base_image_record(
+                        image_reference=file_key,
+                        source="batch_retrieve",
+                        status="success",
+                        model=config.model,
+                        provider=provider,
+                        attempts=1,
+                        max_attempts=1,
+                        rows_written=len(rows),
+                        extra={
+                            "batch_name": batch_name,
+                            "raw_output_file": raw_path.name,
+                            "line_number": line_number,
+                            "duplicate_strategy": duplicate_strategy,
+                            "duplicate_action": "provided"
+                            if duplicate_strategy == "provide_all"
+                            else "kept",
+                        },
+                    ),
+                )
 
                 if len(rows_to_flush) >= flush_every:
                     header_written, wrote = _flush_rows(
@@ -1442,10 +2043,15 @@ def retrieve_batch() -> Path:
                     )
                     total_rows += wrote
 
+    expected_batch_names = (
+        batch_names
+        if recover_missing_with_api
+        else [name for name, _ in raw_outputs]
+    )
     expected_keys = _resolve_expected_request_keys(
         submit_run_dir=submit_run_dir,
         batch_names=batch_names,
-        selected_batch_names=[name for name, _ in raw_outputs],
+        selected_batch_names=expected_batch_names,
         log=log,
     )
     expected_success = _expected_success_keys(
@@ -1464,7 +2070,14 @@ def retrieve_batch() -> Path:
         recovery_keys: set[str] = set()
         recovery_force = False
 
-        if config.api_recovery_enabled:
+        if recover_missing_with_api:
+            recovery_keys = missing_success_keys
+            recovery_force = True
+            log(
+                "Recover-missing API mode enabled: attempting live API recovery "
+                f"for {len(recovery_keys)} missing expected page(s)."
+            )
+        elif config.api_recovery_enabled:
             recovery_keys = missing_success_keys
         elif parse_failure_missing_keys:
             recovery_keys = parse_failure_missing_keys
@@ -1484,7 +2097,9 @@ def retrieve_batch() -> Path:
                 rows_to_flush=rows_to_flush,
                 log=log,
                 force=recovery_force,
+                manifest_path=manifest_path,
             )
+            recovered_pages += recovered_count
             if recovered_count:
                 remaining = (
                     _expected_success_keys(
@@ -1541,7 +2156,7 @@ def retrieve_batch() -> Path:
             print("No failed keys detected; retry batch was not submitted.")
 
     try:
-        if args.allow_partial:
+        if bool(getattr(args, "allow_partial", False)):
             log(
                 "Partial retrieval enabled: expected-page and successful-page "
                 "coverage checks will be reported without failing the run."
@@ -1552,10 +2167,12 @@ def retrieve_batch() -> Path:
             successful_keys=successful_page_keys,
             failures=failures,
             require_all_expected_pages=(
-                bool(config.require_all_expected_pages) and not args.allow_partial
+                bool(config.require_all_expected_pages)
+                and not bool(getattr(args, "allow_partial", False))
             ),
             require_all_pages_successful=(
-                bool(config.require_all_pages_successful) and not args.allow_partial
+                bool(config.require_all_pages_successful)
+                and not bool(getattr(args, "allow_partial", False))
             ),
             log=log,
         )
@@ -1587,10 +2204,29 @@ def retrieve_batch() -> Path:
 
     log(
         f"Retrieved {total_rows} processed row(s) from {len(batch_jobs)} completed "
-        f"batch job(s) into {out_path.name} (errors={error_rows})."
+        f"batch job(s) into {out_path.name} "
+        f"(errors={error_rows}, duplicates_skipped={duplicate_rows_skipped}, "
+        f"recovered={recovered_pages})."
     )
+    summary_path = write_processing_summary(run_dir)
+    log(f"Wrote image processing manifest: {manifest_path.name}")
+    log(f"Wrote image processing summary: {summary_path.name}")
     _upload_dataset_to_gcs(out_path, run_dir.name, log)
-    return out_path
+    return RetrieveBatchResult(
+        dataset_path=out_path,
+        run_dir=run_dir,
+        provider=provider,
+        batch_count=len(batch_jobs),
+        output_file_count=len(raw_outputs),
+        rows_written=total_rows,
+        error_rows=error_rows,
+        expected_pages=len(expected_keys),
+        observed_pages=len(output_keys_seen),
+        successful_pages=len(successful_page_keys),
+        duplicate_rows_skipped=duplicate_rows_skipped,
+        recovered_pages=recovered_pages,
+        manifest_path=manifest_path,
+    )
 
 
 if __name__ == "__main__":

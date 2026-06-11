@@ -5,6 +5,11 @@ from pathlib import Path
 
 import pandas as pd
 
+from patientjournals.shared.identity import (
+    ensure_row_image_name,
+    image_name_from_reference,
+    row_image_name,
+)
 from patientjournals.shared.tools import find_newest_dataset
 
 
@@ -39,6 +44,10 @@ def normalize_gcs_file_key(
     return text or None
 
 
+def normalize_dataset_image_name(value: object) -> str | None:
+    return image_name_from_reference(value)
+
+
 def resolve_continue_dataset_path(
     value: str,
     *,
@@ -50,7 +59,7 @@ def resolve_continue_dataset_path(
     return Path(value).expanduser()
 
 
-def load_dataset_key_coverage(
+def load_dataset_image_coverage(
     dataset_path: str | Path,
     *,
     output_format: str | None = None,
@@ -62,7 +71,7 @@ def load_dataset_key_coverage(
         raise FileNotFoundError(f"dataset not found or not a file: {path}")
 
     fmt = _normalize_output_format(output_format or path.suffix.lstrip("."))
-    keys: set[str] = set()
+    image_names: set[str] = set()
     row_count = 0
 
     if fmt == "jsonl":
@@ -78,31 +87,40 @@ def load_dataset_key_coverage(
                     continue
                 if not isinstance(payload, dict):
                     continue
-                key = normalize_gcs_file_key(
-                    payload.get("file_name"),
-                    bucket_name=bucket_name,
-                )
-                if key:
-                    keys.add(key)
-        return fmt, keys, row_count
+                image_name = row_image_name(payload)
+                if image_name:
+                    image_names.add(image_name)
+        return fmt, image_names, row_count
 
     df = pd.read_csv(path, sep=csv_sep)
     row_count = len(df)
-    if "file_name" not in df.columns:
-        return fmt, keys, row_count
-
-    for value in df["file_name"].dropna().astype(str):
-        key = normalize_gcs_file_key(value, bucket_name=bucket_name)
-        if key:
-            keys.add(key)
-    return fmt, keys, row_count
+    for row in df.to_dict("records"):
+        image_name = row_image_name(row)
+        if image_name:
+            image_names.add(image_name)
+    return fmt, image_names, row_count
 
 
-def copy_dataset_rows_for_keys(
+def load_dataset_key_coverage(
+    dataset_path: str | Path,
+    *,
+    output_format: str | None = None,
+    csv_sep: str = "$",
+    bucket_name: str | None = None,
+) -> tuple[str, set[str], int]:
+    return load_dataset_image_coverage(
+        dataset_path,
+        output_format=output_format,
+        csv_sep=csv_sep,
+        bucket_name=bucket_name,
+    )
+
+
+def copy_dataset_rows_for_image_names(
     src_path: str | Path,
     dest_path: str | Path,
     *,
-    keys: set[str] | None,
+    image_names: set[str] | None,
     output_format: str | None = None,
     csv_sep: str = "$",
     bucket_name: str | None = None,
@@ -123,33 +141,58 @@ def copy_dataset_rows_for_keys(
                 raw = line.strip()
                 if not raw:
                     continue
-                if keys is not None:
-                    try:
-                        payload = json.loads(raw)
-                    except json.JSONDecodeError:
+                try:
+                    payload = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(payload, dict):
+                    continue
+                image_name = ensure_row_image_name(payload)
+                if image_names is not None:
+                    if image_name not in image_names:
                         continue
-                    if not isinstance(payload, dict):
-                        continue
-                    key = normalize_gcs_file_key(
-                        payload.get("file_name"),
-                        bucket_name=bucket_name,
-                    )
-                    if key not in keys:
-                        continue
+                raw = json.dumps(payload, ensure_ascii=False, default=str)
                 dest_handle.write(raw)
                 dest_handle.write("\n")
                 kept += 1
         return kept
 
     df = pd.read_csv(src, sep=csv_sep)
-    if keys is not None and "file_name" in df.columns:
-        mask = df["file_name"].apply(
-            lambda value: normalize_gcs_file_key(
-                value,
-                bucket_name=bucket_name,
-            )
-            in keys
+    if image_names is not None:
+        mask = df.apply(
+            lambda row: row_image_name(row.to_dict()) in image_names,
+            axis=1,
         )
         df = df[mask]
+    if len(df) and "image_name" not in df.columns:
+        df.insert(
+            0,
+            "image_name",
+            [row_image_name(row) for row in df.to_dict("records")],
+        )
+    elif len(df):
+        df["image_name"] = [
+            row.get("image_name") or row_image_name(row)
+            for row in df.to_dict("records")
+        ]
     df.to_csv(dest, index=False, sep=csv_sep)
     return len(df)
+
+
+def copy_dataset_rows_for_keys(
+    src_path: str | Path,
+    dest_path: str | Path,
+    *,
+    keys: set[str] | None,
+    output_format: str | None = None,
+    csv_sep: str = "$",
+    bucket_name: str | None = None,
+) -> int:
+    return copy_dataset_rows_for_image_names(
+        src_path,
+        dest_path,
+        image_names=keys,
+        output_format=output_format,
+        csv_sep=csv_sep,
+        bucket_name=bucket_name,
+    )

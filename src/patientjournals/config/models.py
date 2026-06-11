@@ -25,6 +25,20 @@ _REGISTERED_MODELS: dict[str, ModelSpec] = {
         supports_confidence_scores=True,
         supports_thoughts=True,
     ),
+    "gemini-3.5-flash": ModelSpec(
+        name="gemini-3.5-flash",
+        provider="gemini",
+        supports_batch=True,
+        supports_confidence_scores=True,
+        supports_thoughts=True,
+    ),
+    "gemini-3.1-flash-lite": ModelSpec(
+        name="gemini-3.1-flash-lite",
+        provider="gemini",
+        supports_batch=True,
+        supports_confidence_scores=True,
+        supports_thoughts=True,
+    ),
     "gemini-2.5-pro": ModelSpec(
         name="gemini-2.5-pro",
         provider="gemini",
@@ -65,6 +79,12 @@ _REGISTERED_MODELS: dict[str, ModelSpec] = {
 
 def all_registered_models() -> tuple[ModelSpec, ...]:
     return tuple(sorted(_REGISTERED_MODELS.values(), key=lambda item: item.name))
+
+
+def registered_google_models() -> tuple[ModelSpec, ...]:
+    return tuple(
+        model for model in all_registered_models() if model.provider == "gemini"
+    )
 
 
 def _infer_provider_from_model_name(model_name: str) -> ProviderName | None:

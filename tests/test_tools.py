@@ -3,6 +3,7 @@ import json
 import pandas as pd
 
 from patientjournals.shared.tools import (
+    build_image_name_id_set,
     filter_dataset_by_input_ids,
     list_input_files,
     load_existing_dataset,
@@ -49,7 +50,13 @@ def test_filter_dataset_by_input_ids_jsonl(tmp_path) -> None:
     src.write_text(
         "\n".join(
             [
-                json.dumps({"file_name": str(keep_file), "value": 1}),
+                json.dumps(
+                    {
+                        "image_name": keep_file.name,
+                        "file_name": str(keep_file),
+                        "value": 1,
+                    }
+                ),
                 json.dumps({"file_name": str(drop_file), "value": 2}),
             ]
         )
@@ -61,13 +68,13 @@ def test_filter_dataset_by_input_ids_jsonl(tmp_path) -> None:
     kept = filter_dataset_by_input_ids(
         src,
         dest,
-        input_ids={str(keep_file.resolve())},
+        input_ids={keep_file.name},
         output_format="jsonl",
     )
 
     assert kept == 1
     assert [json.loads(line) for line in dest.read_text(encoding="utf-8").splitlines()] == [
-        {"file_name": str(keep_file), "value": 1}
+        {"image_name": keep_file.name, "file_name": str(keep_file), "value": 1}
     ]
 
 
@@ -75,7 +82,7 @@ def test_load_existing_dataset_csv(tmp_path) -> None:
     path = tmp_path / "dataset.csv"
     pd.DataFrame(
         [
-            {"file_name": "a.png", "value": 1},
+            {"image_name": "a.png", "file_name": "/tmp/a.png", "value": 1},
             {"file_name": "b.png", "value": 2},
         ]
     ).to_csv(path, index=False, sep="$")
@@ -86,3 +93,11 @@ def test_load_existing_dataset_csv(tmp_path) -> None:
     assert files == {"a.png", "b.png"}
     assert row_count == 2
 
+
+def test_build_image_name_id_set_uses_basename_identity(tmp_path) -> None:
+    paths = [
+        str(tmp_path / "one" / "a.png"),
+        str(tmp_path / "two" / "b.png"),
+    ]
+
+    assert build_image_name_id_set(paths) == {"a.png", "b.png"}

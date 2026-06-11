@@ -5,6 +5,7 @@ from typing import Callable
 from pydantic import BaseModel
 
 from patientjournals.config.schemas import FrontPage, TextPage
+from patientjournals.shared.identity import identity_columns
 
 
 FieldConfidenceByPointer = dict[str, dict[str, float | None]]
@@ -89,7 +90,7 @@ def journal_rows(
             field_confidence_by_pointer,
             path=(),
         )
-    row["file_name"] = file_name
+    row.update(identity_columns(file_name))
     return [row]
 
 
@@ -120,7 +121,7 @@ def text_page_rows(
             if isinstance(page_level_confidence, dict):
                 confidence_payload.update(page_level_confidence)
             row["field_confidence"] = confidence_payload
-        row["file_name"] = file_name
+        row.update(identity_columns(file_name))
         rows.append(row)
     return rows
 
@@ -137,7 +138,7 @@ def default_rows(
             field_confidence_by_pointer,
             path=(),
         )
-    row["file_name"] = file_name
+    row.update(identity_columns(file_name))
     return [row]
 
 
