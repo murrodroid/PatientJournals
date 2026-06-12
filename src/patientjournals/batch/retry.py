@@ -544,7 +544,7 @@ def _submit_failed_pages_as_batch(
             f"{skipped_keys} key(s)."
         )
 
-    run_dir = create_subfolder(config.output_root, prefix="submit_")
+    run_dir = create_subfolder(config.output_root, category="submit")
     retry_log = get_run_logger(run_dir)
     model_name = str(config.model).strip()
     if submit_run_dir is not None:

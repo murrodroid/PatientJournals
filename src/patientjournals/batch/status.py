@@ -10,6 +10,7 @@ from pathlib import Path
 from patientjournals.batch.client import get_batch_client, resolve_service_account_path
 from patientjournals.config import config
 from patientjournals.config.models import resolve_model_spec
+from patientjournals.shared import run_layout
 
 
 _GEMINI_TERMINAL_STATES = {
@@ -136,11 +137,7 @@ def _request_count_from_payload(payload: dict | None) -> int | None:
 
 
 def _latest_batch_job_file(output_root: str) -> Path | None:
-    root = Path(output_root).expanduser()
-    if not root.exists() or not root.is_dir():
-        return None
-    run_dirs = sorted((item for item in root.iterdir() if item.is_dir()), reverse=True)
-    for run_dir in run_dirs:
+    for run_dir in run_layout.iter_run_dirs(output_root, "submit"):
         candidate = run_dir / "batch_job.json"
         if candidate.exists() and candidate.is_file():
             return candidate

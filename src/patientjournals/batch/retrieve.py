@@ -45,6 +45,7 @@ from patientjournals.shared.processing_metrics import (
     write_processing_summary,
 )
 from patientjournals.shared.response_parsing import extract_response_metadata
+from patientjournals.shared import run_layout
 from patientjournals.shared.tools import create_subfolder, flush_rows, get_run_logger
 
 
@@ -778,19 +779,8 @@ def _request_files_from_payload(
 
 
 def _find_submit_run_dir(batch_names: list[str]) -> Path | None:
-    root = Path(config.output_root).expanduser()
-    if not root.exists() or not root.is_dir():
-        return None
-
     target = {name for name in batch_names if isinstance(name, str) and name.strip()}
-    run_dirs = sorted(
-        (
-            item
-            for item in root.iterdir()
-            if item.is_dir() and item.name.startswith("submit_")
-        ),
-        reverse=True,
-    )
+    run_dirs = run_layout.iter_run_dirs(config.output_root, "submit")
     for run_dir in run_dirs:
         job_payload = _read_batch_job_payload(run_dir / "batch_job.json")
         if not job_payload:
@@ -1301,11 +1291,7 @@ def _read_batch_names_from_job_file(path: Path) -> list[str]:
 
 
 def _latest_batch_job_file(output_root: str) -> Path | None:
-    root = Path(output_root).expanduser()
-    if not root.exists() or not root.is_dir():
-        return None
-    run_dirs = sorted((item for item in root.iterdir() if item.is_dir()), reverse=True)
-    for run_dir in run_dirs:
+    for run_dir in run_layout.iter_run_dirs(output_root, "submit"):
         candidate = run_dir / "batch_job.json"
         if candidate.exists() and candidate.is_file():
             return candidate
@@ -1376,7 +1362,7 @@ def retrieve_batch(args: argparse.Namespace | None = None) -> RetrieveBatchResul
     if not batch_names:
         raise ValueError("No batch jobs resolved for retrieval.")
 
-    run_dir = create_subfolder(config.output_root, prefix="retrieve_")
+    run_dir = create_subfolder(config.output_root, category="retrieve")
     log = get_run_logger(run_dir)
 
     provider = _provider_from_batch_names(

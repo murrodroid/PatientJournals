@@ -11,11 +11,14 @@ from patientjournals.app.dashboard import latest_dataset_path, summarize_dashboa
 from patientjournals.app.jobs import (
     JobRegistry,
     RegisteredJob,
+    batch_run_provider,
     build_retrieve_command,
     build_submit_command,
+    find_dataset_near,
     list_batch_chunks,
     list_submit_jobs,
     read_dataset_preview,
+    read_recorded_results,
     read_run_error,
 )
 from patientjournals.app.models import AppSettings, SubmitJobDraft
@@ -362,3 +365,103 @@ def test_app_settings_cost_rate_roundtrip(tmp_path) -> None:
     loaded = load_app_settings(path)
 
     assert loaded.estimated_cost_per_1k_images == 12.5
+
+
+def test_find_dataset_near_resolves_file_or_directory(tmp_path) -> None:
+    run_dir = tmp_path / "retrieve_x"
+    run_dir.mkdir()
+    dataset = run_dir / "retrieve_x_dataset.jsonl"
+    dataset.write_text('{"image_name": "a.png"}\n', encoding="utf-8")
+
+    assert find_dataset_near(dataset) == str(dataset)
+    # A missing exact path still resolves via the directory.
+    assert find_dataset_near(run_dir / "gone.jsonl") == str(dataset)
+    assert find_dataset_near(run_dir) == str(dataset)
+    assert find_dataset_near(tmp_path / "nope") == ""
+    assert find_dataset_near("") == ""
+
+
+def test_read_recorded_results_reads_batch_results(tmp_path) -> None:
+    assert read_recorded_results(tmp_path) == {}
+    (tmp_path / "batch_results.json").write_text(
+        json.dumps({"successful_pages": 5, "dataset_path": "/x/y.jsonl"}),
+        encoding="utf-8",
+    )
+    recorded = read_recorded_results(tmp_path)
+    assert recorded["successful_pages"] == 5
+    assert recorded["dataset_path"] == "/x/y.jsonl"
+
+
+def test_batch_run_provider_reads_metadata(tmp_path) -> None:
+    assert batch_run_provider(tmp_path) == ""
+    (tmp_path / "batch_job.json").write_text(
+        json.dumps({"provider": "Gemini"}), encoding="utf-8"
+    )
+    assert batch_run_provider(tmp_path) == "gemini"
+
+
+def test_app_settings_api_recovery_threshold_roundtrip(tmp_path) -> None:
+    path = tmp_path / "app_config.json"
+    save_app_settings(AppSettings(api_recovery_threshold=8), path)
+    assert load_app_settings(path).api_recovery_threshold == 8
+
+
+def test_recover_dataset_gaps_only_targets_missing_pages(tmp_path, monkeypatch) -> None:
+    from patientjournals.app import jobs as app_jobs
+    from patientjournals.batch import retrieve as retrieve_module
+    from patientjournals.shared.identity import image_name_from_reference
+
+    # Existing dataset already covers 3 of 5 expected pages.
+    run_dir = tmp_path / "submit_x"
+    run_dir.mkdir()
+    (run_dir / "batch_job.json").write_text(
+        json.dumps(
+            {
+                "provider": "gemini",
+                "batch_jobs": [{"batch_job_name": "b1", "request_count": 5}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    dataset = run_dir / "submit_x_dataset.jsonl"
+    dataset.write_text(
+        "\n".join(
+            json.dumps({"image_name": f"p{i}.png", "field": "ok"}) for i in range(3)
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "batch_results.json").write_text(
+        json.dumps({"dataset_path": str(dataset)}), encoding="utf-8"
+    )
+
+    expected = {f"pages/dir/p{i}.png" for i in range(5)}  # p0..p4; p3,p4 missing
+    monkeypatch.setattr(
+        retrieve_module,
+        "_resolve_expected_request_keys",
+        lambda **kwargs: set(expected),
+    )
+
+    recovered_for = {}
+
+    def fake_recover(*, missing_keys, rows_to_flush, **kwargs):
+        recovered_for["keys"] = set(missing_keys)
+        for key in missing_keys:
+            rows_to_flush.append(
+                {"image_name": image_name_from_reference(key), "field": "recovered"}
+            )
+        return len(missing_keys)
+
+    monkeypatch.setattr(
+        retrieve_module, "_recover_missing_pages_via_api_key", fake_recover
+    )
+
+    result = app_jobs.recover_dataset_gaps(run_dir, AppSettings())
+
+    # Only the 2 genuinely missing pages are recovered, not all 5.
+    assert recovered_for["keys"] == {"pages/dir/p3.png", "pages/dir/p4.png"}
+    assert result["recovered_pages"] == 2
+    assert result["successful_pages"] == 5
+    assert result["missing_pages"] == 0
+    # The recovered rows were appended to the existing dataset (3 -> 5).
+    assert dataset.read_text(encoding="utf-8").strip().count("\n") + 1 == 5

@@ -335,7 +335,7 @@ def collect_outputs(args: argparse.Namespace | None = None) -> CollectOutputsRes
             "--skip-gcs-outputs requires at least one --local-output path."
         )
 
-    run_dir = create_subfolder(args.run_root, prefix="collect_outputs_")
+    run_dir = create_subfolder(args.run_root, category="collect_outputs")
     log = get_run_logger(run_dir)
     bucket = (
         None

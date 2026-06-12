@@ -123,7 +123,7 @@ async def run_local_job(
 
     out_name = config.dataset_file_name
     output_format = config.output_format
-    run_dir = create_subfolder(config.output_root)
+    run_dir = create_subfolder(config.output_root, category="local")
     log = get_run_logger(run_dir)
     out_path = run_dir / f'{run_dir.name}_{out_name}.{output_format.lstrip(".")}'
     manifest_path = run_dir / MANIFEST_FILE_NAME

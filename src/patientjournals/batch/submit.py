@@ -28,6 +28,7 @@ from patientjournals.shared.dataset_coverage import (
     load_dataset_image_coverage,
     resolve_continue_dataset_path,
 )
+from patientjournals.shared import run_layout
 from patientjournals.shared.identity import image_name_from_gcs_object
 from patientjournals.shared.tools import create_subfolder, get_run_logger
 
@@ -319,17 +320,7 @@ def _submitted_batch_ids_by_chunk_from_run_log(
 
 
 def _latest_submit_run_dir(output_root: str) -> Path | None:
-    root = Path(output_root).expanduser()
-    if not root.exists() or not root.is_dir():
-        return None
-    run_dirs = sorted(
-        (
-            item
-            for item in root.iterdir()
-            if item.is_dir() and item.name.startswith("submit_")
-        ),
-        reverse=True,
-    )
+    run_dirs = run_layout.iter_run_dirs(output_root, "submit")
     return run_dirs[0] if run_dirs else None
 
 
@@ -1081,7 +1072,7 @@ def submit_batch(args: argparse.Namespace | None = None) -> Path | None:
         print(f"Resubmitted {rerun_count} chunk job(s).")
         return run_dir
 
-    run_dir = create_subfolder(config.output_root, prefix="submit_")
+    run_dir = create_subfolder(config.output_root, category="submit")
     log = get_run_logger(run_dir)
     _warn_if_confidence_scores_unsupported(provider=provider, log=log)
     _ensure_uploaded_sources(bucket, log)

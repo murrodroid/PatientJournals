@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 import patientjournals.config.settings as config_module
 from patientjournals.config import config
+from patientjournals.shared import run_layout
 from patientjournals.shared.identity import (
     build_image_name_set,
     ensure_row_image_name,
@@ -85,10 +86,29 @@ def flush_rows(
 def create_subfolder(
     root: str | Path = "runs",
     prefix: str = "",
+    category: str = "",
 ) -> Path:
     root_path = Path(root)
-    run_name = f"{prefix}{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    run_dir = root_path / run_name
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    # Resolve the job category so the run lands in the right subfolder. A bare
+    # prefix (legacy callers) is mapped to its category for the same effect.
+    if not category and prefix:
+        for cat, legacy_prefix in run_layout.LEGACY_PREFIXES.items():
+            if prefix == legacy_prefix:
+                category = cat
+                break
+
+    if category in run_layout.CATEGORY_DIRS:
+        parent = root_path / run_layout.CATEGORY_DIRS[category]
+        run_name = timestamp
+        kind = category
+    else:
+        parent = root_path
+        run_name = f"{prefix}{timestamp}"
+        kind = prefix.rstrip("_") or "run"
+
+    run_dir = parent / run_name
     run_dir.mkdir(parents=True, exist_ok=False)
 
     raw_config = Path(config_module.__file__).read_text(encoding="utf-8")
@@ -103,6 +123,7 @@ def create_subfolder(
 
     payload = {
         "created_at": datetime.now().isoformat(timespec="seconds"),
+        "kind": kind,
         "config_file": "config_snapshot.py",
         "config_values": serializable_config(config_module),
         "output_schema": config.output_schema,
@@ -292,19 +313,15 @@ def find_newest_dataset(
     if not root.exists() or not root.is_dir():
         raise FileNotFoundError(f"runs folder not found: {root}")
 
-    run_dirs = sorted(
-        (p for p in root.iterdir() if p.is_dir()),
-        reverse=True,
-    )
     patterns = (
         f"*_{dataset_name}.jsonl",
         f"*_{dataset_name}.csv",
     )
-    for run_dir in run_dirs:
-        for pattern in patterns:
-            matches = sorted(run_dir.glob(pattern))
-            if matches:
-                return matches[-1]
+    candidates: list[Path] = []
+    for pattern in patterns:
+        candidates.extend(root.rglob(pattern))
+    if candidates:
+        return max(candidates, key=lambda path: path.stat().st_mtime)
 
     raise FileNotFoundError(
         f"No dataset files found in {root} for name '{dataset_name}'."

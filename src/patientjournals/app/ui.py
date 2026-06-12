@@ -22,15 +22,19 @@ from patientjournals.app.datasets import (
 from patientjournals.app.jobs import (
     JobRegistry,
     aggregate_batch_state,
+    batch_run_provider,
     build_submit_command,
     build_validation_command,
     cancel_batch_run,
+    find_dataset_near,
+    recover_dataset_gaps,
     list_batch_chunks,
     list_batch_chunks_with_state,
     list_submit_jobs,
     local_image_names,
     poll_local_batch_states,
     read_dataset_preview,
+    read_recorded_results,
     read_run_error,
     resubmit_failed_requests,
     run_batch_draft_direct,
@@ -631,6 +635,9 @@ class PatientJournalsApp:
         cost_rate_var = tk.StringVar(
             value=str(self.settings.estimated_cost_per_1k_images or "")
         )
+        api_threshold_var = tk.StringVar(
+            value=str(self.settings.api_recovery_threshold)
+        )
 
         ttk.Label(frame, text="Auth mode", style="App.TLabel").grid(row=0, column=0, sticky="w", pady=8)
         auth_combo = ttk.Combobox(
@@ -681,6 +688,7 @@ class PatientJournalsApp:
             width=24,
         ).grid(row=7, column=1, sticky="w", pady=8, padx=(14, 0))
         self._field(advanced, "Est. cost per 1k images ($)", cost_rate_var, 8)
+        self._field(advanced, "API recovery threshold (failures)", api_threshold_var, 9)
 
         status_var = tk.StringVar(value="")
         ttk.Label(self.content, textvariable=status_var, style="Muted.TLabel").pack(anchor="w", pady=(12, 0))
@@ -692,6 +700,14 @@ class PatientJournalsApp:
                 messagebox.showerror(
                     "Invalid setting",
                     "Est. cost per 1k images must be a number (or blank).",
+                )
+                return
+            try:
+                api_threshold = int(float(api_threshold_var.get().strip() or 0))
+            except ValueError:
+                messagebox.showerror(
+                    "Invalid setting",
+                    "API recovery threshold must be a whole number.",
                 )
                 return
             self.settings = AppSettings(
@@ -710,6 +726,7 @@ class PatientJournalsApp:
                 validation_images_root=validation_images_var.get(),
                 batch_duplicate_strategy=duplicate_strategy_var.get(),  # type: ignore[arg-type]
                 estimated_cost_per_1k_images=cost_rate,
+                api_recovery_threshold=api_threshold,
             )
             path = save_app_settings(self.settings, self.settings_path)
             status_var.set(f"Saved {path}")
@@ -1172,6 +1189,11 @@ class PatientJournalsApp:
             ttk.Label(cell, textvariable=var, style="Heading.TLabel").pack(anchor="w")
             ttk.Label(cell, text=label, style="Muted.TLabel").pack(anchor="w")
 
+        path_var = tk.StringVar(value="")
+        ttk.Label(win, textvariable=path_var, style="Muted.TLabel").pack(
+            anchor="w", padx=18, pady=(0, 4)
+        )
+
         preview_frame = ttk.LabelFrame(
             win, text="Sample of extracted rows", padding=(8, 8), style="Section.TLabelframe"
         )
@@ -1189,9 +1211,17 @@ class PatientJournalsApp:
         footer = ttk.Frame(win, style="App.TFrame", padding=(18, 12))
         footer.pack(fill="x", side="bottom")
 
-        state = {"dataset": "", "failed": 0, "done": False, "mode": "request"}
+        state = {
+            "dataset": "",
+            "failed": 0,
+            "done": False,
+            "mode": "request",
+            "rerun_method": "batch",
+        }
 
         def populate_preview(columns, rows) -> None:
+            # Clear any rows from a previous load so re-retrieve/recover can repaint.
+            preview.delete(*preview.get_children())
             preview["columns"] = list(columns)
             for column in columns:
                 preview.heading(column, text=column)
@@ -1212,7 +1242,7 @@ class PatientJournalsApp:
             error_box.insert("1.0", f"Error / notes:\n{text}")
             error_box.configure(state="disabled")
 
-        def finish(payload, columns, rows, error_text) -> None:
+        def finish(payload, dataset_path, columns, rows, error_text) -> None:
             state["done"] = True
             if payload is not None:
                 expected = int(payload.get("expected_pages") or job.image_count or 0)
@@ -1221,17 +1251,37 @@ class PatientJournalsApp:
                 total_var.set(str(expected))
                 ok_var.set(str(succeeded))
                 fail_var.set(str(missing))
-                state["dataset"] = str(payload.get("dataset_path") or "")
+                state["dataset"] = dataset_path or str(payload.get("dataset_path") or "")
                 state["failed"] = missing
-                state_var.set(
-                    "Review the results below, then keep them or rerun what failed."
-                )
-                populate_preview(columns, rows)
                 state["mode"] = "request"
-                rerun_button.configure(
-                    text=f"Rerun {missing} failed" if missing else "Rerun failed",
-                    state="normal" if missing > 0 else "disabled",
-                )
+                populate_preview(columns, rows)
+                if rows:
+                    state_var.set(
+                        "Review the sample below, then keep the results or rerun "
+                        "what failed."
+                    )
+                else:
+                    state_var.set(
+                        f"Retrieved {succeeded} row(s), but no preview rows could be "
+                        "read from the dataset (see path below)."
+                    )
+                path_var.set(f"Dataset: {state['dataset'] or '(none written)'}")
+                if missing > 0:
+                    provider = batch_run_provider(job.run_dir)
+                    threshold = int(self.settings.api_recovery_threshold or 0)
+                    use_api = provider == "gemini" and missing <= threshold
+                    state["rerun_method"] = "api" if use_api else "batch"
+                    rerun_button.configure(
+                        text=(
+                            f"Recover {missing} via API"
+                            if use_api
+                            else f"Resubmit {missing} as batch"
+                        ),
+                        state="normal",
+                    )
+                else:
+                    state["rerun_method"] = "batch"
+                    rerun_button.configure(text="Rerun failed", state="disabled")
                 validate_button.configure(
                     state="normal" if state["dataset"] else "disabled"
                 )
@@ -1250,25 +1300,47 @@ class PatientJournalsApp:
                 rerun_button.configure(text="Rerun job", state="normal")
             show_error(error_text)
 
-        def load() -> None:
+        def load(force_retrieve: bool = False) -> None:
+            import traceback
+
             try:
-                payload = run_retrieve_direct(
-                    job.run_dir,
-                    self.settings,
-                    allow_partial=True,
-                    recover_missing_with_api=recover_missing,
-                    duplicate_strategy=duplicate_strategy,
-                )
-            except Exception as exc:  # noqa: BLE001
+                # Fast path: if this job was already retrieved and its dataset is
+                # still on disk, show it directly instead of re-running a full
+                # (slow, networked) retrieve.
+                payload: dict | None = None
+                if not force_retrieve:
+                    recorded = read_recorded_results(job.run_dir)
+                    if recorded:
+                        existing = find_dataset_near(recorded.get("dataset_path") or "")
+                        if existing:
+                            payload = dict(recorded)
+                            payload["dataset_path"] = existing
+
+                if payload is None:
+                    self.root.after(
+                        0, lambda: state_var.set("Retrieving batch outputs… (this can take a while)")
+                    )
+                    payload = run_retrieve_direct(
+                        job.run_dir,
+                        self.settings,
+                        allow_partial=True,
+                        recover_missing_with_api=recover_missing,
+                        duplicate_strategy=duplicate_strategy,
+                    )
+
+                dataset_path = find_dataset_near(payload.get("dataset_path") or "")
+                columns, rows = read_dataset_preview(dataset_path, limit=25)
                 local = read_run_error(job.run_dir)
-                message = str(exc) + (f"\n\n{local}" if local else "")
-                self.root.after(0, lambda: finish(None, [], [], message))
-                return
-            columns, rows = read_dataset_preview(
-                payload.get("dataset_path", ""), limit=25
-            )
-            local = read_run_error(job.run_dir)
-            self.root.after(0, lambda: finish(payload, columns, rows, local))
+                self.root.after(
+                    0,
+                    lambda: finish(payload, dataset_path, columns, rows, local),
+                )
+            except Exception:  # noqa: BLE001
+                message = traceback.format_exc()
+                local = read_run_error(job.run_dir)
+                if local:
+                    message = f"{message}\n\n{local}"
+                self.root.after(0, lambda: finish(None, "", [], [], message))
 
         def keep_results() -> None:
             win.destroy()
@@ -1278,32 +1350,54 @@ class PatientJournalsApp:
         def rerun() -> None:
             if not state.get("failed"):
                 return
-            chunk_level = state.get("mode") == "chunk"
-            state_var.set(
-                "Resubmitting failed job…" if chunk_level else "Resubmitting failed requests…"
-            )
+            mode = state.get("mode")
+            method = state.get("rerun_method", "batch")
             rerun_button.configure(state="disabled")
+
+            if mode == "chunk":
+                state_var.set("Resubmitting the failed job as a batch…")
+                action = lambda: run_batch_rerun_direct(job.run_dir, self.settings)
+                reload_after = False
+            elif method == "api":
+                state_var.set(
+                    f"Recovering {state['failed']} missing page(s) via API…"
+                )
+                action = lambda: recover_dataset_gaps(job.run_dir, self.settings)
+                reload_after = True
+            else:
+                state_var.set(
+                    f"Resubmitting {state['failed']} failed page(s) as a batch…"
+                )
+                action = lambda: resubmit_failed_requests(job.run_dir, self.settings)
+                reload_after = False
 
             def worker() -> None:
                 try:
-                    if chunk_level:
-                        run_batch_rerun_direct(job.run_dir, self.settings)
-                    else:
-                        resubmit_failed_requests(job.run_dir, self.settings)
+                    action()
                 except Exception as exc:  # noqa: BLE001
-                    self.root.after(
-                        0, lambda: messagebox.showerror("Rerun failed", str(exc), parent=win)
-                    )
+
+                    def on_err() -> None:
+                        messagebox.showerror("Rerun failed", str(exc), parent=win)
+                        rerun_button.configure(state="normal")
+
+                    self.root.after(0, on_err)
                     return
 
                 def done() -> None:
                     self._live_batch_status.pop(job.run_dir, None)
-                    win.destroy()
-                    if on_change:
-                        on_change(
-                            f"Resubmitted failed work for {job.job_id}. "
-                            "Refresh status, then view results again."
-                        )
+                    if reload_after:
+                        # API recovery completes the dataset immediately; refresh
+                        # this window in place instead of closing it.
+                        if on_change:
+                            on_change(f"Recovered failed pages via API for {job.job_id}.")
+                        start_load()
+                    else:
+                        win.destroy()
+                        if on_change:
+                            on_change(
+                                f"Resubmitted failed work for {job.job_id}. "
+                                "Refresh status, then view results again."
+                            )
 
                 self.root.after(0, done)
 
@@ -1314,10 +1408,24 @@ class PatientJournalsApp:
             win.destroy()
             self._navigate("dashboard", self.show_dashboard)
 
+        def start_load(force_retrieve: bool = False) -> None:
+            state_var.set(
+                "Re-retrieving batch outputs…" if force_retrieve else "Loading results…"
+            )
+            threading.Thread(
+                target=lambda: load(force_retrieve=force_retrieve), daemon=True
+            ).start()
+
         self._button(footer, "Keep results", keep_results).pack(side="left")
         rerun_button = self._button(footer, "Rerun failed", rerun, kind="secondary")
         rerun_button.pack(side="left", padx=(10, 0))
         rerun_button.configure(state="disabled")
+        self._button(
+            footer,
+            "Re-retrieve",
+            lambda: start_load(force_retrieve=True),
+            kind="secondary",
+        ).pack(side="left", padx=(10, 0))
         validate_button = self._button(
             footer, "Validate in Dashboard", validate_in_dashboard, kind="secondary"
         )
@@ -1333,7 +1441,7 @@ class PatientJournalsApp:
             side="right"
         )
 
-        threading.Thread(target=load, daemon=True).start()
+        start_load()
 
     def show_jobs(self) -> None:
         self._clear_content()

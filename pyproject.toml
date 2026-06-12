@@ -18,6 +18,10 @@ dependencies = [
     "tqdm>=4.67.1",
 ]
 
+[project.scripts]
+app = "patientjournals.app.ui:main"
+patientjournals-app = "patientjournals.app.ui:main"
+
 [dependency-groups]
 dev = [
     "pytest>=8.3.0",

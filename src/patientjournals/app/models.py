@@ -34,6 +34,10 @@ class AppSettings:
     # Optional, user-provided rate used only to show a rough cost estimate before
     # submitting a batch. 0 disables the estimate. This is not a billed figure.
     estimated_cost_per_1k_images: float = 0.0
+    # When rerunning failed pages, at or below this many failures the app recovers
+    # them with synchronous API calls (fast, no new batch); above it, it submits a
+    # rerun batch instead. API recovery is Gemini-only.
+    api_recovery_threshold: int = 20
 
     @classmethod
     def from_runtime_config(cls) -> "AppSettings":

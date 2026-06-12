@@ -26,6 +26,7 @@ from patientjournals.app.settings_store import (
 from patientjournals.config import config
 from patientjournals.config.schemas import resolve_output_schema
 from patientjournals.local.service import LocalRunRequest, LocalRunResult, run_local_job
+from patientjournals.shared import run_layout
 
 
 @dataclass(frozen=True)
@@ -429,6 +430,133 @@ def resubmit_failed_requests(
     return payload
 
 
+def batch_run_provider(run_dir: str | Path) -> str:
+    """Return the provider ("gemini"/"anthropic") recorded for a submit run."""
+    meta = _read_json_file(Path(run_dir).expanduser() / "batch_job.json")
+    return str(meta.get("provider") or "").strip().lower()
+
+
+def recover_failed_via_api(
+    run_dir: str | Path,
+    settings: AppSettings,
+) -> dict[str, object]:
+    """Fill in failed/missing pages with synchronous API calls and record results.
+
+    This completes the dataset in one pass without submitting a new batch. It is
+    appropriate for a small number of failures; large counts should use a rerun
+    batch instead. Gemini-only.
+    """
+    return run_retrieve_direct(
+        run_dir,
+        settings,
+        allow_partial=True,
+        recover_missing_with_api=True,
+    )
+
+
+def recover_dataset_gaps(
+    run_dir: str | Path,
+    settings: AppSettings,
+) -> dict[str, object]:
+    """Recover only the pages genuinely missing from the existing dataset via API.
+
+    Unlike a full retrieve (which re-derives every batch failure from scratch and
+    redoes work already recovered), this targets exactly the expected pages that
+    are absent from the current dataset, recovers them with concurrent API calls,
+    and appends the new rows. Falls back to a full recover-retrieve if the job has
+    not been retrieved yet or expected keys cannot be resolved.
+    """
+    from patientjournals.batch import retrieve as retrieve_module
+    from patientjournals.shared.identity import image_name_from_reference
+    from patientjournals.shared.tools import (
+        flush_rows,
+        get_run_logger,
+        load_existing_dataset,
+    )
+
+    recorded = read_recorded_results(run_dir)
+    dataset_path = find_dataset_near(recorded.get("dataset_path") or "")
+    if not dataset_path:
+        return recover_failed_via_api(run_dir, settings)
+
+    overrides = command_override_payload(settings)
+    previous = _apply_runtime_overrides(overrides)
+    try:
+        run_path = Path(run_dir).expanduser()
+        log = get_run_logger(run_path)
+        batch_meta = _read_json_file(run_path / "batch_job.json")
+        batch_names = [
+            str(item.get("batch_job_name"))
+            for item in (batch_meta.get("batch_jobs") or [])
+            if item.get("batch_job_name")
+        ]
+        output_format, covered_names, existing_count = load_existing_dataset(dataset_path)
+        expected_keys = retrieve_module._resolve_expected_request_keys(
+            submit_run_dir=run_path,
+            batch_names=batch_names,
+            selected_batch_names=batch_names,
+            log=log,
+        )
+        if not expected_keys:
+            # Cannot determine the page universe; fall back to a full retrieve.
+            return recover_failed_via_api(run_dir, settings)
+
+        def basename(key: str) -> str:
+            return image_name_from_reference(key) or key
+
+        missing_keys = {
+            key for key in expected_keys if basename(key) not in covered_names
+        }
+        log(
+            f"Incremental API recovery: {len(missing_keys)} of {len(expected_keys)} "
+            f"expected page(s) missing from existing dataset."
+        )
+
+        recovered = 0
+        if missing_keys:
+            rows_to_flush: list[dict] = []
+            recovered = retrieve_module._recover_missing_pages_via_api_key(
+                missing_keys=missing_keys,
+                successful_keys=set(),
+                observed_output_keys=set(),
+                failures={},
+                rows_to_flush=rows_to_flush,
+                log=log,
+                force=True,
+                manifest_path=None,
+            )
+            if rows_to_flush:
+                flush_rows(
+                    rows=rows_to_flush,
+                    out_path=str(dataset_path),
+                    header_written=True,
+                    output_format=output_format,
+                )
+
+        successful = len(covered_names) + recovered
+        payload = {
+            "retrieved_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "dataset_path": str(dataset_path),
+            "provider": str(batch_meta.get("provider") or ""),
+            "batch_count": len(batch_names),
+            "rows_written": successful,
+            "error_rows": max(0, len(missing_keys) - recovered),
+            "expected_pages": len(expected_keys),
+            "observed_pages": len(expected_keys),
+            "successful_pages": successful,
+            "recovered_pages": recovered,
+            "missing_pages": max(0, len(missing_keys) - recovered),
+            "submit_failed": False,
+        }
+        (run_path / BATCH_RESULTS_FILE).write_text(
+            json.dumps(payload, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        return payload
+    finally:
+        _restore_runtime_overrides(previous)
+
+
 def cancel_batch_run(run_dir: str | Path, settings: AppSettings) -> int:
     """Cancel every non-terminal batch job belonging to a submit run.
 
@@ -472,6 +600,31 @@ def read_run_error(run_dir: str | Path) -> str:
             continue
         if text:
             return text
+    return ""
+
+
+def read_recorded_results(run_dir: str | Path) -> dict:
+    """Return the recorded retrieval results for a run, if it has been retrieved."""
+    return _read_json_file(Path(run_dir).expanduser() / BATCH_RESULTS_FILE)
+
+
+def find_dataset_near(reference: str | Path) -> str:
+    """Locate a dataset file at ``reference`` or, failing that, in its directory.
+
+    Returns the resolved path as a string, or "" if none is found.
+    """
+    if not reference:
+        return ""
+    path = Path(reference).expanduser()
+    if path.is_file():
+        return str(path)
+    search_dir = path if path.is_dir() else path.parent
+    if not search_dir.is_dir():
+        return ""
+    for pattern in ("*_dataset.jsonl", "*_dataset.csv", "*.jsonl", "*.csv"):
+        matches = sorted(search_dir.glob(pattern))
+        if matches:
+            return str(matches[0])
     return ""
 
 
@@ -781,15 +934,6 @@ def _run_dir_status(run_dir: Path) -> str:
     return "unknown"
 
 
-# Operational run directories that are steps performed on a job, not jobs
-# themselves; they only clutter the Jobs list.
-_OPERATIONAL_RUN_PREFIXES = ("retrieve_", "collect_outputs_")
-
-
-def _has_dataset(run_dir: Path) -> bool:
-    return any(run_dir.glob("*_dataset.jsonl")) or any(run_dir.glob("*_dataset.csv"))
-
-
 def _describe_input_location(run_dir: Path, batch_meta: dict) -> str:
     """A human-readable description of where a submit job's inputs came from."""
     metadata = _read_json_file(run_dir / "metadata.json")
@@ -830,9 +974,7 @@ def list_submit_jobs(run_root: str | Path | None = None) -> list[JobSummary]:
     if not root.exists() or not root.is_dir():
         return []
     summaries: list[JobSummary] = []
-    for run_dir in sorted((item for item in root.iterdir() if item.is_dir()), reverse=True):
-        if run_dir.name.startswith(_OPERATIONAL_RUN_PREFIXES):
-            continue
+    for run_dir in run_layout.iter_run_dirs(root, "submit"):
         batch_meta = _read_json_file(run_dir / "batch_job.json")
         if not batch_meta:
             continue
