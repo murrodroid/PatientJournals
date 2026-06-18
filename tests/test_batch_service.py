@@ -21,6 +21,7 @@ def test_batch_submit_request_namespace() -> None:
 def test_batch_retrieve_request_namespace() -> None:
     namespace = BatchRetrieveRequest(
         run_dir="runs/submit_1",
+        output_dir="runs/submit_1",
         batch_names=("batch-a", "batch-b"),
         wait=True,
         allow_partial=True,
@@ -29,6 +30,7 @@ def test_batch_retrieve_request_namespace() -> None:
     ).to_namespace()
 
     assert namespace.run_dir == "runs/submit_1"
+    assert namespace.output_dir == "runs/submit_1"
     assert namespace.batch_name == ["batch-a", "batch-b"]
     assert namespace.wait is True
     assert namespace.allow_partial is True

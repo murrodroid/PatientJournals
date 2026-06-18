@@ -117,6 +117,7 @@ class BatchRetrieveRequest:
     batch_name: str | None = None
     batch_names: tuple[str, ...] = ()
     run_dir: str | None = None
+    output_dir: str | None = None
     wait: bool = False
     allow_partial: bool = False
     submit_failed: bool = False
@@ -130,6 +131,7 @@ class BatchRetrieveRequest:
                 *([self.batch_name] if self.batch_name else []),
             ],
             run_dir=self.run_dir,
+            output_dir=self.output_dir,
             wait=self.wait,
             allow_partial=self.allow_partial,
             submit_failed=self.submit_failed,

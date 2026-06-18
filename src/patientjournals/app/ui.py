@@ -16,12 +16,14 @@ from patientjournals.app.dashboard import (
     summarize_dashboard,
 )
 from patientjournals.app.datasets import (
+    download_cloud_dataset,
     inspect_local_dataset,
+    list_cloud_dataset_library,
     list_cloud_dataset_choices,
+    list_local_dataset_library,
 )
 from patientjournals.app.jobs import (
     JobRegistry,
-    aggregate_batch_state,
     batch_run_provider,
     build_submit_command,
     build_validation_command,
@@ -36,15 +38,23 @@ from patientjournals.app.jobs import (
     read_dataset_preview,
     read_recorded_results,
     read_run_error,
+    repair_all_missing_recorded_results,
     resubmit_failed_requests,
+    resolve_batch_run_readiness,
     run_batch_draft_direct,
     run_batch_rerun_direct,
     run_local_draft_direct,
     run_retrieve_direct,
     start_command,
 )
-from patientjournals.app.models import AppSettings, SubmitJobDraft, app_settings_path
+from patientjournals.app.models import (
+    AppSettings,
+    DatasetLibraryItem,
+    SubmitJobDraft,
+    app_settings_path,
+)
 from patientjournals.app.settings_store import load_app_settings, save_app_settings
+from patientjournals.config import config
 
 
 BG = "#FFFFFF"
@@ -67,6 +77,42 @@ def _open_in_file_browser(path: str | Path) -> None:
         subprocess.Popen(["explorer", target])  # noqa: S603, S607
     else:
         subprocess.Popen(["xdg-open", target])  # noqa: S603, S607
+
+
+class _Tooltip:
+    def __init__(self, widget: tk.Widget, text: str) -> None:
+        self.widget = widget
+        self.text = text
+        self.window: tk.Toplevel | None = None
+        widget.bind("<Enter>", self.show)
+        widget.bind("<Leave>", self.hide)
+
+    def show(self, _event=None) -> None:
+        if self.window is not None or not self.text:
+            return
+        x = self.widget.winfo_rootx() + 18
+        y = self.widget.winfo_rooty() + 22
+        window = tk.Toplevel(self.widget)
+        window.wm_overrideredirect(True)
+        window.wm_geometry(f"+{x}+{y}")
+        label = tk.Label(
+            window,
+            text=self.text,
+            justify="left",
+            wraplength=320,
+            bg=INK,
+            fg=BG,
+            padx=10,
+            pady=8,
+            font=("Helvetica", 11),
+        )
+        label.pack()
+        self.window = window
+
+    def hide(self, _event=None) -> None:
+        if self.window is not None:
+            self.window.destroy()
+            self.window = None
 
 
 class PatientJournalsApp:
@@ -215,6 +261,7 @@ class PatientJournalsApp:
         title.pack(anchor="w", pady=(0, 22))
         for key, label, command in (
             ("dashboard", "Dashboard", self.show_dashboard),
+            ("datasets", "Datasets", self.show_datasets),
             ("submit", "Submit", self.show_submit),
             ("jobs", "Jobs", self.show_jobs),
             ("settings", "Settings", self.show_settings),
@@ -271,6 +318,24 @@ class PatientJournalsApp:
     def _subheading(self, text: str) -> None:
         label = ttk.Label(self.content, text=text, style="Muted.TLabel")
         label.pack(anchor="w", pady=(0, 18))
+
+    def _help_icon(self, parent: tk.Misc, text: str) -> tk.Label:
+        label = tk.Label(
+            parent,
+            text="?",
+            bg=ACCENT,
+            fg=INK,
+            width=2,
+            height=1,
+            relief="flat",
+            font=("Helvetica", 10, "bold"),
+            cursor="question_arrow",
+        )
+        _Tooltip(label, text)
+        return label
+
+    def _grid_help(self, parent: tk.Misc, row: int, column: int, text: str) -> None:
+        self._help_icon(parent, text).grid(row=row, column=column, padx=(8, 0), sticky="w")
 
     def _field(self, parent: ttk.Frame, label: str, variable: tk.StringVar, row: int) -> ttk.Entry:
         ttk.Label(parent, text=label, style="App.TLabel").grid(row=row, column=0, sticky="w", pady=8)
@@ -423,10 +488,197 @@ class PatientJournalsApp:
             bar.pack(side="left", fill="x", expand=True, padx=(8, 8))
             ttk.Label(row, text=str(count), width=8, style="App.TLabel").pack(side="left")
 
+    def show_datasets(self) -> None:
+        self._clear_content()
+        self._heading("Datasets")
+        self._subheading("Browse extracted datasets from this machine and the shared bucket.")
+
+        footer = ttk.Frame(self.content, style="App.TFrame")
+        footer.pack(side="bottom", fill="x", pady=(8, 0))
+
+        columns = ("source", "name", "rows", "updated", "run", "location")
+        tree = ttk.Treeview(
+            self.content,
+            columns=columns,
+            show="headings",
+            height=16,
+            selectmode="browse",
+        )
+        for column, heading, width, anchor in (
+            ("source", "Source", 75, "w"),
+            ("name", "Dataset", 240, "w"),
+            ("rows", "Rows", 70, "e"),
+            ("updated", "Updated", 135, "w"),
+            ("run", "Run", 140, "w"),
+            ("location", "Location", 430, "w"),
+        ):
+            tree.heading(column, text=heading)
+            tree.column(column, width=width, anchor=anchor)
+        tree.pack(side="top", fill="both", expand=True)
+
+        status_var = tk.StringVar(value="")
+        ttk.Label(footer, textvariable=status_var, style="Muted.TLabel").pack(
+            side="bottom", anchor="w", pady=(8, 0)
+        )
+
+        items_by_iid: dict[str, DatasetLibraryItem] = {}
+        loaded_items: list[DatasetLibraryItem] = []
+
+        def format_rows(value: int | None) -> str:
+            return "—" if value is None else str(value)
+
+        def insert_items(items: list[DatasetLibraryItem]) -> None:
+            items_by_iid.clear()
+            tree.delete(*tree.get_children())
+            for index, item in enumerate(items, start=1):
+                iid = f"dataset_{index}"
+                items_by_iid[iid] = item
+                tree.insert(
+                    "",
+                    "end",
+                    iid=iid,
+                    values=(
+                        item.source,
+                        item.name,
+                        format_rows(item.row_count),
+                        item.updated_at,
+                        item.run_id,
+                        item.location,
+                    ),
+                )
+            status_var.set(f"{len(items)} dataset(s).")
+
+        def selected_item() -> DatasetLibraryItem | None:
+            selection = tree.selection()
+            if not selection:
+                return None
+            return items_by_iid.get(selection[0])
+
+        def refresh_local() -> None:
+            nonlocal loaded_items
+            cloud_items = [item for item in loaded_items if item.is_cloud]
+            local_items = list_local_dataset_library(self.settings.local_runs_root)
+            loaded_items = [*local_items, *cloud_items]
+            insert_items(loaded_items)
+            status_var.set(f"Loaded {len(local_items)} local dataset(s).")
+
+        def load_shared() -> None:
+            status_var.set("Loading shared datasets from GCS...")
+
+            def worker() -> None:
+                try:
+                    cloud_items = list_cloud_dataset_library(
+                        bucket_name=self.settings.gcs_bucket_name,
+                        datasets_prefix=self.settings.datasets_gcs_prefix,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    self.root.after(
+                        0,
+                        lambda: messagebox.showerror(
+                            "Shared dataset library failed", str(exc)
+                        ),
+                    )
+                    return
+
+                def apply() -> None:
+                    nonlocal loaded_items
+                    local_items = [item for item in loaded_items if not item.is_cloud]
+                    seen = {item.location for item in local_items}
+                    merged = [
+                        *local_items,
+                        *[item for item in cloud_items if item.location not in seen],
+                    ]
+                    loaded_items = merged
+                    insert_items(loaded_items)
+                    status_var.set(f"Loaded {len(cloud_items)} shared dataset(s).")
+
+                self.root.after(0, apply)
+
+            threading.Thread(target=worker, daemon=True).start()
+
+        def download_selected(*, then_validate: bool = False) -> None:
+            item = selected_item()
+            if item is None:
+                status_var.set("Select a dataset first.")
+                return
+            if not item.is_cloud:
+                if then_validate:
+                    self._preset_validation_dataset = item.local_path or item.location
+                    self._navigate("dashboard", self.show_dashboard)
+                else:
+                    status_var.set(f"Selected local dataset: {item.location}")
+                return
+            status_var.set("Downloading shared dataset...")
+
+            def worker() -> None:
+                try:
+                    path = download_cloud_dataset(item.gcs_uri or item.location)
+                except Exception as exc:  # noqa: BLE001
+                    self.root.after(
+                        0,
+                        lambda: messagebox.showerror("Download failed", str(exc)),
+                    )
+                    return
+
+                def apply() -> None:
+                    status_var.set(f"Downloaded {path}")
+                    refresh_local()
+                    if then_validate:
+                        self._preset_validation_dataset = str(path)
+                        self._navigate("dashboard", self.show_dashboard)
+
+                self.root.after(0, apply)
+
+            threading.Thread(target=worker, daemon=True).start()
+
+        def validate_selected() -> None:
+            download_selected(then_validate=True)
+
+        def open_selected() -> None:
+            item = selected_item()
+            if item is None:
+                status_var.set("Select a local dataset first.")
+                return
+            if item.is_cloud:
+                status_var.set("Download shared datasets before opening them locally.")
+                return
+            _open_in_file_browser(Path(item.local_path or item.location).parent)
+
+        buttons = self._button_row(footer)
+        self._button(buttons, "Validate selected", validate_selected).pack(side="left")
+        self._help_icon(
+            buttons,
+            "Starts the validation flow with the selected dataset. Shared datasets "
+            "are downloaded first so the validator can read them locally.",
+        ).pack(side="left", padx=(6, 10))
+        self._button(buttons, "Refresh local", refresh_local, kind="secondary").pack(
+            side="left"
+        )
+        self._button(buttons, "Load shared", load_shared, kind="secondary").pack(
+            side="left", padx=(10, 0)
+        )
+        self._help_icon(
+            buttons,
+            "Shared datasets are processed result files uploaded to the configured "
+            "GCS bucket under the datasets prefix.",
+        ).pack(side="left", padx=(6, 10))
+        self._button(
+            buttons,
+            "Download",
+            lambda: download_selected(then_validate=False),
+            kind="secondary",
+        ).pack(side="left")
+        self._button(buttons, "Open folder", open_selected, kind="secondary").pack(
+            side="left", padx=(10, 0)
+        )
+
+        tree.bind("<Double-1>", lambda _event: validate_selected())
+        refresh_local()
+
     def show_dashboard(self) -> None:
         self._clear_content()
-        self._heading("Dashboard")
-        self._subheading("Review run measurements and launch validation from one place.")
+        self._heading("Validation Dashboard")
+        self._subheading("Compare validation accuracy across datasets, runs, and schema setups.")
         page = self._scrollable_frame(self.content)
 
         run_root_var = tk.StringVar(value=self.settings.local_runs_root)
@@ -435,10 +687,11 @@ class PatientJournalsApp:
         images_var = tk.StringVar(value=self.settings.validation_images_root)
         username_var = tk.StringVar(value="unspecified")
         corrections_var = tk.BooleanVar(value=True)
+        include_shared_var = tk.BooleanVar(value=True)
         status_var = tk.StringVar(value="")
         dataset_path_by_label: dict[str, str] = {}
 
-        controls = self._section(page, "Validate")
+        controls = self._section(page, "Start Validation")
         controls.columnconfigure(1, weight=1)
         ttk.Label(controls, text="Dataset", style="App.TLabel").grid(row=0, column=0, sticky="w", pady=8)
         dataset_combo = ttk.Combobox(
@@ -448,6 +701,12 @@ class PatientJournalsApp:
             state="readonly",
         )
         dataset_combo.grid(row=0, column=1, sticky="ew", pady=8, padx=(14, 0))
+        self._grid_help(
+            controls,
+            0,
+            4,
+            "Pick the extracted dataset you want a person to check against the source images.",
+        )
 
         def resolve_dataset_selection() -> str:
             return dataset_path_by_label.get(dataset_var.get(), dataset_var.get())
@@ -484,8 +743,25 @@ class PatientJournalsApp:
             row=1, column=2, padx=(10, 0), pady=8
         )
         self._field(controls, "Validator", username_var, 2)
+        self._grid_help(
+            controls,
+            2,
+            2,
+            "Use a stable person or team name. It is written into every validation row.",
+        )
         ttk.Checkbutton(controls, text="Corrections", variable=corrections_var).grid(
             row=3, column=1, sticky="w", pady=8, padx=(14, 0)
+        )
+        ttk.Checkbutton(
+            controls,
+            text="Include shared validations",
+            variable=include_shared_var,
+        ).grid(row=4, column=1, sticky="w", pady=8, padx=(14, 0))
+        self._grid_help(
+            controls,
+            4,
+            2,
+            "Loads validation CSV files from the shared GCS validation library and merges them with local validations.",
         )
 
         advanced, _advanced_open = self._advanced_section(page)
@@ -503,6 +779,10 @@ class PatientJournalsApp:
                 summary = summarize_dashboard(
                     run_root=run_root_var.get() or "runs",
                     validations_root=validations_root_var.get() or "validations",
+                    cloud_validations_bucket=(
+                        self.settings.gcs_bucket_name if include_shared_var.get() else ""
+                    ),
+                    cloud_validations_prefix=self.settings.validations_gcs_prefix,
                 )
             except Exception as exc:  # noqa: BLE001
                 messagebox.showerror("Dashboard failed", str(exc))
@@ -521,32 +801,133 @@ class PatientJournalsApp:
             left.pack(side="left", fill="both", expand=True, padx=(0, 12))
             right.pack(side="right", fill="both", expand=True)
 
-            metrics = ttk.LabelFrame(left, text="Run Measurements", padding=(16, 12), style="Section.TLabelframe")
-            metrics.pack(fill="x")
-            self._metric_row(metrics, "Datasets", summary.dataset_count, 0)
-            self._metric_row(metrics, "Dataset rows", summary.dataset_rows, 1)
-            self._metric_row(metrics, "Processing records", summary.processing_record_count, 2)
-            self._metric_row(metrics, "Images measured", summary.processing_image_count, 3)
-            self._metric_row(metrics, "Validation decisions", summary.validation_count, 4)
-            self._metric_row(metrics, "Latest dataset", summary.latest_dataset or "none", 5)
+            def pct(value) -> str:
+                return "—" if value is None else f"{value:.1f}%"
 
-            attempts = summary.attempts
-            generation = summary.generation_seconds
-            dist = ttk.LabelFrame(left, text="Distributions", padding=(16, 12), style="Section.TLabelframe")
-            dist.pack(fill="x", pady=(8, 0))
-            self._metric_row(dist, "Attempts mean", attempts.get("mean"), 0)
-            self._metric_row(dist, "Attempts median", attempts.get("median"), 1)
-            self._metric_row(dist, "Attempts max", attempts.get("max"), 2)
-            self._metric_row(dist, "Generation seconds mean", generation.get("mean"), 3)
-            self._metric_row(dist, "Generation seconds median", generation.get("median"), 4)
+            scored_decisions = sum(run.scored for run in summary.validation_runs)
+            overview = ttk.LabelFrame(
+                left,
+                text="Validation Overview",
+                padding=(16, 12),
+                style="Section.TLabelframe",
+            )
+            overview.pack(fill="x")
+            self._metric_row(overview, "Datasets", summary.dataset_count, 0)
+            self._metric_row(overview, "Dataset rows", summary.dataset_rows, 1)
+            self._metric_row(
+                overview,
+                "Validation runs",
+                len(summary.validation_runs),
+                2,
+            )
+            self._metric_row(overview, "Validation decisions", summary.validation_count, 3)
+            self._metric_row(overview, "Scored decisions", scored_decisions, 4)
+            self._metric_row(overview, "Latest dataset", summary.latest_dataset or "none", 5)
 
-            self._bar_group(right, "Processing Status", summary.status_counts)
-            self._bar_group(right, "Processing Source", summary.source_counts)
-            self._bar_group(right, "Validation Labels", summary.validation_label_counts)
-            self._bar_group(right, "Failure Reasons", summary.failure_reasons)
-            self._bar_group(right, "Duplicate Actions", summary.duplicate_actions)
+            runs = ttk.LabelFrame(
+                left,
+                text="Run Comparison",
+                padding=(8, 8),
+                style="Section.TLabelframe",
+            )
+            runs.pack(fill="both", expand=True, pady=(8, 0))
+            run_tree = ttk.Treeview(
+                runs,
+                columns=("run", "validator", "dataset", "accuracy", "decisions", "corrected"),
+                show="headings",
+                height=8,
+            )
+            for column, heading, width in (
+                ("run", "Run", 150),
+                ("validator", "Validator", 115),
+                ("dataset", "Dataset", 190),
+                ("accuracy", "Accuracy", 90),
+                ("decisions", "Decisions", 85),
+                ("corrected", "Corrected", 85),
+            ):
+                run_tree.heading(column, text=heading)
+                anchor = (
+                    "e"
+                    if column in {"accuracy", "decisions", "corrected"}
+                    else "w"
+                )
+                run_tree.column(column, width=width, anchor=anchor)
+            run_tree.pack(fill="both", expand=True)
+            for index, run in enumerate(summary.validation_runs[:50]):
+                run_tree.insert(
+                    "",
+                    "end",
+                    iid=f"run_{index}",
+                    values=(
+                        run.run_id,
+                        run.validator_id,
+                        run.dataset_file,
+                        pct(run.accuracy),
+                        run.decisions,
+                        run.corrected,
+                    ),
+                )
 
-            status_var.set("Dashboard refreshed.")
+            metrics = ttk.LabelFrame(
+                right,
+                text="Metric Accuracy",
+                padding=(8, 8),
+                style="Section.TLabelframe",
+            )
+            metrics.pack(fill="both", expand=True)
+            metric_tree = ttk.Treeview(
+                metrics,
+                columns=(
+                    "metric",
+                    "accuracy",
+                    "decisions",
+                    "accepted",
+                    "partial",
+                    "rejected",
+                    "corrected",
+                    "unsure",
+                ),
+                show="headings",
+                height=13,
+            )
+            for column, heading, width in (
+                ("metric", "Metric", 220),
+                ("accuracy", "Accuracy", 90),
+                ("decisions", "Decisions", 85),
+                ("accepted", "Accept", 70),
+                ("partial", "Partial", 70),
+                ("rejected", "Reject", 70),
+                ("corrected", "Correct", 70),
+                ("unsure", "Unsure", 70),
+            ):
+                metric_tree.heading(column, text=heading)
+                metric_tree.column(
+                    column,
+                    width=width,
+                    anchor="w" if column == "metric" else "e",
+                )
+            metric_tree.pack(fill="both", expand=True)
+            for index, metric in enumerate(summary.validation_metrics[:100]):
+                metric_tree.insert(
+                    "",
+                    "end",
+                    iid=f"metric_{index}",
+                    values=(
+                        metric.metric,
+                        pct(metric.accuracy),
+                        metric.decisions,
+                        metric.accepted,
+                        metric.somewhat_accepted,
+                        metric.rejected,
+                        metric.corrected,
+                        metric.unsure,
+                    ),
+                )
+
+            if summary.validation_sync_error:
+                status_var.set(f"Dashboard refreshed. {summary.validation_sync_error}")
+            else:
+                status_var.set("Dashboard refreshed.")
 
         def use_latest_dataset() -> None:
             latest = latest_dataset_path(run_root_var.get() or "runs")
@@ -591,6 +972,12 @@ class PatientJournalsApp:
                     summarize_dashboard(
                         run_root=run_root_var.get() or "runs",
                         validations_root=validations_root_var.get() or "validations",
+                        cloud_validations_bucket=(
+                            self.settings.gcs_bucket_name
+                            if include_shared_var.get()
+                            else ""
+                        ),
+                        cloud_validations_prefix=self.settings.validations_gcs_prefix,
                     )
                 )
             ),
@@ -628,6 +1015,9 @@ class PatientJournalsApp:
         pages_var = tk.StringVar(value=self.settings.gcs_pages_prefix)
         request_prefix_var = tk.StringVar(value=self.settings.batch_requests_gcs_prefix)
         output_prefix_var = tk.StringVar(value=self.settings.batch_outputs_gcs_prefix)
+        datasets_prefix_var = tk.StringVar(value=self.settings.datasets_gcs_prefix)
+        validations_prefix_var = tk.StringVar(value=self.settings.validations_gcs_prefix)
+        upload_validations_var = tk.BooleanVar(value=self.settings.upload_validation_to_gcs)
         runs_var = tk.StringVar(value=self.settings.local_runs_root)
         api_env_var = tk.StringVar(value=self.settings.gemini_api_key_env)
         validation_images_var = tk.StringVar(value=self.settings.validation_images_root)
@@ -655,6 +1045,12 @@ class PatientJournalsApp:
         )
         self._field(frame, "GCP project", project_var, 2)
         self._field(frame, "GCS bucket", bucket_var, 3)
+        self._grid_help(
+            frame,
+            3,
+            2,
+            "Shared datasets and validations are uploaded to this bucket.",
+        )
         self._field(frame, "Runs folder", runs_var, 4)
         self._field(frame, "Validation image folder", validation_images_var, 5)
         self._button(frame, "Browse", lambda: self._select_folder(validation_images_var), kind="secondary").grid(
@@ -678,17 +1074,30 @@ class PatientJournalsApp:
         self._field(advanced, "Pages prefix", pages_var, 3)
         self._field(advanced, "Requests prefix", request_prefix_var, 4)
         self._field(advanced, "Outputs prefix", output_prefix_var, 5)
-        self._field(advanced, "Gemini API key env", api_env_var, 6)
-        ttk.Label(advanced, text="Duplicate strategy", style="App.TLabel").grid(row=7, column=0, sticky="w", pady=8)
+        self._field(advanced, "Datasets prefix", datasets_prefix_var, 6)
+        self._field(advanced, "Validations prefix", validations_prefix_var, 7)
+        ttk.Checkbutton(
+            advanced,
+            text="Upload validations to shared bucket",
+            variable=upload_validations_var,
+        ).grid(row=8, column=1, sticky="w", pady=8, padx=(14, 0))
+        self._grid_help(
+            advanced,
+            8,
+            2,
+            "When enabled, each validator saves locally and uploads CSV plus metadata to the shared bucket.",
+        )
+        self._field(advanced, "Gemini API key env", api_env_var, 9)
+        ttk.Label(advanced, text="Duplicate strategy", style="App.TLabel").grid(row=10, column=0, sticky="w", pady=8)
         ttk.Combobox(
             advanced,
             textvariable=duplicate_strategy_var,
             values=("first_successful", "provide_all"),
             state="readonly",
             width=24,
-        ).grid(row=7, column=1, sticky="w", pady=8, padx=(14, 0))
-        self._field(advanced, "Est. cost per 1k images ($)", cost_rate_var, 8)
-        self._field(advanced, "API recovery threshold (failures)", api_threshold_var, 9)
+        ).grid(row=10, column=1, sticky="w", pady=8, padx=(14, 0))
+        self._field(advanced, "Est. cost per 1k images ($)", cost_rate_var, 11)
+        self._field(advanced, "API recovery threshold (failures)", api_threshold_var, 12)
 
         status_var = tk.StringVar(value="")
         ttk.Label(self.content, textvariable=status_var, style="Muted.TLabel").pack(anchor="w", pady=(12, 0))
@@ -721,6 +1130,9 @@ class PatientJournalsApp:
                 gcs_pages_prefix=pages_var.get(),
                 batch_requests_gcs_prefix=request_prefix_var.get(),
                 batch_outputs_gcs_prefix=output_prefix_var.get(),
+                datasets_gcs_prefix=datasets_prefix_var.get(),
+                validations_gcs_prefix=validations_prefix_var.get(),
+                upload_validation_to_gcs=upload_validations_var.get(),
                 local_runs_root=runs_var.get(),
                 gemini_api_key_env=api_env_var.get(),
                 validation_images_root=validation_images_var.get(),
@@ -755,7 +1167,10 @@ class PatientJournalsApp:
         schema_names = [option.name for option in self.schema_options]
         model_names = [option.name for option in self.model_options]
         schema_var = tk.StringVar(value=schema_names[0] if schema_names else "")
-        model_var = tk.StringVar(value=model_names[0] if model_names else "")
+        default_model = config.model if config.model in model_names else (
+            model_names[0] if model_names else ""
+        )
+        model_var = tk.StringVar(value=default_model)
         output_format_var = tk.StringVar(value="jsonl")
         continue_var = tk.StringVar(value="")
         num_batches_var = tk.StringVar(value="")
@@ -770,6 +1185,12 @@ class PatientJournalsApp:
             state="readonly",
             width=18,
         ).grid(row=0, column=1, sticky="w", pady=8, padx=(14, 0))
+        self._grid_help(
+            frame,
+            0,
+            2,
+            "Local uses a folder on this computer. Cloud uses image folders already uploaded to GCS.",
+        )
 
         ttk.Label(frame, text="Run mode", style="App.TLabel").grid(row=1, column=0, sticky="w", pady=8)
         ttk.Combobox(
@@ -779,6 +1200,12 @@ class PatientJournalsApp:
             state="readonly",
             width=18,
         ).grid(row=1, column=1, sticky="w", pady=8, padx=(14, 0))
+        self._grid_help(
+            frame,
+            1,
+            2,
+            "Local API runs immediately on this machine. Cloud batch is for larger paid jobs and is tracked in Jobs.",
+        )
 
         local_label = ttk.Label(frame, text="Local folder", style="App.TLabel")
         local_entry = ttk.Entry(frame, textvariable=local_path_var, width=64)
@@ -954,6 +1381,12 @@ class PatientJournalsApp:
         ttk.Label(frame, text="Model", style="App.TLabel").grid(row=4, column=0, sticky="w", pady=8)
         ttk.Combobox(frame, textvariable=model_var, values=model_names, state="readonly").grid(
             row=4, column=1, sticky="ew", pady=8, padx=(14, 0)
+        )
+        self._grid_help(
+            frame,
+            4,
+            2,
+            "The standard model is selected by default. Change it only when comparing model behavior.",
         )
 
         advanced, _advanced_open = self._advanced_section(self.content)
@@ -1247,9 +1680,13 @@ class PatientJournalsApp:
             if payload is not None:
                 expected = int(payload.get("expected_pages") or job.image_count or 0)
                 succeeded = int(payload.get("successful_pages") or 0)
+                recovered = int(payload.get("recovered_pages") or 0)
                 missing = int(payload.get("missing_pages") or max(0, expected - succeeded))
                 total_var.set(str(expected))
-                ok_var.set(str(succeeded))
+                ok_text = f"{succeeded}"
+                if recovered:
+                    ok_text = f"{succeeded} ({recovered} recovered with API)"
+                ok_var.set(ok_text)
                 fail_var.set(str(missing))
                 state["dataset"] = dataset_path or str(payload.get("dataset_path") or "")
                 state["failed"] = missing
@@ -1300,6 +1737,16 @@ class PatientJournalsApp:
                 rerun_button.configure(text="Rerun job", state="normal")
             show_error(error_text)
 
+        def show_not_ready(message: str) -> None:
+            state["done"] = False
+            total_var.set(str(job.image_count or "—"))
+            ok_var.set("—")
+            fail_var.set("—")
+            state_var.set(message)
+            path_var.set("")
+            rerun_button.configure(text="Rerun failed", state="disabled")
+            validate_button.configure(state="disabled")
+
         def load(force_retrieve: bool = False) -> None:
             import traceback
 
@@ -1317,6 +1764,15 @@ class PatientJournalsApp:
                             payload["dataset_path"] = existing
 
                 if payload is None:
+                    readiness = resolve_batch_run_readiness(job.run_dir)
+                    if readiness.state not in {"succeeded", "failed"}:
+                        detail = f" {readiness.detail}" if readiness.detail else ""
+                        message = (
+                            "Batch outputs are not ready yet. "
+                            f"Current status: {readiness.state}.{detail}"
+                        )
+                        self.root.after(0, lambda: show_not_ready(message))
+                        return
                     self.root.after(
                         0, lambda: state_var.set("Retrieving batch outputs… (this can take a while)")
                     )
@@ -1427,9 +1883,13 @@ class PatientJournalsApp:
             kind="secondary",
         ).pack(side="left", padx=(10, 0))
         validate_button = self._button(
-            footer, "Validate in Dashboard", validate_in_dashboard, kind="secondary"
+            footer, "Validate dataset", validate_in_dashboard, kind="secondary"
         )
         validate_button.pack(side="left", padx=(10, 0))
+        self._help_icon(
+            footer,
+            "Opens the validation dashboard with this dataset selected.",
+        ).pack(side="left", padx=(6, 0))
         validate_button.configure(state="disabled")
         self._button(
             footer,
@@ -1448,7 +1908,7 @@ class PatientJournalsApp:
         self._heading("Jobs")
         self._subheading(
             "One row per submitted batch. Select a job to view results, "
-            "refresh status, or cancel."
+            "or refresh its live status."
         )
 
         # Reserve the bottom for the controls so the action buttons stay visible
@@ -1472,7 +1932,7 @@ class PatientJournalsApp:
             "folder": 330,
             "images": 80,
             "status": 110,
-            "success": 80,
+            "success": 230,
             "failed": 70,
         }
         tree = ttk.Treeview(
@@ -1522,13 +1982,18 @@ class PatientJournalsApp:
             return live or job.status
 
         def job_values(job):
+            success_text = ""
+            if job.succeeded is not None:
+                success_text = f"{job.succeeded} succeeded"
+                if getattr(job, "recovered", 0):
+                    success_text += f" ({job.recovered} recovered with API)"
             return (
                 job.created_at,
                 job.model,
                 job.input_location,
                 job.image_count,
                 effective_status(job),
-                "" if job.succeeded is None else str(job.succeeded),
+                success_text,
                 "" if job.failed is None else str(job.failed),
             )
 
@@ -1612,11 +2077,15 @@ class PatientJournalsApp:
 
                 def apply() -> None:
                     insert_chunks(chunks)
-                    state = aggregate_batch_state(chunks)
+                    readiness = resolve_batch_run_readiness(run_dir, chunks=chunks)
+                    state = readiness.state
                     if state:
                         self._live_batch_status[run_dir] = state
                         refresh(quiet=True)
-                        status_var.set(f"Status: {state} ({len(chunks)} chunk(s)).")
+                        detail = f" {readiness.detail}" if readiness.detail else ""
+                        status_var.set(
+                            f"Status: {state} ({len(chunks)} chunk(s)).{detail}"
+                        )
 
                 self.root.after(0, apply)
 
@@ -1634,6 +2103,14 @@ class PatientJournalsApp:
             if job is None or not job.run_dir:
                 status_var.set("Select a batch job to view results.")
                 return
+            if not job.retrieved:
+                state = effective_status(job)
+                if state not in {"succeeded", "failed"}:
+                    status_var.set(
+                        "Batch outputs are not ready yet. Refresh status and wait "
+                        f"for succeeded before viewing results (current: {state})."
+                    )
+                    return
             self._open_results_window(
                 job,
                 on_change=after_results,
@@ -1677,6 +2154,21 @@ class PatientJournalsApp:
 
             threading.Thread(target=worker, daemon=True).start()
 
+        def repair_metadata() -> None:
+            try:
+                repaired = repair_all_missing_recorded_results(
+                    self.settings.local_runs_root
+                )
+            except Exception as exc:  # noqa: BLE001
+                messagebox.showerror("Repair failed", str(exc))
+                return
+            refresh(quiet=True)
+            status_var.set(
+                f"Repaired {repaired} job result record(s)."
+                if repaired
+                else "No missing result records found."
+            )
+
         tree.bind(
             "<<TreeviewSelect>>",
             lambda _event: show_chunks_for_selection(with_state=False),
@@ -1691,11 +2183,12 @@ class PatientJournalsApp:
             lambda: show_chunks_for_selection(with_state=True),
             kind="secondary",
         ).pack(side="left", padx=(10, 0))
-        self._button(buttons, "Cancel job", cancel_selected, kind="secondary").pack(
-            side="left", padx=(10, 0)
-        )
-        self._button(buttons, "Refresh", lambda: refresh(), kind="secondary").pack(
-            side="left", padx=(18, 0)
+        self._help_icon(
+            buttons,
+            "Checks the provider status and waits for output files before results can be viewed.",
+        ).pack(side="left", padx=(6, 10))
+        self._button(buttons, "Refresh list", lambda: refresh(), kind="secondary").pack(
+            side="left"
         )
 
         advanced, _advanced_open = self._advanced_section(footer)
@@ -1715,6 +2208,18 @@ class PatientJournalsApp:
             state="readonly",
             width=18,
         ).grid(row=1, column=1, sticky="w", pady=(14, 0), padx=(14, 0))
+        self._button(advanced, "Cancel selected job", cancel_selected, kind="secondary").grid(
+            row=2, column=0, sticky="w", pady=(14, 0)
+        )
+        self._button(advanced, "Repair metadata", repair_metadata, kind="secondary").grid(
+            row=2, column=1, sticky="w", pady=(14, 0), padx=(14, 0)
+        )
+        self._grid_help(
+            advanced,
+            2,
+            2,
+            "Repair metadata only fills in missing result summaries from existing dataset and output files.",
+        )
         self._jobs_repaint = lambda: refresh(quiet=True)
         refresh()
         self._jobs_refresh_after_id = self.root.after(AUTO_REFRESH_MS, auto_refresh)

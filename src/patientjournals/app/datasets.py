@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+import csv
 from datetime import datetime
 from pathlib import Path
 
-from patientjournals.app.models import CloudDatasetChoice, CloudResolution, DatasetSummary
+from patientjournals.app.models import (
+    CloudDatasetChoice,
+    CloudResolution,
+    DatasetLibraryItem,
+    DatasetSummary,
+)
+from patientjournals.config import config
 from patientjournals.data.bucket import (
     build_storage_bucket,
     list_bucket_blobs,
@@ -59,6 +66,145 @@ def local_summary_report(
         glob_pattern=glob_pattern,
         recursive=recursive,
     )
+
+
+def _count_jsonl_rows(path: Path) -> int:
+    count = 0
+    with open(path, "r", encoding="utf-8") as handle:
+        for line in handle:
+            if line.strip():
+                count += 1
+    return count
+
+
+def _count_csv_rows(path: Path) -> int:
+    with open(path, "r", encoding="utf-8", newline="") as handle:
+        reader = csv.reader(handle, delimiter=config.csv_sep)
+        rows = sum(1 for row in reader if row)
+    return max(0, rows - 1)
+
+
+def count_dataset_rows(path: str | Path) -> int:
+    dataset = Path(path).expanduser()
+    suffix = dataset.suffix.lower()
+    if suffix == ".jsonl":
+        return _count_jsonl_rows(dataset)
+    if suffix == ".csv":
+        return _count_csv_rows(dataset)
+    return 0
+
+
+def _format_blob_updated(blob: object) -> str:
+    value = getattr(blob, "updated", None) or getattr(blob, "time_created", None)
+    if isinstance(value, datetime):
+        return value.strftime("%Y-%m-%d %H:%M")
+    return str(value or "")
+
+
+def list_local_dataset_library(
+    run_root: str | Path = "runs",
+    *,
+    limit: int = 200,
+) -> list[DatasetLibraryItem]:
+    root = Path(run_root).expanduser()
+    if not root.exists() or not root.is_dir():
+        return []
+    files = sorted(
+        [
+            *root.rglob("*_dataset.jsonl"),
+            *root.rglob("*_dataset.csv"),
+        ],
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    items: list[DatasetLibraryItem] = []
+    for path in files[: max(1, limit)]:
+        try:
+            row_count = count_dataset_rows(path)
+            size_bytes = path.stat().st_size
+            updated_at = datetime.fromtimestamp(path.stat().st_mtime).strftime(
+                "%Y-%m-%d %H:%M"
+            )
+        except OSError:
+            continue
+        items.append(
+            DatasetLibraryItem(
+                source="local",
+                name=path.name,
+                location=str(path),
+                row_count=row_count,
+                size_bytes=size_bytes,
+                updated_at=updated_at,
+                run_id=path.parent.name,
+                local_path=str(path),
+            )
+        )
+    return items
+
+
+def list_cloud_dataset_library(
+    *,
+    bucket_name: str | None = None,
+    datasets_prefix: str | None = None,
+    limit: int = 500,
+) -> list[DatasetLibraryItem]:
+    bucket = build_storage_bucket(bucket_name)
+    resolved_bucket = str(getattr(bucket, "name", "") or bucket_name or "")
+    prefix = normalize_prefix(datasets_prefix or config.datasets_gcs_prefix)
+    blobs = list_bucket_blobs(bucket, prefix=prefix)
+    items: list[DatasetLibraryItem] = []
+    for blob in blobs:
+        name = str(getattr(blob, "name", "") or "")
+        if not name or name.endswith("/"):
+            continue
+        if Path(name).suffix.lower() not in {".jsonl", ".csv"}:
+            continue
+        metadata = getattr(blob, "metadata", None) or {}
+        rows_value = metadata.get("rows") or metadata.get("row_count")
+        try:
+            row_count = int(rows_value) if rows_value not in {None, ""} else None
+        except (TypeError, ValueError):
+            row_count = None
+        uri = f"gs://{resolved_bucket}/{name}"
+        items.append(
+            DatasetLibraryItem(
+                source="cloud",
+                name=Path(name).name,
+                location=uri,
+                row_count=row_count,
+                size_bytes=getattr(blob, "size", None),
+                updated_at=_format_blob_updated(blob),
+                run_id=Path(name).parent.name,
+                gcs_uri=uri,
+            )
+        )
+        if len(items) >= max(1, limit):
+            break
+    return sorted(items, key=lambda item: item.updated_at, reverse=True)
+
+
+def _split_gcs_uri(uri: str) -> tuple[str, str]:
+    value = uri.strip()
+    if not value.startswith("gs://"):
+        raise ValueError(f"Expected a gs:// dataset URI, got: {uri}")
+    bucket_and_object = value[5:]
+    bucket, _, object_name = bucket_and_object.partition("/")
+    if not bucket or not object_name:
+        raise ValueError(f"Invalid GCS URI: {uri}")
+    return bucket, object_name
+
+
+def download_cloud_dataset(
+    gcs_uri: str,
+    *,
+    destination_root: str | Path = "datasets",
+) -> Path:
+    bucket_name, object_name = _split_gcs_uri(gcs_uri)
+    bucket = build_storage_bucket(bucket_name)
+    destination = Path(destination_root).expanduser() / Path(object_name).name
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    bucket.blob(object_name).download_to_filename(str(destination))
+    return destination
 
 
 def inspect_cloud_dataset(

@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import uuid
+from collections import Counter
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
@@ -26,6 +27,12 @@ from patientjournals.app.settings_store import (
 from patientjournals.config import config
 from patientjournals.config.schemas import resolve_output_schema
 from patientjournals.local.service import LocalRunRequest, LocalRunResult, run_local_job
+from patientjournals.shared.dataset_coverage import load_dataset_image_coverage
+from patientjournals.shared.identity import image_name_from_reference
+from patientjournals.shared.processing_metrics import (
+    MANIFEST_FILE_NAME,
+    read_processing_records,
+)
 from patientjournals.shared import run_layout
 
 
@@ -144,6 +151,10 @@ def _apply_runtime_overrides(payload: dict[str, object]) -> dict[str, object]:
         "gcs_pages_prefix",
         "batch_requests_gcs_prefix",
         "batch_outputs_gcs_prefix",
+        "datasets_gcs_prefix",
+        "upload_dataset_to_gcs",
+        "validations_gcs_prefix",
+        "upload_validation_to_gcs",
         "batch_input_prefix",
         "batch_input_prefixes",
         "target_folder",
@@ -156,6 +167,7 @@ def _apply_runtime_overrides(payload: dict[str, object]) -> dict[str, object]:
         "provider_api_keys",
         "batch_duplicate_strategy",
         "batch_restrict_image_names",
+        "api_recovery_enabled",
     }
     previous = {key: getattr(config, key) for key in keys if hasattr(config, key)}
     aliases = {
@@ -218,6 +230,14 @@ class BatchSubmitOutcome:
     request_count: int
     batch_job_names: tuple[str, ...]
     status: str
+
+
+@dataclass(frozen=True)
+class BatchRunReadiness:
+    state: str
+    detail: str = ""
+    output_rows: int | None = None
+    expected_rows: int | None = None
 
 
 def _summarize_batch_run(run_dir: Path) -> BatchSubmitOutcome:
@@ -372,11 +392,13 @@ def run_retrieve_direct(
         settings,
         duplicate_strategy=str(effective_strategy),
     )
+    overrides["api_recovery_enabled"] = bool(recover_missing_with_api)
     previous = _apply_runtime_overrides(overrides)
     try:
         result = BatchResultService().retrieve(
             BatchRetrieveRequest(
                 run_dir=str(run_dir),
+                output_dir=str(run_dir),
                 allow_partial=allow_partial,
                 recover_missing_with_api=recover_missing_with_api,
                 submit_failed=submit_failed,
@@ -398,6 +420,7 @@ def run_retrieve_direct(
         "successful_pages": result.successful_pages,
         "recovered_pages": result.recovered_pages,
         "missing_pages": max(0, result.expected_pages - result.successful_pages),
+        "dataset_gcs_uri": result.dataset_gcs_uri,
         "submit_failed": bool(submit_failed),
     }
     if record_results:
@@ -533,10 +556,29 @@ def recover_dataset_gaps(
                     output_format=output_format,
                 )
 
+        recovered_at = datetime.now().astimezone().isoformat(timespec="seconds")
+        previous_recovered = int(recorded.get("recovered_pages") or 0)
+        recovered_total = previous_recovered + recovered
+        recovery_history = list(recorded.get("recovery_history") or [])
+        if recovered:
+            recovery_history.append(
+                {
+                    "recovered_at": recovered_at,
+                    "recovered_pages": recovered,
+                    "method": "api",
+                }
+            )
+        dataset_gcs_uri = retrieve_module._upload_dataset_to_gcs(
+            Path(dataset_path),
+            run_path.name,
+            log,
+        ) or str(recorded.get("dataset_gcs_uri") or "")
+
         successful = len(covered_names) + recovered
         payload = {
-            "retrieved_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "retrieved_at": recovered_at,
             "dataset_path": str(dataset_path),
+            "dataset_gcs_uri": dataset_gcs_uri,
             "provider": str(batch_meta.get("provider") or ""),
             "batch_count": len(batch_names),
             "rows_written": successful,
@@ -544,9 +586,10 @@ def recover_dataset_gaps(
             "expected_pages": len(expected_keys),
             "observed_pages": len(expected_keys),
             "successful_pages": successful,
-            "recovered_pages": recovered,
+            "recovered_pages": recovered_total,
             "missing_pages": max(0, len(missing_keys) - recovered),
             "submit_failed": False,
+            "recovery_history": recovery_history,
         }
         (run_path / BATCH_RESULTS_FILE).write_text(
             json.dumps(payload, indent=2, ensure_ascii=False),
@@ -600,12 +643,199 @@ def read_run_error(run_dir: str | Path) -> str:
             continue
         if text:
             return text
+    diagnostics = run_failure_diagnostics(run_path)
+    if diagnostics:
+        return diagnostics
     return ""
+
+
+def _dataset_files_in_run_dir(run_dir: Path) -> list[Path]:
+    return sorted(
+        [
+            *run_dir.glob("*_dataset.jsonl"),
+            *run_dir.glob("*_dataset.csv"),
+        ],
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+
+
+def _read_request_keys_from_run_dir(run_dir: Path, batch_meta: dict) -> set[str]:
+    request_files: list[str] = []
+    jobs = batch_meta.get("batch_jobs")
+    if isinstance(jobs, list):
+        for item in jobs:
+            if not isinstance(item, dict):
+                continue
+            value = item.get("requests_file")
+            if isinstance(value, str) and value.strip():
+                request_files.append(value.strip())
+    direct = batch_meta.get("requests_file")
+    if isinstance(direct, str) and direct.strip():
+        request_files.append(direct.strip())
+    if not request_files:
+        request_files.append(config.batch_requests_file_name)
+
+    keys: set[str] = set()
+    for file_name in dict.fromkeys(request_files):
+        path = run_dir / file_name
+        if not path.exists() or not path.is_file():
+            continue
+        with open(path, "r", encoding="utf-8") as handle:
+            for line in handle:
+                raw = line.strip()
+                if not raw:
+                    continue
+                try:
+                    payload = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(payload, dict):
+                    continue
+                key = payload.get("key")
+                if isinstance(key, str) and key.strip():
+                    keys.add(key.strip())
+    return keys
+
+
+def _count_output_rows(run_dir: Path) -> int:
+    total = 0
+    for path in sorted(run_dir.glob("batch_output_*.jsonl")):
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                total += sum(1 for line in handle if line.strip())
+        except OSError:
+            continue
+    return total
+
+
+def _derived_results_from_artifacts(run_dir: str | Path) -> dict:
+    run_path = Path(run_dir).expanduser()
+    batch_meta = _read_json_file(run_path / "batch_job.json")
+    if not batch_meta:
+        return {}
+    dataset_files = _dataset_files_in_run_dir(run_path)
+    if not dataset_files:
+        return {}
+    dataset_path = dataset_files[0]
+    try:
+        _fmt, covered_names, row_count = load_dataset_image_coverage(
+            dataset_path,
+            csv_sep=config.csv_sep,
+            bucket_name=str(batch_meta.get("gcs_bucket_name") or config.gcs_bucket_name),
+        )
+    except Exception:  # noqa: BLE001
+        return {}
+
+    request_keys = _read_request_keys_from_run_dir(run_path, batch_meta)
+    expected_names = {
+        image_name_from_reference(key)
+        for key in request_keys
+        if image_name_from_reference(key)
+    }
+    request_count = int(batch_meta.get("request_count") or 0)
+    expected_pages = len(expected_names) or request_count or len(covered_names)
+    successful_pages = (
+        len(covered_names & expected_names)
+        if expected_names
+        else len(covered_names)
+    )
+    observed_pages = _count_output_rows(run_path) or expected_pages
+    missing_pages = max(0, expected_pages - successful_pages)
+    chunks = _batch_chunk_summaries_from_payload(batch_meta)
+    return {
+        "retrieved_at": datetime.fromtimestamp(
+            dataset_path.stat().st_mtime
+        ).astimezone().isoformat(timespec="seconds"),
+        "dataset_path": str(dataset_path),
+        "provider": str(batch_meta.get("provider") or ""),
+        "batch_count": len(chunks) or len(batch_meta.get("batch_job_names") or []),
+        "rows_written": row_count,
+        "error_rows": max(0, observed_pages - successful_pages),
+        "expected_pages": expected_pages,
+        "observed_pages": observed_pages,
+        "successful_pages": successful_pages,
+        "recovered_pages": 0,
+        "missing_pages": missing_pages,
+        "submit_failed": False,
+        "result_inferred": True,
+        "inference_note": (
+            "Derived from dataset, request file, and downloaded batch output "
+            "because batch_results.json was missing."
+        ),
+    }
+
+
+def run_failure_diagnostics(run_dir: str | Path, *, limit: int = 12) -> str:
+    run_path = Path(run_dir).expanduser()
+    manifest_path = run_path / MANIFEST_FILE_NAME
+    records = read_processing_records(manifest_path)
+    if not records:
+        return ""
+
+    seen: set[tuple[str, str]] = set()
+    reason_counts: Counter[str] = Counter()
+    examples: list[str] = []
+    for record in records:
+        if str(record.get("status") or "") != "failed":
+            continue
+        reason = str(record.get("failure_reason") or "unknown")
+        image_name = str(record.get("image_name") or record.get("image_reference") or "")
+        key = (image_name, reason)
+        if key in seen:
+            continue
+        seen.add(key)
+        reason_counts[reason] += 1
+        if len(examples) < limit:
+            examples.append(f"{image_name or '(unknown image)'}: {reason}")
+
+    if not reason_counts:
+        return ""
+
+    counts = ", ".join(
+        f"{reason}={count}" for reason, count in reason_counts.most_common()
+    )
+    lines = [f"Processing failure codes: {counts}"]
+    if examples:
+        lines.append("Examples:")
+        lines.extend(f"- {item}" for item in examples)
+    return "\n".join(lines)
 
 
 def read_recorded_results(run_dir: str | Path) -> dict:
     """Return the recorded retrieval results for a run, if it has been retrieved."""
-    return _read_json_file(Path(run_dir).expanduser() / BATCH_RESULTS_FILE)
+    run_path = Path(run_dir).expanduser()
+    return _read_json_file(run_path / BATCH_RESULTS_FILE) or _derived_results_from_artifacts(
+        run_path
+    )
+
+
+def repair_recorded_results(run_dir: str | Path) -> dict:
+    """Persist derived results when a dataset exists but batch_results.json is absent."""
+    run_path = Path(run_dir).expanduser()
+    existing = _read_json_file(run_path / BATCH_RESULTS_FILE)
+    if existing:
+        return existing
+    derived = _derived_results_from_artifacts(run_path)
+    if derived:
+        (run_path / BATCH_RESULTS_FILE).write_text(
+            json.dumps(derived, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    return derived
+
+
+def repair_all_missing_recorded_results(
+    run_root: str | Path | None = None,
+) -> int:
+    root = Path(run_root or config.output_root).expanduser()
+    repaired = 0
+    for run_dir in run_layout.iter_run_dirs(root, "submit"):
+        if (run_dir / BATCH_RESULTS_FILE).exists():
+            continue
+        if repair_recorded_results(run_dir):
+            repaired += 1
+    return repaired
 
 
 def find_dataset_near(reference: str | Path) -> str:
@@ -857,13 +1087,23 @@ def list_batch_chunks_with_state(run_dir: str | Path) -> list[BatchChunkSummary]
 
 
 def _is_success_state(state: str) -> bool:
-    return "SUCCEEDED" in state or state == "ENDED"
+    return state.strip().upper() in {"JOB_STATE_SUCCEEDED", "SUCCEEDED", "ENDED"}
 
 
 def _is_failure_state(state: str) -> bool:
-    return any(
-        token in state for token in ("FAILED", "CANCELLED", "CANCELED", "EXPIRED")
-    )
+    return state.strip().upper() in {
+        "JOB_STATE_FAILED",
+        "FAILED",
+        "ERRORED",
+        "JOB_STATE_PARTIALLY_SUCCEEDED",
+        "PARTIALLY_SUCCEEDED",
+        "JOB_STATE_CANCELLED",
+        "JOB_STATE_CANCELED",
+        "CANCELLED",
+        "CANCELED",
+        "EXPIRED",
+        "JOB_STATE_EXPIRED",
+    }
 
 
 def aggregate_batch_state(chunks: list[BatchChunkSummary]) -> str:
@@ -880,6 +1120,91 @@ def aggregate_batch_state(chunks: list[BatchChunkSummary]) -> str:
     return "running"
 
 
+def _batch_model_progress(run_dir: str | Path):
+    from patientjournals.batch import status as status_module
+
+    run_path = Path(run_dir).expanduser()
+    payload = _read_json_file(run_path / "batch_job.json")
+    chunks = _batch_chunk_summaries_from_payload(payload)
+    batch_names = [chunk.batch_job_name for chunk in chunks if chunk.batch_job_name]
+    if not batch_names:
+        return None
+
+    provider = status_module._provider_from_batch_names(batch_names, run_dir=run_path)
+    client = status_module._get_client(provider, batch_names)
+    total = status_module._request_count_from_payload(payload)
+    if total is None:
+        total = sum(chunk.request_count for chunk in chunks) or None
+
+    if provider == "anthropic":
+        batch_jobs = [
+            status_module._get_batch_job(client, name, provider)
+            for name in batch_names
+        ]
+        return status_module._anthropic_model_progress(batch_jobs, total)
+
+    batch_jobs_by_name = {
+        name: status_module._get_batch_job(client, name, provider)
+        for name in batch_names
+    }
+    return status_module._gemini_model_progress(
+        batch_jobs_by_name,
+        run_dir=run_path,
+        total=total,
+    )
+
+
+def resolve_batch_run_readiness(
+    run_dir: str | Path,
+    *,
+    chunks: list[BatchChunkSummary] | None = None,
+) -> BatchRunReadiness:
+    """Return the app-facing batch state, including output-file readiness.
+
+    Some Gemini jobs can report a succeeded job state before prediction JSONL
+    files are fully visible in GCS. The app should not offer retrieval until
+    those rows are present, otherwise a user can accidentally record a zero-row
+    partial retrieval as if every page failed.
+    """
+    current_chunks = chunks if chunks is not None else list_batch_chunks_with_state(run_dir)
+    state = aggregate_batch_state(current_chunks)
+    if state != "succeeded":
+        return BatchRunReadiness(state=state)
+
+    try:
+        progress = _batch_model_progress(run_dir)
+    except Exception as exc:  # noqa: BLE001
+        return BatchRunReadiness(
+            state="succeeded",
+            detail=f"output readiness unavailable: {type(exc).__name__}",
+        )
+    if progress is None:
+        return BatchRunReadiness(state="succeeded")
+
+    if (
+        progress.processed is not None
+        and progress.total is not None
+        and progress.total > 0
+        and progress.processed < progress.total
+    ):
+        return BatchRunReadiness(
+            state="finalizing",
+            detail=(
+                f"model outputs {progress.processed}/{progress.total}; "
+                "waiting for prediction files"
+            ),
+            output_rows=progress.processed,
+            expected_rows=progress.total,
+        )
+
+    return BatchRunReadiness(
+        state="succeeded",
+        detail=progress.detail,
+        output_rows=progress.processed,
+        expected_rows=progress.total,
+    )
+
+
 def resolve_batch_run_state(run_dir: str | Path) -> str:
     """Query the batch API once and aggregate chunk states into a job-level status.
 
@@ -887,10 +1212,9 @@ def resolve_batch_run_state(run_dir: str | Path) -> str:
     error) so callers can fall back to the on-disk status.
     """
     try:
-        chunks = list_batch_chunks_with_state(run_dir)
+        return resolve_batch_run_readiness(run_dir).state
     except Exception:  # noqa: BLE001
         return ""
-    return aggregate_batch_state(chunks)
 
 
 def poll_local_batch_states(
@@ -989,15 +1313,17 @@ def list_submit_jobs(run_root: str | Path | None = None) -> list[JobSummary]:
         )
         location = _describe_input_location(run_dir, batch_meta)
 
-        results = _read_json_file(run_dir / BATCH_RESULTS_FILE)
+        results = read_recorded_results(run_dir)
         retrieved = bool(results)
         succeeded: int | None = None
         failed: int | None = None
+        recovered = 0
         status = _run_dir_status(run_dir)
         if retrieved:
             succeeded = int(results.get("successful_pages") or 0)
             expected = int(results.get("expected_pages") or images or 0)
             failed = max(0, expected - succeeded)
+            recovered = int(results.get("recovered_pages") or 0)
             status = "retrieved"
 
         detail = f"{images} image(s)"
@@ -1020,6 +1346,7 @@ def list_submit_jobs(run_root: str | Path | None = None) -> list[JobSummary]:
                 retrieved=retrieved,
                 succeeded=succeeded,
                 failed=failed,
+                recovered=recovered,
             )
         )
     return summaries

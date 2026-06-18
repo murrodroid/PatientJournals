@@ -506,6 +506,12 @@ def collect_outputs(args: argparse.Namespace | None = None) -> CollectOutputsRes
             ({"image_name": name} for name in sorted(missing_page_image_names)),
         )
 
+    dataset_gcs_uri = ""
+    if output_format.strip().lower().lstrip(".") == "jsonl":
+        from patientjournals.batch.retrieve import _upload_dataset_to_gcs
+
+        dataset_gcs_uri = _upload_dataset_to_gcs(out_path, run_dir.name, log) or ""
+
     report = {
         "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "bucket": getattr(bucket, "name", args.bucket_name or config.gcs_bucket_name),
@@ -539,6 +545,7 @@ def collect_outputs(args: argparse.Namespace | None = None) -> CollectOutputsRes
             len(extra_output_image_names) if pages_checked else None
         ),
         "dataset_path": str(out_path),
+        "dataset_gcs_uri": dataset_gcs_uri,
         "selected_outputs_path": str(manifest_path),
         "rejected_output_keys_path": str(rejected_path),
         "missing_page_keys_path": str(missing_path) if pages_checked else None,
@@ -577,6 +584,7 @@ def collect_outputs(args: argparse.Namespace | None = None) -> CollectOutputsRes
         pages_total=len(page_image_names) if pages_checked else None,
         pages_covered=len(covered_page_image_names) if pages_checked else None,
         missing_pages=len(missing_page_image_names) if pages_checked else None,
+        dataset_gcs_uri=dataset_gcs_uri,
     )
 
 

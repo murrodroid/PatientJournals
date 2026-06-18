@@ -76,6 +76,14 @@ def _parse_args() -> argparse.Namespace:
         help="Run directory containing batch_job.json (overrides auto-discovery).",
     )
     parser.add_argument(
+        "--output-dir",
+        dest="output_dir",
+        help=(
+            "Directory where retrieved outputs and the dataset should be written. "
+            "Defaults to a new runs/retrieves/<timestamp> folder."
+        ),
+    )
+    parser.add_argument(
         "--wait",
         action="store_true",
         help="Poll until the batch job completes.",
@@ -295,19 +303,6 @@ def _record_failure(
 
 def _sample_keys(values: set[str], limit: int) -> list[str]:
     return sorted(values)[: max(1, limit)]
-
-
-def _is_parse_failure_reason(reason: str | None) -> bool:
-    if not reason:
-        return False
-    parse_related_prefixes = (
-        "schema_validation_failed",
-        "empty_response_text",
-        "missing_response",
-        "invalid_jsonl_line",
-        "invalid_record_type",
-    )
-    return reason.startswith(parse_related_prefixes)
 
 
 def _expected_success_keys(
@@ -1107,19 +1102,26 @@ def _upload_dataset_to_gcs(
         log(f"Skipped upload for missing file: {dataset_path.name}")
         return None
 
-    bucket_name = _require_bucket_name()
-    service_account_file = _require_service_account_file()
-    service_account_path = resolve_service_account_path(service_account_file)
-    storage_client = storage.Client.from_service_account_json(str(service_account_path))
-    bucket = storage_client.bucket(bucket_name)
+    try:
+        bucket_name = _require_bucket_name()
+        service_account_file = _require_service_account_file()
+        service_account_path = resolve_service_account_path(service_account_file)
+        storage_client = storage.Client.from_service_account_json(
+            str(service_account_path)
+        )
+        bucket = storage_client.bucket(bucket_name)
 
-    prefix = _normalize_prefix(config.datasets_gcs_prefix or "")
-    object_name = f"{prefix}{run_dir_name}/{dataset_path.name}"
-    blob = bucket.blob(object_name)
-    blob.upload_from_filename(
-        str(dataset_path),
-        content_type=_dataset_content_type(dataset_path),
-    )
+        prefix = _normalize_prefix(config.datasets_gcs_prefix or "")
+        object_name = f"{prefix}{run_dir_name}/{dataset_path.name}"
+        blob = bucket.blob(object_name)
+        blob.upload_from_filename(
+            str(dataset_path),
+            content_type=_dataset_content_type(dataset_path),
+        )
+    except Exception as exc:  # noqa: BLE001
+        log(f"Dataset upload skipped or failed for {dataset_path.name}.", exc=exc)
+        return None
+
     uri = f"gs://{bucket_name}/{object_name}"
     log(f"Uploaded dataset to {uri}.")
     return uri
@@ -1325,6 +1327,19 @@ def _resolve_batch_targets(args: argparse.Namespace) -> tuple[list[str], Path | 
     )
 
 
+def _resolve_retrieve_run_dir(
+    args: argparse.Namespace,
+    *,
+    submit_run_dir: Path | None,
+) -> Path:
+    output_dir = getattr(args, "output_dir", None)
+    if output_dir:
+        run_dir = Path(output_dir).expanduser()
+        run_dir.mkdir(parents=True, exist_ok=True)
+        return run_dir
+    return create_subfolder(config.output_root, category="retrieve")
+
+
 def _extract_location_from_batch_name(batch_name: str) -> str | None:
     parts = [part for part in batch_name.split("/") if part]
     for index, part in enumerate(parts):
@@ -1362,7 +1377,7 @@ def retrieve_batch(args: argparse.Namespace | None = None) -> RetrieveBatchResul
     if not batch_names:
         raise ValueError("No batch jobs resolved for retrieval.")
 
-    run_dir = create_subfolder(config.output_root, category="retrieve")
+    run_dir = _resolve_retrieve_run_dir(args, submit_run_dir=submit_run_dir)
     log = get_run_logger(run_dir)
 
     provider = _provider_from_batch_names(
@@ -1611,9 +1626,13 @@ def retrieve_batch(args: argparse.Namespace | None = None) -> RetrieveBatchResul
 
     out_name = config.dataset_file_name
     output_dataset_format = config.output_format
-    out_path = (
+    final_out_path = (
         run_dir / f"{run_dir.name}_{out_name}.{output_dataset_format.lstrip('.')}"
     )
+    out_path = final_out_path
+    if final_out_path.exists():
+        out_path = run_dir / f".{final_out_path.name}.tmp"
+        out_path.unlink(missing_ok=True)
 
     flush_every = max(1, int(config.flush_every or config.batch_size))
     rows_to_flush: list[dict] = []
@@ -2045,13 +2064,6 @@ def retrieve_batch(args: argparse.Namespace | None = None) -> RetrieveBatchResul
         observed_output_keys=output_keys_seen,
     )
     missing_success_keys = expected_success - successful_page_keys
-    parse_failure_missing_keys = {
-        key
-        for key in missing_success_keys
-        if _is_parse_failure_reason(failures.get(key))
-    }
-
-    forced_parse_recovery_used = False
     if missing_success_keys and provider == "gemini":
         recovery_keys: set[str] = set()
         recovery_force = False
@@ -2065,14 +2077,6 @@ def retrieve_batch(args: argparse.Namespace | None = None) -> RetrieveBatchResul
             )
         elif config.api_recovery_enabled:
             recovery_keys = missing_success_keys
-        elif parse_failure_missing_keys:
-            recovery_keys = parse_failure_missing_keys
-            recovery_force = True
-            forced_parse_recovery_used = True
-            log(
-                "Detected parse-related batch failures; attempting API-key recovery "
-                "for affected page(s) even though api_recovery_enabled=False."
-            )
 
         if recovery_keys:
             recovered_count = _recover_missing_pages_via_api_key(
@@ -2162,15 +2166,8 @@ def retrieve_batch(args: argparse.Namespace | None = None) -> RetrieveBatchResul
             ),
             log=log,
         )
-    except RuntimeError as exc:
-        if forced_parse_recovery_used:
-            log(
-                "Coverage validation failed after forced parse recovery. "
-                "Continuing to write partial dataset.",
-                exc=exc,
-            )
-        else:
-            raise
+    except RuntimeError:
+        raise
 
     _print_validation_summary(
         expected_keys=expected_keys,
@@ -2188,6 +2185,12 @@ def retrieve_batch(args: argparse.Namespace | None = None) -> RetrieveBatchResul
         )
         total_rows += wrote
 
+    if out_path != final_out_path and out_path.exists():
+        out_path.replace(final_out_path)
+        out_path = final_out_path
+    elif out_path != final_out_path:
+        out_path = final_out_path
+
     log(
         f"Retrieved {total_rows} processed row(s) from {len(batch_jobs)} completed "
         f"batch job(s) into {out_path.name} "
@@ -2197,7 +2200,7 @@ def retrieve_batch(args: argparse.Namespace | None = None) -> RetrieveBatchResul
     summary_path = write_processing_summary(run_dir)
     log(f"Wrote image processing manifest: {manifest_path.name}")
     log(f"Wrote image processing summary: {summary_path.name}")
-    _upload_dataset_to_gcs(out_path, run_dir.name, log)
+    dataset_gcs_uri = _upload_dataset_to_gcs(out_path, run_dir.name, log) or ""
     return RetrieveBatchResult(
         dataset_path=out_path,
         run_dir=run_dir,
@@ -2212,6 +2215,7 @@ def retrieve_batch(args: argparse.Namespace | None = None) -> RetrieveBatchResul
         duplicate_rows_skipped=duplicate_rows_skipped,
         recovered_pages=recovered_pages,
         manifest_path=manifest_path,
+        dataset_gcs_uri=dataset_gcs_uri,
     )
 
 

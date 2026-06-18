@@ -16,6 +16,7 @@ class CollectOutputsResult:
     pages_total: int | None
     pages_covered: int | None
     missing_pages: int | None
+    dataset_gcs_uri: str = ""
 
 
 @dataclass(frozen=True)
@@ -33,3 +34,4 @@ class RetrieveBatchResult:
     duplicate_rows_skipped: int = 0
     recovered_pages: int = 0
     manifest_path: Path | None = None
+    dataset_gcs_uri: str = ""

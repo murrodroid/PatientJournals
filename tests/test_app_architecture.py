@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 import json
+from types import SimpleNamespace
 
 from patientjournals.app import datasets as app_datasets
 from patientjournals.app.catalog import (
@@ -11,6 +12,7 @@ from patientjournals.app.dashboard import latest_dataset_path, summarize_dashboa
 from patientjournals.app.jobs import (
     JobRegistry,
     RegisteredJob,
+    _is_success_state,
     batch_run_provider,
     build_retrieve_command,
     build_submit_command,
@@ -20,10 +22,12 @@ from patientjournals.app.jobs import (
     read_dataset_preview,
     read_recorded_results,
     read_run_error,
+    resolve_batch_run_readiness,
 )
-from patientjournals.app.models import AppSettings, SubmitJobDraft
+from patientjournals.app.models import AppSettings, BatchChunkSummary, SubmitJobDraft
 from patientjournals.app.settings_store import load_app_settings, save_app_settings
 from patientjournals.config.schemas import FrontPage, TextPage, resolve_output_schema
+from patientjournals.validation import sync as validation_sync
 
 
 def test_schema_catalog_lists_top_level_output_schemas() -> None:
@@ -43,6 +47,7 @@ def test_google_model_catalog_is_google_only() -> None:
 
     assert models
     assert {model.provider for model in models} == {"gemini"}
+    assert "gemini-3.1-pro" in {model.name for model in models}
     assert "gemini-3.5-flash" in {model.name for model in models}
 
 
@@ -184,6 +189,55 @@ def test_batch_chunks_are_grouped_from_submit_metadata(tmp_path) -> None:
     assert [chunk.request_count for chunk in chunks] == [5, 4]
 
 
+def test_partial_success_state_is_not_clean_success() -> None:
+    assert _is_success_state("JOB_STATE_SUCCEEDED") is True
+    assert _is_success_state("ended") is True
+    assert _is_success_state("JOB_STATE_PARTIALLY_SUCCEEDED") is False
+    partial = [
+        BatchChunkSummary(
+            chunk_index=1,
+            total_chunks=1,
+            chunk_label="chunk_001_of_001",
+            batch_job_name="b1",
+            request_count=10,
+            status="JOB_STATE_PARTIALLY_SUCCEEDED",
+        )
+    ]
+    assert resolve_batch_run_readiness("unused", chunks=partial).state == "failed"
+
+
+def test_batch_readiness_waits_for_gemini_output_files(tmp_path, monkeypatch) -> None:
+    from patientjournals.app import jobs as app_jobs
+
+    run_dir = tmp_path / "submit_x"
+    run_dir.mkdir()
+    chunks = [
+        BatchChunkSummary(
+            chunk_index=1,
+            total_chunks=1,
+            chunk_label="chunk_001_of_001",
+            batch_job_name="b1",
+            request_count=10,
+            status="JOB_STATE_SUCCEEDED",
+        )
+    ]
+    monkeypatch.setattr(
+        app_jobs,
+        "_batch_model_progress",
+        lambda _run_dir: SimpleNamespace(
+            processed=3,
+            total=10,
+            detail="1 prediction file(s)",
+        ),
+    )
+
+    readiness = resolve_batch_run_readiness(run_dir, chunks=chunks)
+
+    assert readiness.state == "finalizing"
+    assert readiness.output_rows == 3
+    assert readiness.expected_rows == 10
+
+
 def test_dashboard_summary_reads_metrics_and_validations(tmp_path) -> None:
     runs = tmp_path / "runs"
     run_dir = runs / "run_1"
@@ -217,6 +271,138 @@ def test_dashboard_summary_reads_metrics_and_validations(tmp_path) -> None:
     assert summary.status_counts == {"duplicate_skipped": 1, "failed": 1, "success": 1}
     assert summary.duplicate_actions == {"skipped_input_duplicate": 1}
     assert summary.validation_label_counts == {"accept": 1, "reject": 1}
+    assert summary.validation_runs[0].accuracy == 50.0
+    assert [metric.metric for metric in summary.validation_metrics] == ["x", "y"]
+
+
+def test_dashboard_summary_reads_shared_validation_rows(tmp_path, monkeypatch) -> None:
+    class Blob:
+        name = "validations/alice_20260618/alice_20260618_validations.csv"
+        updated = datetime(2026, 6, 18, 9, tzinfo=timezone.utc)
+
+        def download_as_text(self, *, encoding="utf-8") -> str:
+            return (
+                "label,column_name,image_name,dataset_file,validator_id,decided_at\n"
+                "accept,name,a.png,run_dataset.jsonl,alice,2026-06-18T09:00:00\n"
+                "reject,date,b.png,run_dataset.jsonl,alice,2026-06-18T09:01:00\n"
+            )
+
+    class Bucket:
+        name = "bucket"
+
+    from patientjournals.app import dashboard as dashboard_module
+
+    monkeypatch.setattr(dashboard_module, "build_storage_bucket", lambda _name: Bucket())
+    monkeypatch.setattr(
+        dashboard_module,
+        "list_bucket_blobs",
+        lambda _bucket, prefix=None: [Blob()],
+    )
+
+    summary = summarize_dashboard(
+        run_root=tmp_path / "runs",
+        validations_root=tmp_path / "validations",
+        cloud_validations_bucket="bucket",
+        cloud_validations_prefix="validations",
+    )
+
+    assert summary.validation_count == 2
+    assert summary.validation_runs[0].validator_id == "alice"
+    assert summary.validation_runs[0].accuracy == 50.0
+    assert summary.validation_sync_error == ""
+
+
+def test_dataset_library_lists_local_and_cloud_datasets(tmp_path, monkeypatch) -> None:
+    run_dir = tmp_path / "runs" / "submits" / "20260618_094819"
+    run_dir.mkdir(parents=True)
+    dataset = run_dir / "20260618_094819_dataset.jsonl"
+    dataset.write_text('{"image_name": "a.png"}\n{"image_name": "b.png"}\n', encoding="utf-8")
+
+    local_items = app_datasets.list_local_dataset_library(tmp_path / "runs")
+
+    assert len(local_items) == 1
+    assert local_items[0].row_count == 2
+    assert local_items[0].run_id == "20260618_094819"
+
+    class Blob:
+        name = "datasets/20260618_094819/20260618_094819_dataset.jsonl"
+        size = 123
+        updated = datetime(2026, 6, 18, 10, tzinfo=timezone.utc)
+        metadata = {"rows": "1068"}
+
+    class Bucket:
+        name = "bucket"
+
+    monkeypatch.setattr(app_datasets, "build_storage_bucket", lambda _name: Bucket())
+    monkeypatch.setattr(
+        app_datasets,
+        "list_bucket_blobs",
+        lambda _bucket, prefix=None: [Blob()],
+    )
+
+    cloud_items = app_datasets.list_cloud_dataset_library(
+        bucket_name="bucket",
+        datasets_prefix="datasets",
+    )
+
+    assert len(cloud_items) == 1
+    assert cloud_items[0].source == "cloud"
+    assert cloud_items[0].row_count == 1068
+    assert cloud_items[0].gcs_uri.startswith("gs://bucket/datasets/")
+
+
+def test_validation_upload_writes_metadata_and_uploads_files(tmp_path, monkeypatch) -> None:
+    run_dir = tmp_path / "validations" / "alice_20260618"
+    run_dir.mkdir(parents=True)
+    csv_path = run_dir / "alice_20260618_validations.csv"
+    csv_path.write_text("label,column_name\naccept,name\n", encoding="utf-8")
+    dataset_path = tmp_path / "dataset.jsonl"
+    dataset_path.write_text('{"image_name": "a.png"}\n', encoding="utf-8")
+
+    metadata_path = validation_sync.write_validation_metadata(
+        run_dir=run_dir,
+        csv_path=csv_path,
+        dataset_path=dataset_path,
+        validator_id="alice",
+        decision_count=1,
+    )
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+
+    assert metadata["validator_id"] == "alice"
+    assert metadata["dataset_file"] == "dataset.jsonl"
+    assert metadata["decision_count"] == 1
+
+    uploaded: list[tuple[str, str]] = []
+
+    class Blob:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        def upload_from_filename(self, filename: str, *, content_type: str) -> None:
+            uploaded.append((self.name, content_type))
+
+    class Bucket:
+        name = "bucket"
+
+        def blob(self, name: str) -> Blob:
+            return Blob(name)
+
+    monkeypatch.setattr(validation_sync, "build_storage_bucket", lambda _name: Bucket())
+
+    result = validation_sync.upload_validation_run(
+        run_dir=run_dir,
+        csv_path=csv_path,
+        metadata_path=metadata_path,
+        bucket_name="bucket",
+        prefix="validations",
+    )
+
+    assert result["validation_csv_uri"].endswith("/alice_20260618_validations.csv")
+    assert result["validation_metadata_uri"].endswith("/validation_metadata.json")
+    assert uploaded == [
+        ("validations/alice_20260618/alice_20260618_validations.csv", "text/csv"),
+        ("validations/alice_20260618/validation_metadata.json", "application/json"),
+    ]
 
 
 def test_settings_store_roundtrip(tmp_path) -> None:
@@ -314,7 +500,7 @@ def test_list_submit_jobs_folds_in_retrieval_results(tmp_path) -> None:
                 {"chunk_index": 1, "total_chunks": 1, "batch_job_name": "b1", "request_count": 100}
             ],
         },
-        results={"successful_pages": 90, "expected_pages": 100},
+        results={"successful_pages": 90, "expected_pages": 100, "recovered_pages": 2},
     )
 
     job = list_submit_jobs(tmp_path)[0]
@@ -323,6 +509,7 @@ def test_list_submit_jobs_folds_in_retrieval_results(tmp_path) -> None:
     assert job.status == "retrieved"
     assert job.succeeded == 90
     assert job.failed == 10
+    assert job.recovered == 2
 
 
 def test_read_dataset_preview_jsonl(tmp_path) -> None:
@@ -392,6 +579,89 @@ def test_read_recorded_results_reads_batch_results(tmp_path) -> None:
     assert recorded["dataset_path"] == "/x/y.jsonl"
 
 
+def test_read_recorded_results_derives_missing_batch_results(tmp_path) -> None:
+    run_dir = _write_submit_run(
+        tmp_path / "submits",
+        "20260618_094819",
+        batch_meta={
+            "provider": "gemini",
+            "request_count": 3,
+            "batch_jobs": [
+                {
+                    "chunk_index": 1,
+                    "total_chunks": 1,
+                    "batch_job_name": "b1",
+                    "request_count": 3,
+                    "requests_file": "batch_requests.jsonl",
+                }
+            ],
+        },
+    )
+    (run_dir / "batch_requests.jsonl").write_text(
+        "\n".join(
+            json.dumps({"key": f"pages/folder/p{i}.png"}) for i in range(3)
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "batch_output_001.jsonl").write_text("{}\n{}\n{}\n", encoding="utf-8")
+    (run_dir / "20260618_094819_dataset.jsonl").write_text(
+        "\n".join(
+            json.dumps({"image_name": f"p{i}.png", "field": "ok"}) for i in range(2)
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    recorded = read_recorded_results(run_dir)
+    job = list_submit_jobs(tmp_path)[0]
+
+    assert recorded["result_inferred"] is True
+    assert recorded["expected_pages"] == 3
+    assert recorded["successful_pages"] == 2
+    assert recorded["missing_pages"] == 1
+    assert job.succeeded == 2
+    assert job.failed == 1
+
+
+def test_read_run_error_falls_back_to_failure_diagnostics(tmp_path) -> None:
+    manifest = tmp_path / "image_processing_manifest.jsonl"
+    manifest.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "status": "failed",
+                        "image_name": "a.png",
+                        "failure_reason": "schema_validation_failed",
+                    }
+                ),
+                json.dumps(
+                    {
+                        "status": "failed",
+                        "image_name": "a.png",
+                        "failure_reason": "schema_validation_failed",
+                    }
+                ),
+                json.dumps(
+                    {
+                        "status": "failed",
+                        "image_name": "b.png",
+                        "failure_reason": "missing_response",
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    text = read_run_error(tmp_path)
+
+    assert "schema_validation_failed=1" in text
+    assert "missing_response=1" in text
+
+
 def test_batch_run_provider_reads_metadata(tmp_path) -> None:
     assert batch_run_provider(tmp_path) == ""
     (tmp_path / "batch_job.json").write_text(
@@ -432,7 +702,14 @@ def test_recover_dataset_gaps_only_targets_missing_pages(tmp_path, monkeypatch) 
         encoding="utf-8",
     )
     (run_dir / "batch_results.json").write_text(
-        json.dumps({"dataset_path": str(dataset)}), encoding="utf-8"
+        json.dumps(
+            {
+                "dataset_path": str(dataset),
+                "recovered_pages": 1,
+                "recovery_history": [{"recovered_pages": 1, "method": "api"}],
+            }
+        ),
+        encoding="utf-8",
     )
 
     expected = {f"pages/dir/p{i}.png" for i in range(5)}  # p0..p4; p3,p4 missing
@@ -460,7 +737,8 @@ def test_recover_dataset_gaps_only_targets_missing_pages(tmp_path, monkeypatch) 
 
     # Only the 2 genuinely missing pages are recovered, not all 5.
     assert recovered_for["keys"] == {"pages/dir/p3.png", "pages/dir/p4.png"}
-    assert result["recovered_pages"] == 2
+    assert result["recovered_pages"] == 3
+    assert len(result["recovery_history"]) == 2
     assert result["successful_pages"] == 5
     assert result["missing_pages"] == 0
     # The recovered rows were appended to the existing dataset (3 -> 5).

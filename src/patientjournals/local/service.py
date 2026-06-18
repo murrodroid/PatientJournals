@@ -278,6 +278,13 @@ async def run_local_job(
     summary_path = write_processing_summary(run_dir)
     log(f"Wrote image processing manifest: {manifest_path.name}")
     log(f"Wrote image processing summary: {summary_path.name}")
+    if out_path.exists():
+        try:
+            from patientjournals.batch.retrieve import _upload_dataset_to_gcs
+
+            _upload_dataset_to_gcs(out_path, run_dir.name, log)
+        except Exception as exc:  # noqa: BLE001
+            log("Dataset upload skipped or failed.", exc=exc)
 
     covered_after = total_written
     try:

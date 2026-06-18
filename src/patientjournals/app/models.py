@@ -27,6 +27,9 @@ class AppSettings:
     gcs_pages_prefix: str = ""
     batch_requests_gcs_prefix: str = ""
     batch_outputs_gcs_prefix: str = ""
+    datasets_gcs_prefix: str = "datasets"
+    validations_gcs_prefix: str = "validations"
+    upload_validation_to_gcs: bool = True
     local_runs_root: str = "runs"
     gemini_api_key_env: str = "GEMINI_API_KEY"
     validation_images_root: str = ""
@@ -52,6 +55,9 @@ class AppSettings:
             gcs_pages_prefix=str(config.gcs_pages_prefix or ""),
             batch_requests_gcs_prefix=str(config.batch_requests_gcs_prefix or ""),
             batch_outputs_gcs_prefix=str(config.batch_outputs_gcs_prefix or ""),
+            datasets_gcs_prefix=str(config.datasets_gcs_prefix or "datasets"),
+            validations_gcs_prefix=str(config.validations_gcs_prefix or "validations"),
+            upload_validation_to_gcs=bool(config.upload_validation_to_gcs),
             local_runs_root=str(config.output_root or "runs"),
             validation_images_root=str(
                 config.upload_images_folder or config.target_folder or ""
@@ -129,6 +135,23 @@ class CloudDatasetChoice:
 
 
 @dataclass(frozen=True)
+class DatasetLibraryItem:
+    source: str
+    name: str
+    location: str
+    row_count: int | None = None
+    size_bytes: int | None = None
+    updated_at: str = ""
+    run_id: str = ""
+    local_path: str = ""
+    gcs_uri: str = ""
+
+    @property
+    def is_cloud(self) -> bool:
+        return self.source == "cloud"
+
+
+@dataclass(frozen=True)
 class SubmitJobDraft:
     dataset_source: DatasetSource
     run_mode: RunMode
@@ -173,6 +196,7 @@ class JobSummary:
     retrieved: bool = False
     succeeded: int | None = None
     failed: int | None = None
+    recovered: int = 0
 
 
 @dataclass(frozen=True)

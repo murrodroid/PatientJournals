@@ -14,6 +14,10 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from patientjournals.config.schemas import FrontPage
 from patientjournals.shared.identity import row_image_name
+from patientjournals.validation.sync import (
+    upload_validation_run,
+    write_validation_metadata,
+)
 
 _COLUMNS_NOT_INCLUDED = ['generation_seconds','image_name','file_name']
 
@@ -562,6 +566,27 @@ class ValidatorApp:
             )
             writer.writeheader()
             writer.writerows(self.results)
+        metadata_path = write_validation_metadata(
+            run_dir=self.run_dir,
+            csv_path=out_path,
+            dataset_path=self.dataset_path,
+            validator_id=self.username,
+            decision_count=len(self.results),
+        )
+        try:
+            uploaded = upload_validation_run(
+                run_dir=self.run_dir,
+                csv_path=out_path,
+                metadata_path=metadata_path,
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.log(f"Validation upload skipped or failed: {type(exc).__name__}: {exc}")
+        else:
+            if uploaded:
+                self.log(
+                    "Uploaded validation results: "
+                    f"{uploaded.get('validation_csv_uri', '')}"
+                )
 
 
 def main():

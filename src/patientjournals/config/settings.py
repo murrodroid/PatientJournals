@@ -56,7 +56,7 @@ def _default_api_key() -> str:
 
 @dataclass
 class Config:
-    model: str = "gemini-3.1-pro-preview"  # gemini-3.1-pro-preview
+    model: str = "gemini-3.1-pro"
     input_prompt_name: str = "frontpage"  # change to correct prompt
     output_model: type[BaseModel] = FrontPage  # change to correct schema in schemas.py
     target_folder: str = "/Volumes/Expansion/patientjournaler_1889-1897_jpg"
@@ -139,7 +139,9 @@ class Config:
     batch_requests_gcs_prefix: str = "batch/requests"
     batch_outputs_gcs_prefix: str = "batch/outputs"
     datasets_gcs_prefix: str = "datasets"
-    upload_dataset_to_gcs: bool = False
+    upload_dataset_to_gcs: bool = True
+    validations_gcs_prefix: str = "validations"
+    upload_validation_to_gcs: bool = True
 
     # Upload/render settings for PDF to GCS image pages
     upload_source: Literal["pdf", "images", "auto"] = "images"
@@ -297,6 +299,10 @@ def _apply_external_json_config(cfg: Config) -> None:
         "gcs_pages_prefix",
         "batch_requests_gcs_prefix",
         "batch_outputs_gcs_prefix",
+        "datasets_gcs_prefix",
+        "upload_dataset_to_gcs",
+        "validations_gcs_prefix",
+        "upload_validation_to_gcs",
         "batch_input_prefix",
         "batch_input_prefixes",
         "target_folder",
