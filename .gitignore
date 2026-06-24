@@ -210,6 +210,9 @@ marimo/_lsp/
 __marimo__/
 
 api_keys.py
+.patientjournals/
+secrets.json
+*secrets*.json
 .DS_Store
 
 # local runs and dataset stuff

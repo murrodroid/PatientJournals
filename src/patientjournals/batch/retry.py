@@ -424,6 +424,42 @@ def _count_requests_file(path: Path) -> tuple[int, int]:
     return count, total_bytes
 
 
+def _split_keys_evenly(keys: list[str], num_batches: int) -> list[list[str]]:
+    if not keys:
+        return []
+    if num_batches <= 1:
+        return [keys]
+
+    target_batches = min(num_batches, len(keys))
+    base_size, remainder = divmod(len(keys), target_batches)
+    chunks: list[list[str]] = []
+    start = 0
+    for index in range(target_batches):
+        size = base_size + (1 if index < remainder else 0)
+        end = start + size
+        if size > 0:
+            chunks.append(keys[start:end])
+        start = end
+    return chunks
+
+
+def _retry_requests_file_name(
+    base_name: str,
+    *,
+    chunk_index: int,
+    total_chunks: int,
+) -> str:
+    if total_chunks <= 1:
+        return base_name
+    base = Path(base_name)
+    suffix = base.suffix or ".jsonl"
+    return f"{base.stem}.part{chunk_index:03d}-of-{total_chunks:03d}{suffix}"
+
+
+def _chunk_label(*, chunk_index: int, total_chunks: int) -> str:
+    return f"chunk_{chunk_index:03d}_of_{total_chunks:03d}"
+
+
 def _write_retry_keys_file(
     *,
     path: Path,
@@ -443,34 +479,46 @@ def _write_retry_keys_file(
 def _write_retry_batch_job_meta(
     *,
     run_dir: Path,
-    job: dict[str, object],
+    jobs: list[dict[str, object]],
     client_backend: str,
     vertex_location: str | None,
     provider: str,
     retry_source_run: str | None,
+    retry_source_run_id: str | None,
+    job_group_id: str,
     retry_source_batch_names: list[str],
     retry_failed_keys_file: str,
+    num_batches_requested: int,
 ) -> None:
-    request_count = int(job.get("request_count") or 0)
-    request_bytes = int(job.get("request_bytes") or 0)
+    if not jobs:
+        raise ValueError("Cannot write retry metadata without batch jobs.")
+
+    request_count = sum(int(job.get("request_count") or 0) for job in jobs)
+    request_bytes = sum(int(job.get("request_bytes") or 0) for job in jobs)
+    first = jobs[0]
 
     meta: dict[str, object] = {
         "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
-        "batch_job_name": job.get("batch_job_name"),
-        "batch_job_names": [job.get("batch_job_name")],
-        "batch_jobs": [job],
+        "job_group_id": job_group_id,
+        "job_group_role": "retry",
+        "batch_job_name": first.get("batch_job_name"),
+        "batch_job_names": [
+            job.get("batch_job_name") for job in jobs if job.get("batch_job_name")
+        ],
+        "batch_jobs": jobs,
         "request_count": request_count,
         "request_bytes": request_bytes,
-        "input_file": job.get("input_file"),
-        "input_source": job.get("input_source"),
-        "output_destination": job.get("output_destination"),
-        "model": job.get("model") or config.model,
+        "input_file": first.get("input_file"),
+        "input_source": first.get("input_source"),
+        "output_destination": first.get("output_destination"),
+        "model": first.get("model") or config.model,
         "provider": provider,
         "client_backend": client_backend,
         "vertex_location": vertex_location,
-        "num_batches_requested": 1,
-        "num_batches_submitted": 1,
+        "num_batches_requested": int(num_batches_requested),
+        "num_batches_submitted": len(jobs),
         "retry_failed_keys_file": retry_failed_keys_file,
+        "retry_source_run_id": retry_source_run_id,
         "retry_source_batch_names": retry_source_batch_names,
     }
     if retry_source_run:
@@ -478,6 +526,123 @@ def _write_retry_batch_job_meta(
 
     (run_dir / "batch_job.json").write_text(
         json.dumps(meta, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+def _source_job_group_id(source_payload: dict, submit_run_dir: Path | None) -> str:
+    value = source_payload.get("job_group_id")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    if submit_run_dir is not None:
+        return submit_run_dir.name
+    return datetime.now().strftime("batch_%Y%m%d_%H%M%S")
+
+
+def _retry_attempt_label(source_payload: dict) -> str:
+    retry_runs = source_payload.get("retry_runs")
+    count = len(retry_runs) if isinstance(retry_runs, list) else 0
+    return f"retry_failed_{count + 1:03d}"
+
+
+def _append_retry_to_source_metadata(
+    *,
+    submit_run_dir: Path | None,
+    retry_run_dir: Path,
+    jobs_to_append: list[dict[str, object]],
+    retry_failed_keys_file: str,
+) -> None:
+    if submit_run_dir is None:
+        return
+    source_path = submit_run_dir / "batch_job.json"
+    source_payload = _read_batch_job_payload(source_path)
+    if not source_payload:
+        return
+
+    retry_jobs = [job for job in jobs_to_append if job.get("batch_job_name")]
+    if not retry_jobs:
+        return
+
+    source_payload.setdefault("job_group_id", _source_job_group_id(source_payload, submit_run_dir))
+    source_payload.setdefault("job_group_role", "root")
+    jobs = source_payload.get("batch_jobs")
+    if not isinstance(jobs, list):
+        jobs = []
+        source_payload["batch_jobs"] = jobs
+
+    existing_names = {
+        item.get("batch_job_name")
+            for item in jobs
+            if isinstance(item, dict) and item.get("batch_job_name")
+    }
+
+    attempt_label = _retry_attempt_label(source_payload)
+    total_retry_chunks = len(retry_jobs)
+    chunk_indices = [
+        int(item.get("chunk_index") or 0)
+        for item in jobs
+        if isinstance(item, dict)
+    ]
+    next_chunk_index = max(chunk_indices or [0]) + 1
+    appended_names: list[object] = []
+    for retry_index, job in enumerate(retry_jobs, start=1):
+        job_name = job.get("batch_job_name")
+        if job_name in existing_names:
+            continue
+        retry_entry = dict(job)
+        retry_label = (
+            attempt_label
+            if total_retry_chunks == 1
+            else f"{attempt_label}_{retry_index:03d}_of_{total_retry_chunks:03d}"
+        )
+        retry_entry.update(
+            {
+                "chunk_index": next_chunk_index,
+                "total_chunks": next_chunk_index,
+                "chunk_label": retry_label,
+                "is_retry": True,
+                "retry_run_dir": str(retry_run_dir),
+                "retry_run_id": retry_run_dir.name,
+                "retry_source_run": str(submit_run_dir),
+                "retry_failed_keys_file": retry_failed_keys_file,
+            }
+        )
+        jobs.append(retry_entry)
+        existing_names.add(job_name)
+        appended_names.append(job_name)
+        next_chunk_index += 1
+
+    names = [
+        item.get("batch_job_name")
+        for item in jobs
+        if isinstance(item, dict) and item.get("batch_job_name")
+    ]
+    source_payload["batch_job_names"] = list(dict.fromkeys(names))
+    retry_runs = source_payload.get("retry_runs")
+    if not isinstance(retry_runs, list):
+        retry_runs = []
+        source_payload["retry_runs"] = retry_runs
+    if not any(
+        isinstance(item, dict) and item.get("run_dir") == str(retry_run_dir)
+        for item in retry_runs
+    ):
+        retry_runs.append(
+            {
+                "run_dir": str(retry_run_dir),
+                "run_id": retry_run_dir.name,
+                "batch_job_name": retry_jobs[0].get("batch_job_name"),
+                "batch_job_names": appended_names
+                or [job.get("batch_job_name") for job in retry_jobs],
+                "batch_count": total_retry_chunks,
+                "request_count": sum(
+                    int(job.get("request_count") or 0) for job in retry_jobs
+                ),
+                "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+            }
+        )
+
+    source_path.write_text(
+        json.dumps(source_payload, indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
 
@@ -517,9 +682,12 @@ def _submit_failed_pages_as_batch(
     batch_names: list[str],
     submit_run_dir: Path | None,
     log,
-) -> tuple[Path, str, int] | None:
+    num_batches: int = 1,
+) -> tuple[Path, list[str], int] | None:
     if not failed_keys:
         return None
+    if num_batches <= 0:
+        raise ValueError(f"num_batches must be >= 1 (received {num_batches}).")
 
     bucket_name = _require_bucket_name()
     normalized_reasons: dict[str, str] = {}
@@ -547,6 +715,7 @@ def _submit_failed_pages_as_batch(
     run_dir = create_subfolder(config.output_root, category="submit")
     retry_log = get_run_logger(run_dir)
     model_name = str(config.model).strip()
+    source_payload: dict = {}
     if submit_run_dir is not None:
         source_payload = _read_batch_job_payload(submit_run_dir / "batch_job.json")
         source_model = _normalize_key((source_payload or {}).get("model"))
@@ -554,27 +723,15 @@ def _submit_failed_pages_as_batch(
             model_name = source_model
     if not model_name:
         raise ValueError("Retry batch model is empty. Set config.model.")
+    job_group_id = _source_job_group_id(source_payload, submit_run_dir)
+    key_chunks = _split_keys_evenly(normalized_keys, num_batches)
+    total_chunks = len(key_chunks)
 
     retry_keys_file = run_dir / "failed_keys.jsonl"
     _write_retry_keys_file(
         path=retry_keys_file,
         keys=normalized_keys,
         reasons_by_key=normalized_reasons,
-    )
-
-    requests_file_name = config.batch_requests_file_name
-    requests_path = run_dir / requests_file_name
-    _write_retry_requests_file(
-        keys=normalized_keys,
-        output_path=requests_path,
-        provider=provider,
-        bucket_name=bucket_name,
-        for_vertex=bool(getattr(client, "vertexai", False)),
-    )
-    request_count, request_bytes = _count_requests_file(requests_path)
-    retry_log(
-        "Prepared failed-page retry request file "
-        f"{requests_file_name} with {request_count} key(s)."
     )
 
     bucket: storage.Bucket | None = None
@@ -587,117 +744,167 @@ def _submit_failed_pages_as_batch(
         )
         bucket = storage_client.bucket(bucket_name)
 
-    display_name = f"{config.batch_job_display_name}-failed-retry"
-    input_source = "gcs"
-    input_ref = ""
-    output_destination: str | None = None
+    jobs: list[dict[str, object]] = []
+    client_backend = "anthropic" if provider == "anthropic" else "mldev"
+    vertex_location = None
+    if provider != "anthropic" and bool(getattr(client, "vertexai", False)):
+        client_backend = "vertex"
+        vertex_location = (
+            _extract_location_from_batch_name(batch_names[0])
+            if batch_names
+            else (config.vertex_model_location or "").strip()
+            or (config.gcp_location or "").strip()
+            or None
+        )
 
-    if provider == "anthropic":
-        if bucket is None:
-            raise RuntimeError(
-                "Anthropic failed-page retry submission requires GCS bucket access."
-            )
-        requests = _build_anthropic_batch_requests_for_retry(
-            bucket=bucket,
-            requests_path=requests_path,
-            model_name=model_name,
+    for chunk_index, chunk_keys in enumerate(key_chunks, start=1):
+        chunk_label = _chunk_label(
+            chunk_index=chunk_index,
+            total_chunks=total_chunks,
         )
-        batch_job = client.messages.batches.create(requests=requests)
-        batch_job_name = batch_job.id
-        input_source = "anthropic_manifest"
-        input_ref = requests_path.name
+        requests_file_name = _retry_requests_file_name(
+            config.batch_requests_file_name,
+            chunk_index=chunk_index,
+            total_chunks=total_chunks,
+        )
+        requests_path = run_dir / requests_file_name
+        _write_retry_requests_file(
+            keys=chunk_keys,
+            output_path=requests_path,
+            provider=provider,
+            bucket_name=bucket_name,
+            for_vertex=bool(getattr(client, "vertexai", False)),
+        )
+        request_count, request_bytes = _count_requests_file(requests_path)
         retry_log(
-            "Submitted failed-page retry Anthropic batch with "
-            f"{len(requests)} request(s). batch_id={batch_job_name}"
+            "Prepared failed-page retry request file "
+            f"{requests_file_name} with {request_count} key(s)."
         )
-        client_backend = "anthropic"
-        vertex_location = None
-    else:
-        if bool(getattr(client, "vertexai", False)):
+
+        display_name = f"{config.batch_job_display_name}-failed-retry"
+        if total_chunks > 1:
+            display_name = f"{display_name}-{chunk_label}"
+        input_source = "gcs"
+        input_ref = ""
+        output_destination: str | None = None
+
+        if provider == "anthropic":
             if bucket is None:
                 raise RuntimeError(
-                    "Vertex failed-page retry submission requires GCS bucket access."
+                    "Anthropic failed-page retry submission requires GCS bucket access."
                 )
-            input_ref = _upload_requests_to_gcs(
+            requests = _build_anthropic_batch_requests_for_retry(
                 bucket=bucket,
-                run_dir_name=run_dir.name,
-                local_requests_path=requests_path,
+                requests_path=requests_path,
+                model_name=model_name,
             )
-            output_destination = _output_dest_gcs_uri(
-                bucket_name=bucket_name,
-                run_dir_name=run_dir.name,
-                chunk_label="retry_failed",
-            )
-            batch_job = client.batches.create(
-                model=model_name,
-                src=input_ref,
-                config=types.CreateBatchJobConfig(
-                    display_name=display_name,
-                    dest=output_destination,
-                ),
-            )
-            batch_job_name = batch_job.name
-            client_backend = "vertex"
-            vertex_location = (
-                _extract_location_from_batch_name(batch_names[0])
-                if batch_names
-                else (config.vertex_model_location or "").strip()
-                or (config.gcp_location or "").strip()
-                or None
-            )
+            batch_job = client.messages.batches.create(requests=requests)
+            batch_job_name = batch_job.id
+            input_source = "anthropic_manifest"
+            input_ref = requests_path.name
             retry_log(
-                f"Submitted failed-page retry Vertex batch_id={batch_job_name} "
-                f"input={input_ref} output={output_destination}"
+                "Submitted failed-page retry Anthropic batch with "
+                f"{len(requests)} request(s). batch_id={batch_job_name}"
             )
         else:
-            uploaded_file = client.files.upload(
-                file=str(requests_path),
-                config=types.UploadFileConfig(
-                    display_name=f"{display_name}-requests",
-                    mime_type="jsonl",
-                ),
-            )
-            input_source = "gemini_files"
-            input_ref = uploaded_file.name
-            batch_job = client.batches.create(
-                model=model_name,
-                src=uploaded_file.name,
-                config=types.CreateBatchJobConfig(display_name=display_name),
-            )
-            batch_job_name = batch_job.name
-            client_backend = "mldev"
-            vertex_location = None
-            retry_log(
-                f"Submitted failed-page retry mldev batch_id={batch_job_name} "
-                f"input={input_ref}"
-            )
+            if bool(getattr(client, "vertexai", False)):
+                if bucket is None:
+                    raise RuntimeError(
+                        "Vertex failed-page retry submission requires GCS bucket access."
+                    )
+                input_ref = _upload_requests_to_gcs(
+                    bucket=bucket,
+                    run_dir_name=run_dir.name,
+                    local_requests_path=requests_path,
+                )
+                output_destination = _output_dest_gcs_uri(
+                    bucket_name=bucket_name,
+                    run_dir_name=run_dir.name,
+                    chunk_label=f"retry_failed/{chunk_label}",
+                )
+                batch_job = client.batches.create(
+                    model=model_name,
+                    src=input_ref,
+                    config=types.CreateBatchJobConfig(
+                        display_name=display_name,
+                        dest=output_destination,
+                    ),
+                )
+                batch_job_name = batch_job.name
+                retry_log(
+                    f"Submitted failed-page retry Vertex batch_id={batch_job_name} "
+                    f"input={input_ref} output={output_destination}"
+                )
+            else:
+                uploaded_file = client.files.upload(
+                    file=str(requests_path),
+                    config=types.UploadFileConfig(
+                        display_name=f"{display_name}-requests",
+                        mime_type="jsonl",
+                    ),
+                )
+                input_source = "gemini_files"
+                input_ref = uploaded_file.name
+                batch_job = client.batches.create(
+                    model=model_name,
+                    src=uploaded_file.name,
+                    config=types.CreateBatchJobConfig(display_name=display_name),
+                )
+                batch_job_name = batch_job.name
+                retry_log(
+                    f"Submitted failed-page retry mldev batch_id={batch_job_name} "
+                    f"input={input_ref}"
+                )
 
-    job_entry: dict[str, object] = {
-        "chunk_index": 1,
-        "total_chunks": 1,
-        "chunk_label": "chunk_001_of_001",
-        "requests_file": requests_file_name,
-        "request_count": request_count,
-        "request_bytes": request_bytes,
-        "batch_job_name": batch_job_name,
-        "input_file": input_ref,
-        "input_source": input_source,
-        "output_destination": output_destination,
-        "provider": provider,
-        "model": model_name,
-    }
+        jobs.append(
+            {
+                "chunk_index": chunk_index,
+                "total_chunks": total_chunks,
+                "chunk_label": chunk_label,
+                "requests_file": requests_file_name,
+                "request_count": request_count,
+                "request_bytes": request_bytes,
+                "batch_job_name": batch_job_name,
+                "input_file": input_ref,
+                "input_source": input_source,
+                "output_destination": output_destination,
+                "provider": provider,
+                "model": model_name,
+                "is_retry": True,
+                "retry_run_dir": str(run_dir),
+                "retry_run_id": run_dir.name,
+                "retry_source_run": str(submit_run_dir) if submit_run_dir else None,
+                "retry_source_run_id": submit_run_dir.name if submit_run_dir else None,
+                "job_group_id": job_group_id,
+            }
+        )
+
+    _append_retry_to_source_metadata(
+        submit_run_dir=submit_run_dir,
+        retry_run_dir=run_dir,
+        jobs_to_append=jobs,
+        retry_failed_keys_file=retry_keys_file.name,
+    )
     _write_retry_batch_job_meta(
         run_dir=run_dir,
-        job=job_entry,
+        jobs=jobs,
         client_backend=client_backend,
         vertex_location=vertex_location,
         provider=provider,
         retry_source_run=str(submit_run_dir) if submit_run_dir else None,
+        retry_source_run_id=submit_run_dir.name if submit_run_dir else None,
+        job_group_id=job_group_id,
         retry_source_batch_names=batch_names,
         retry_failed_keys_file=retry_keys_file.name,
+        num_batches_requested=num_batches,
     )
+    batch_job_names = [
+        str(job.get("batch_job_name")) for job in jobs if job.get("batch_job_name")
+    ]
+    total_request_count = sum(int(job.get("request_count") or 0) for job in jobs)
     log(
-        f"Submitted failed-page retry batch with {request_count} key(s): "
-        f"{batch_job_name} (run_dir={run_dir})"
+        f"Submitted failed-page retry batch with {total_request_count} key(s) "
+        f"across {len(batch_job_names)} chunk(s): "
+        f"{', '.join(batch_job_names)} (run_dir={run_dir})"
     )
-    return run_dir, str(batch_job_name), request_count
+    return run_dir, batch_job_names, total_request_count

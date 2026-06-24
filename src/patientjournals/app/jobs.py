@@ -25,6 +25,7 @@ from patientjournals.app.settings_store import (
     write_command_overrides,
 )
 from patientjournals.config import config
+from patientjournals.config.models import resolve_model_spec
 from patientjournals.config.schemas import resolve_output_schema
 from patientjournals.local.service import LocalRunRequest, LocalRunResult, run_local_job
 from patientjournals.shared.dataset_coverage import load_dataset_image_coverage
@@ -243,9 +244,7 @@ class BatchRunReadiness:
 def _summarize_batch_run(run_dir: Path) -> BatchSubmitOutcome:
     payload = _read_json_file(run_dir / "batch_job.json")
     chunks = _batch_chunk_summaries_from_payload(payload)
-    request_count = sum(chunk.request_count for chunk in chunks) or int(
-        payload.get("request_count") or 0
-    )
+    request_count = _primary_request_count_from_payload(payload)
     names = tuple(
         str(item.get("batch_job_name"))
         for item in (payload.get("batch_jobs") or [])
@@ -365,6 +364,34 @@ def run_batch_rerun_direct(
 BATCH_RESULTS_FILE = "batch_results.json"
 
 
+def _api_recovery_error_rows(failures: dict[str, str]) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    for key, reason in sorted(failures.items()):
+        image_name = image_name_from_reference(key) or (Path(key).name if key else "")
+        rows.append(
+            {
+                "image_name": image_name or key,
+                "key": key,
+                "failure_reason": str(reason or "api_key_recovery_failed:unknown"),
+            }
+        )
+    return rows
+
+
+def _api_recovery_error_summary(error_rows: list[dict[str, str]]) -> str:
+    if not error_rows:
+        return ""
+    counts = Counter(row.get("failure_reason") or "unknown" for row in error_rows)
+    summary = ", ".join(f"{count} {reason}" for reason, count in counts.most_common())
+    sample = "; ".join(
+        f"{row.get('image_name') or row.get('key')}: {row.get('failure_reason')}"
+        for row in error_rows[:5]
+    )
+    if len(error_rows) > 5:
+        sample = f"{sample}; +{len(error_rows) - 5} more"
+    return f"API recovery failed for {len(error_rows)} page(s): {summary}. {sample}"
+
+
 def run_retrieve_direct(
     run_dir: str | Path,
     settings: AppSettings,
@@ -372,6 +399,7 @@ def run_retrieve_direct(
     allow_partial: bool = False,
     recover_missing_with_api: bool = False,
     submit_failed: bool = False,
+    failed_retry_num_batches: int | None = None,
     duplicate_strategy: str = "",
     record_results: bool = True,
 ) -> dict[str, object]:
@@ -402,6 +430,7 @@ def run_retrieve_direct(
                 allow_partial=allow_partial,
                 recover_missing_with_api=recover_missing_with_api,
                 submit_failed=submit_failed,
+                failed_retry_num_batches=failed_retry_num_batches,
                 duplicate_strategy=str(effective_strategy),
             )
         )
@@ -423,6 +452,11 @@ def run_retrieve_direct(
         "dataset_gcs_uri": result.dataset_gcs_uri,
         "submit_failed": bool(submit_failed),
     }
+    if recover_missing_with_api:
+        payload["api_recovery_attempted"] = True
+        payload["api_recovery_completed"] = True
+        payload["api_recovered_row_count"] = int(result.recovered_pages or 0)
+        payload["api_recovered_rows"] = []
     if record_results:
         results_path = Path(run_dir).expanduser() / BATCH_RESULTS_FILE
         results_path.write_text(
@@ -435,6 +469,8 @@ def run_retrieve_direct(
 def resubmit_failed_requests(
     run_dir: str | Path,
     settings: AppSettings,
+    *,
+    num_batches: int = 1,
 ) -> dict[str, object]:
     """Resubmit the requests that did not succeed as a fresh batch.
 
@@ -446,6 +482,7 @@ def resubmit_failed_requests(
         settings,
         allow_partial=True,
         submit_failed=True,
+        failed_retry_num_batches=num_batches,
         record_results=False,
     )
     results_path = Path(run_dir).expanduser() / BATCH_RESULTS_FILE
@@ -456,7 +493,41 @@ def resubmit_failed_requests(
 def batch_run_provider(run_dir: str | Path) -> str:
     """Return the provider ("gemini"/"anthropic") recorded for a submit run."""
     meta = _read_json_file(Path(run_dir).expanduser() / "batch_job.json")
-    return str(meta.get("provider") or "").strip().lower()
+    provider = str(meta.get("provider") or "").strip().lower()
+    if provider in {"gemini", "anthropic"}:
+        return provider
+
+    model = str(meta.get("model") or "").strip()
+    if model:
+        try:
+            model_provider = resolve_model_spec(model).provider
+        except ValueError:
+            lowered = model.lower()
+            if "gemini" in lowered:
+                return "gemini"
+            if "claude" in lowered or "anthropic" in lowered:
+                return "anthropic"
+        else:
+            if model_provider in {"gemini", "anthropic"}:
+                return model_provider
+
+    names = [
+        str(item.get("batch_job_name") or "")
+        for item in (meta.get("batch_jobs") or [])
+        if isinstance(item, dict) and item.get("batch_job_name")
+    ]
+    if not names and meta.get("batch_job_name"):
+        names = [str(meta.get("batch_job_name"))]
+    if names and all(name.startswith("msgbatch_") for name in names):
+        return "anthropic"
+    if names and all(
+        name.startswith("projects/")
+        or "/locations/" in name
+        or name.startswith("batches/")
+        for name in names
+    ):
+        return "gemini"
+    return ""
 
 
 def recover_failed_via_api(
@@ -536,18 +607,21 @@ def recover_dataset_gaps(
         )
 
         recovered = 0
+        recovered_rows: list[dict] = []
+        api_failures: dict[str, str] = {}
         if missing_keys:
             rows_to_flush: list[dict] = []
             recovered = retrieve_module._recover_missing_pages_via_api_key(
                 missing_keys=missing_keys,
                 successful_keys=set(),
                 observed_output_keys=set(),
-                failures={},
+                failures=api_failures,
                 rows_to_flush=rows_to_flush,
                 log=log,
                 force=True,
                 manifest_path=None,
             )
+            recovered_rows = [dict(row) for row in rows_to_flush]
             if rows_to_flush:
                 flush_rows(
                     rows=rows_to_flush,
@@ -575,6 +649,26 @@ def recover_dataset_gaps(
         ) or str(recorded.get("dataset_gcs_uri") or "")
 
         successful = len(covered_names) + recovered
+        missing_after_recovery = max(0, len(missing_keys) - recovered)
+        api_error_rows = _api_recovery_error_rows(api_failures)
+        if missing_after_recovery and not api_error_rows:
+            recovered_names = {
+                str(row.get("image_name") or "")
+                for row in recovered_rows
+                if isinstance(row, dict)
+            }
+            unresolved = [
+                key
+                for key in sorted(missing_keys)
+                if basename(key) not in recovered_names
+            ]
+            api_error_rows = _api_recovery_error_rows(
+                {
+                    key: "api_key_recovery_failed:no_recovered_row"
+                    for key in unresolved[:missing_after_recovery]
+                }
+            )
+        api_failed = bool(missing_after_recovery)
         payload = {
             "retrieved_at": recovered_at,
             "dataset_path": str(dataset_path),
@@ -587,9 +681,16 @@ def recover_dataset_gaps(
             "observed_pages": len(expected_keys),
             "successful_pages": successful,
             "recovered_pages": recovered_total,
-            "missing_pages": max(0, len(missing_keys) - recovered),
+            "missing_pages": missing_after_recovery,
             "submit_failed": False,
             "recovery_history": recovery_history,
+            "api_recovery_attempted": True,
+            "api_recovery_completed": True,
+            "api_recovery_failed": api_failed,
+            "api_recovery_errors": api_error_rows,
+            "api_recovery_error_summary": _api_recovery_error_summary(api_error_rows),
+            "api_recovered_rows": recovered_rows,
+            "api_recovered_row_count": len(recovered_rows),
         }
         (run_path / BATCH_RESULTS_FILE).write_text(
             json.dumps(payload, indent=2, ensure_ascii=False),
@@ -1004,6 +1105,265 @@ def _read_json_file(path: Path) -> dict:
     return payload if isinstance(payload, dict) else {}
 
 
+def _write_json_file(path: Path, payload: dict) -> None:
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _stored_batch_status(payload: dict, item: dict) -> str:
+    status = str(item.get("status") or "").strip()
+    if status and status.lower() != "unknown":
+        return status
+    payload_status = str(payload.get("status") or "").strip()
+    if payload_status and payload_status.lower() != "unknown":
+        return payload_status
+    return "submitted"
+
+
+def _now_iso() -> str:
+    return datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+def _is_retry_batch_meta(payload: dict) -> bool:
+    role = str(payload.get("job_group_role") or "").strip().lower()
+    return bool(
+        role == "retry"
+        or payload.get("retry_source_run")
+        or payload.get("retry_source_run_id")
+    )
+
+
+def _submit_root_for_run_dir(run_dir: Path) -> Path:
+    return run_dir.parent.parent if run_dir.parent.name == "submits" else run_dir.parent
+
+
+def _same_run_dir(left: Path, right: Path) -> bool:
+    try:
+        return left.resolve() == right.resolve()
+    except OSError:
+        return left == right
+
+
+def _resolve_retry_source_run_dir(
+    root: Path,
+    retry_run_dir: Path,
+    retry_meta: dict,
+) -> Path | None:
+    raw = str(retry_meta.get("retry_source_run") or "").strip()
+    candidates: list[Path] = []
+    if raw:
+        raw_path = Path(raw).expanduser()
+        candidates.append(raw_path)
+        if not raw_path.is_absolute():
+            candidates.extend(
+                [
+                    root / raw_path,
+                    run_layout.category_root(root, "submit") / raw_path,
+                    retry_run_dir.parent / raw_path,
+                ]
+            )
+        candidates.append(run_layout.category_root(root, "submit") / raw_path.name)
+        candidates.append(root / raw_path.name)
+
+    source_id = str(retry_meta.get("retry_source_run_id") or "").strip()
+    if source_id:
+        candidates.extend(
+            [
+                run_layout.category_root(root, "submit") / source_id,
+                root / source_id,
+            ]
+        )
+
+    for candidate in candidates:
+        if candidate == retry_run_dir:
+            continue
+        if (candidate / "batch_job.json").is_file():
+            return candidate
+    return None
+
+
+def _retry_child_run_dirs(source_run_dir: Path) -> list[Path]:
+    root = _submit_root_for_run_dir(source_run_dir)
+    children: list[Path] = []
+    for candidate in run_layout.iter_run_dirs(root, "submit"):
+        if _same_run_dir(candidate, source_run_dir):
+            continue
+        meta = _read_json_file(candidate / "batch_job.json")
+        if not meta or not _is_retry_batch_meta(meta):
+            continue
+        source = _resolve_retry_source_run_dir(root, candidate, meta)
+        if source is not None and _same_run_dir(source, source_run_dir):
+            children.append(candidate)
+    return children
+
+
+def _retry_attempt_label(parent_meta: dict) -> str:
+    retry_runs = parent_meta.get("retry_runs")
+    count = len(retry_runs) if isinstance(retry_runs, list) else 0
+    return f"retry_failed_{count + 1:03d}"
+
+
+def _patch_retry_child_metadata(
+    *,
+    source_run_dir: Path,
+    retry_run_dir: Path,
+    retry_meta: dict,
+) -> bool:
+    group_id = str(retry_meta.get("job_group_id") or source_run_dir.name)
+    changed = False
+    if retry_meta.get("job_group_id") != group_id:
+        retry_meta["job_group_id"] = group_id
+        changed = True
+    if retry_meta.get("job_group_role") != "retry":
+        retry_meta["job_group_role"] = "retry"
+        changed = True
+    if retry_meta.get("retry_source_run_id") != source_run_dir.name:
+        retry_meta["retry_source_run_id"] = source_run_dir.name
+        changed = True
+    if changed:
+        _write_json_file(retry_run_dir / "batch_job.json", retry_meta)
+    return changed
+
+
+def _append_retry_child_to_source_metadata(
+    *,
+    source_run_dir: Path,
+    retry_run_dir: Path,
+) -> bool:
+    source_path = source_run_dir / "batch_job.json"
+    retry_path = retry_run_dir / "batch_job.json"
+    source_meta = _read_json_file(source_path)
+    retry_meta = _read_json_file(retry_path)
+    if not source_meta or not retry_meta or not _is_retry_batch_meta(retry_meta):
+        return False
+
+    changed = False
+    group_id = str(source_meta.get("job_group_id") or source_run_dir.name)
+    if source_meta.get("job_group_id") != group_id:
+        source_meta["job_group_id"] = group_id
+        changed = True
+    if source_meta.get("job_group_role") != "root":
+        source_meta["job_group_role"] = "root"
+        changed = True
+
+    retry_jobs = [
+        item
+        for item in (retry_meta.get("batch_jobs") or [])
+        if isinstance(item, dict) and item.get("batch_job_name")
+    ]
+    if not retry_jobs:
+        return changed
+
+    jobs = source_meta.get("batch_jobs")
+    if not isinstance(jobs, list):
+        jobs = []
+        source_meta["batch_jobs"] = jobs
+        changed = True
+    existing_names = {
+        item.get("batch_job_name")
+        for item in jobs
+        if isinstance(item, dict) and item.get("batch_job_name")
+    }
+    chunk_indices = [
+        int(item.get("chunk_index") or 0)
+        for item in jobs
+        if isinstance(item, dict)
+    ]
+    next_chunk_index = max(chunk_indices or [0]) + 1
+    retry_attempt_label = _retry_attempt_label(source_meta)
+    total_retry_jobs = len(retry_jobs)
+    appended_names: list[object] = []
+    for retry_index, retry_job in enumerate(retry_jobs, start=1):
+        batch_name = retry_job.get("batch_job_name")
+        if batch_name in existing_names:
+            continue
+        retry_entry = dict(retry_job)
+        retry_label = (
+            retry_attempt_label
+            if total_retry_jobs == 1
+            else f"{retry_attempt_label}_{retry_index:03d}_of_{total_retry_jobs:03d}"
+        )
+        retry_entry.update(
+            {
+                "chunk_index": next_chunk_index,
+                "total_chunks": next_chunk_index,
+                "chunk_label": retry_label,
+                "status": _stored_batch_status(retry_meta, retry_job),
+                "is_retry": True,
+                "retry_run_dir": str(retry_run_dir),
+                "retry_run_id": retry_run_dir.name,
+                "retry_source_run": str(source_run_dir),
+                "retry_source_run_id": source_run_dir.name,
+                "job_group_id": group_id,
+                "retry_failed_keys_file": retry_meta.get("retry_failed_keys_file"),
+            }
+        )
+        jobs.append(retry_entry)
+        existing_names.add(batch_name)
+        appended_names.append(batch_name)
+        next_chunk_index += 1
+        changed = True
+
+    names = [
+        item.get("batch_job_name")
+        for item in jobs
+        if isinstance(item, dict) and item.get("batch_job_name")
+    ]
+    deduped_names = list(dict.fromkeys(names))
+    if source_meta.get("batch_job_names") != deduped_names:
+        source_meta["batch_job_names"] = deduped_names
+        changed = True
+
+    retry_runs = source_meta.get("retry_runs")
+    if not isinstance(retry_runs, list):
+        retry_runs = []
+        source_meta["retry_runs"] = retry_runs
+        changed = True
+    if not any(
+        isinstance(item, dict) and item.get("run_id") == retry_run_dir.name
+        for item in retry_runs
+    ):
+        retry_runs.append(
+            {
+                "run_dir": str(retry_run_dir),
+                "run_id": retry_run_dir.name,
+                "batch_job_name": retry_jobs[0].get("batch_job_name"),
+                "batch_job_names": appended_names
+                or [item.get("batch_job_name") for item in retry_jobs],
+                "batch_count": total_retry_jobs,
+                "request_count": int(retry_meta.get("request_count") or 0),
+                "created_at": str(retry_meta.get("created_at") or ""),
+            }
+        )
+        changed = True
+
+    child_changed = _patch_retry_child_metadata(
+        source_run_dir=source_run_dir,
+        retry_run_dir=retry_run_dir,
+        retry_meta=retry_meta,
+    )
+    if changed:
+        _write_json_file(source_path, source_meta)
+    return changed or child_changed
+
+
+def repair_retry_metadata_links(run_root: str | Path | None = None) -> int:
+    root = Path(run_root or config.output_root).expanduser()
+    repaired = 0
+    for retry_run_dir in run_layout.iter_run_dirs(root, "submit"):
+        retry_meta = _read_json_file(retry_run_dir / "batch_job.json")
+        if not retry_meta or not _is_retry_batch_meta(retry_meta):
+            continue
+        source_run_dir = _resolve_retry_source_run_dir(root, retry_run_dir, retry_meta)
+        if source_run_dir is None:
+            continue
+        if _append_retry_child_to_source_metadata(
+            source_run_dir=source_run_dir,
+            retry_run_dir=retry_run_dir,
+        ):
+            repaired += 1
+    return repaired
+
+
 def _batch_chunk_summaries_from_payload(payload: dict) -> list[BatchChunkSummary]:
     jobs = payload.get("batch_jobs")
     if not isinstance(jobs, list):
@@ -1028,6 +1388,7 @@ def _batch_chunk_summaries_from_payload(payload: dict) -> list[BatchChunkSummary
                 ),
                 batch_job_name=batch_job_name,
                 request_count=int(item.get("request_count") or 0),
+                status=_stored_batch_status(payload, item),
                 output_destination=str(item.get("output_destination") or ""),
                 requests_file=str(item.get("requests_file") or ""),
                 provider=str(item.get("provider") or payload.get("provider") or ""),
@@ -1036,9 +1397,104 @@ def _batch_chunk_summaries_from_payload(payload: dict) -> list[BatchChunkSummary
     return sorted(summaries, key=lambda item: item.chunk_index)
 
 
+def _primary_request_count_from_payload(payload: dict) -> int:
+    jobs = payload.get("batch_jobs")
+    if isinstance(jobs, list):
+        count = sum(
+            int(item.get("request_count") or 0)
+            for item in jobs
+            if isinstance(item, dict) and not bool(item.get("is_retry"))
+        )
+        if count:
+            return count
+    return int(payload.get("request_count") or 0)
+
+
+def _linked_batch_chunk_summaries(run_dir: Path) -> list[BatchChunkSummary]:
+    payload = _read_json_file(run_dir / "batch_job.json")
+    chunks = _batch_chunk_summaries_from_payload(payload)
+    seen_names = {chunk.batch_job_name for chunk in chunks}
+    next_index = max((chunk.chunk_index for chunk in chunks), default=0) + 1
+    for retry_run_dir in _retry_child_run_dirs(run_dir):
+        retry_payload = _read_json_file(retry_run_dir / "batch_job.json")
+        for chunk in _batch_chunk_summaries_from_payload(retry_payload):
+            if chunk.batch_job_name in seen_names:
+                continue
+            chunks.append(
+                BatchChunkSummary(
+                    chunk_index=next_index,
+                    total_chunks=next_index,
+                    chunk_label=f"retry_failed_{next_index:03d}",
+                    batch_job_name=chunk.batch_job_name,
+                    request_count=chunk.request_count,
+                    status=chunk.status,
+                    output_destination=chunk.output_destination,
+                    requests_file=chunk.requests_file,
+                    provider=chunk.provider,
+                )
+            )
+            seen_names.add(chunk.batch_job_name)
+            next_index += 1
+    return sorted(chunks, key=lambda item: item.chunk_index)
+
+
+def _record_chunk_statuses_in_payload(
+    payload: dict,
+    state_by_name: dict[str, str],
+    checked_at: str,
+) -> bool:
+    jobs = payload.get("batch_jobs")
+    if not isinstance(jobs, list):
+        return False
+
+    changed = False
+    for item in jobs:
+        if not isinstance(item, dict):
+            continue
+        batch_name = str(item.get("batch_job_name") or "")
+        state = state_by_name.get(batch_name)
+        if not state:
+            continue
+        if item.get("status") != state:
+            item["status"] = state
+            changed = True
+        if item.get("status_checked_at") != checked_at:
+            item["status_checked_at"] = checked_at
+            changed = True
+    return changed
+
+
+def record_batch_chunk_statuses(
+    run_dir: str | Path,
+    state_by_name: dict[str, str],
+) -> None:
+    """Persist the last checked provider state for parent and retry batch chunks."""
+    if not state_by_name:
+        return
+    checked_at = _now_iso()
+    run_path = Path(run_dir).expanduser()
+    parent_path = run_path / "batch_job.json"
+    parent_payload = _read_json_file(parent_path)
+    if parent_payload and _record_chunk_statuses_in_payload(
+        parent_payload,
+        state_by_name,
+        checked_at,
+    ):
+        _write_json_file(parent_path, parent_payload)
+
+    for retry_run_dir in _retry_child_run_dirs(run_path):
+        retry_path = retry_run_dir / "batch_job.json"
+        retry_payload = _read_json_file(retry_path)
+        if retry_payload and _record_chunk_statuses_in_payload(
+            retry_payload,
+            state_by_name,
+            checked_at,
+        ):
+            _write_json_file(retry_path, retry_payload)
+
+
 def list_batch_chunks(run_dir: str | Path) -> list[BatchChunkSummary]:
-    payload = _read_json_file(Path(run_dir).expanduser() / "batch_job.json")
-    return _batch_chunk_summaries_from_payload(payload)
+    return _linked_batch_chunk_summaries(Path(run_dir).expanduser())
 
 
 def list_batch_chunks_with_state(run_dir: str | Path) -> list[BatchChunkSummary]:
@@ -1069,6 +1525,11 @@ def list_batch_chunks_with_state(run_dir: str | Path) -> list[BatchChunkSummary]
                 state_by_name[name] = status_module._batch_state(batch_job, provider)
             except Exception as exc:  # noqa: BLE001
                 state_by_name[name] = f"error:{type(exc).__name__}"
+
+    try:
+        record_batch_chunk_statuses(run_path, state_by_name)
+    except Exception:  # noqa: BLE001
+        pass
 
     return [
         BatchChunkSummary(
@@ -1230,8 +1691,11 @@ def poll_local_batch_states(
         job
         for job in list_submit_jobs(run_root or settings.local_runs_root)
         if job.run_dir
-        and not job.retrieved
-        and job.status in {"submitted", "unknown", "running"}
+        and (
+            not job.retrieved
+            or job.status in {"retry_submitted", "submitted", "running"}
+        )
+        and job.status in {"submitted", "unknown", "running", "retry_submitted"}
     ]
     if not candidates:
         return {}
@@ -1297,21 +1761,26 @@ def list_submit_jobs(run_root: str | Path | None = None) -> list[JobSummary]:
     root = Path(run_root or config.output_root).expanduser()
     if not root.exists() or not root.is_dir():
         return []
+    repair_retry_metadata_links(root)
     summaries: list[JobSummary] = []
     for run_dir in run_layout.iter_run_dirs(root, "submit"):
         batch_meta = _read_json_file(run_dir / "batch_job.json")
         if not batch_meta:
             continue
+        if _is_retry_batch_meta(batch_meta):
+            source_run_dir = _resolve_retry_source_run_dir(root, run_dir, batch_meta)
+            if source_run_dir is not None:
+                continue
 
         metadata = _read_json_file(run_dir / "metadata.json")
         created_at = str(metadata.get("created_at") or batch_meta.get("created_at") or "")
         model = str(batch_meta.get("model") or "")
-        chunks = _batch_chunk_summaries_from_payload(batch_meta)
+        chunks = list_batch_chunks(run_dir)
         chunk_count = len(chunks) or len(batch_meta.get("batch_job_names") or [])
-        images = sum(chunk.request_count for chunk in chunks) or int(
-            batch_meta.get("request_count") or 0
-        )
+        images = _primary_request_count_from_payload(batch_meta)
         location = _describe_input_location(run_dir, batch_meta)
+        retry_runs = batch_meta.get("retry_runs")
+        retry_count = len(retry_runs) if isinstance(retry_runs, list) else 0
 
         results = read_recorded_results(run_dir)
         retrieved = bool(results)
@@ -1325,10 +1794,15 @@ def list_submit_jobs(run_root: str | Path | None = None) -> list[JobSummary]:
             failed = max(0, expected - succeeded)
             recovered = int(results.get("recovered_pages") or 0)
             status = "retrieved"
+        if retry_count and failed:
+            status = "retry_submitted"
 
         detail = f"{images} image(s)"
         if chunk_count:
             detail = f"{detail}, {chunk_count} chunk(s)"
+        if retry_count:
+            label = "retry batch" if retry_count == 1 else "retry batches"
+            detail = f"{detail}, {retry_count} {label}"
 
         summaries.append(
             JobSummary(

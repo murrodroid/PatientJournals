@@ -5,9 +5,11 @@ import subprocess
 import sys
 import threading
 import tkinter as tk
+from dataclasses import replace
 from pathlib import Path
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 
+from patientjournals.app.access import run_access_checks
 from patientjournals.app.catalog import list_google_model_options, list_schema_options
 from patientjournals.app.dashboard import (
     dashboard_summary_json,
@@ -39,6 +41,7 @@ from patientjournals.app.jobs import (
     read_recorded_results,
     read_run_error,
     repair_all_missing_recorded_results,
+    repair_retry_metadata_links,
     resubmit_failed_requests,
     resolve_batch_run_readiness,
     run_batch_draft_direct,
@@ -55,6 +58,7 @@ from patientjournals.app.models import (
 )
 from patientjournals.app.settings_store import load_app_settings, save_app_settings
 from patientjournals.config import config
+from patientjournals.shared.local_secrets import local_secrets_path, save_local_api_key
 
 
 BG = "#FFFFFF"
@@ -134,6 +138,7 @@ class PatientJournalsApp:
         self._jobs_refresh_after_id = None
         self._jobs_repaint = None
         self._preset_validation_dataset = ""
+        self._bind_global_mousewheel()
 
         self.sidebar = tk.Frame(self.root, bg=INK, padx=16, pady=18, width=210)
         self.sidebar.pack(side="left", fill="y")
@@ -145,7 +150,7 @@ class PatientJournalsApp:
         if self.settings_path.exists():
             self._navigate("submit", self.show_submit)
         else:
-            self._navigate("settings", self.show_settings)
+            self._navigate("setup", self.show_setup)
 
         self._start_launch_batch_poll()
 
@@ -171,6 +176,39 @@ class PatientJournalsApp:
 
     def run(self) -> None:
         self.root.mainloop()
+
+    def _bind_global_mousewheel(self) -> None:
+        self.root.bind_all("<MouseWheel>", self._on_mousewheel, add="+")
+        self.root.bind_all("<Button-4>", self._on_mousewheel, add="+")
+        self.root.bind_all("<Button-5>", self._on_mousewheel, add="+")
+
+    def _scroll_canvas_for_widget(self, widget: tk.Misc | None) -> tk.Canvas | None:
+        current = widget
+        while current is not None:
+            canvas = getattr(current, "_scroll_canvas", None)
+            if isinstance(canvas, tk.Canvas) and canvas.winfo_exists():
+                return canvas
+            current = getattr(current, "master", None)
+        return None
+
+    def _on_mousewheel(self, event) -> str | None:
+        if isinstance(event.widget, (ttk.Treeview, tk.Text, tk.Listbox)):
+            return None
+        canvas = self._scroll_canvas_for_widget(getattr(event, "widget", None))
+        if canvas is None:
+            return None
+        if getattr(event, "num", None) == 4:
+            canvas.yview_scroll(-1, "units")
+            return "break"
+        if getattr(event, "num", None) == 5:
+            canvas.yview_scroll(1, "units")
+            return "break"
+        delta = getattr(event, "delta", 0)
+        if not delta:
+            return None
+        steps = int(-delta / 120) if abs(delta) >= 120 else (-1 if delta > 0 else 1)
+        canvas.yview_scroll(steps, "units")
+        return "break"
 
     def _setup_theme(self) -> None:
         style = ttk.Style(self.root)
@@ -248,6 +286,19 @@ class PatientJournalsApp:
         )
         style.map("Treeview", background=[("selected", ACCENT)], foreground=[("selected", BG)])
         style.configure("TProgressbar", troughcolor=MUTED_BG, background=ACCENT)
+        style.configure(
+            "Vertical.TScrollbar",
+            background="#B8C5C8",
+            troughcolor=MUTED_BG,
+            bordercolor=BG,
+            arrowcolor="#5F6B6E",
+            relief="flat",
+            width=12,
+        )
+        style.map(
+            "Vertical.TScrollbar",
+            background=[("active", "#AAB8BB"), ("pressed", "#9EADB0")],
+        )
 
     def _build_sidebar(self) -> None:
         title = tk.Label(
@@ -260,6 +311,7 @@ class PatientJournalsApp:
         )
         title.pack(anchor="w", pady=(0, 22))
         for key, label, command in (
+            ("setup", "Setup", self.show_setup),
             ("dashboard", "Dashboard", self.show_dashboard),
             ("datasets", "Datasets", self.show_datasets),
             ("submit", "Submit", self.show_submit),
@@ -337,6 +389,45 @@ class PatientJournalsApp:
     def _grid_help(self, parent: tk.Misc, row: int, column: int, text: str) -> None:
         self._help_icon(parent, text).grid(row=row, column=column, padx=(8, 0), sticky="w")
 
+    def _gemini_key_is_configured(self) -> bool:
+        try:
+            return bool(config.api_key_for_provider("gemini").strip())
+        except ValueError:
+            return False
+
+    def _store_gemini_api_key(self, api_key: str) -> Path:
+        path = save_local_api_key("gemini", api_key)
+        value = api_key.strip()
+        config.provider_api_keys["gemini"] = value
+        config.api_key = value
+        return path
+
+    def _prompt_for_gemini_api_key(self, *, reason: str = "") -> bool:
+        prompt = reason or "A Gemini API key is required for this action."
+        value = simpledialog.askstring(
+            "Gemini API key",
+            f"{prompt}\n\nThe key is stored only on this computer.",
+            show="*",
+            parent=self.root,
+        )
+        if value is None:
+            return False
+        value = value.strip()
+        if not value:
+            messagebox.showerror("Missing API key", "The Gemini API key cannot be empty.")
+            return False
+        path = self._store_gemini_api_key(value)
+        messagebox.showinfo(
+            "API key saved",
+            f"Saved the Gemini API key locally at:\n{path}",
+        )
+        return True
+
+    def _ensure_gemini_api_key(self, *, reason: str = "") -> bool:
+        if self._gemini_key_is_configured():
+            return True
+        return self._prompt_for_gemini_api_key(reason=reason)
+
     def _field(self, parent: ttk.Frame, label: str, variable: tk.StringVar, row: int) -> ttk.Entry:
         ttk.Label(parent, text=label, style="App.TLabel").grid(row=row, column=0, sticky="w", pady=8)
         entry = ttk.Entry(parent, textvariable=variable, width=64)
@@ -403,6 +494,9 @@ class PatientJournalsApp:
 
         inner = ttk.Frame(canvas, style="App.TFrame")
         window_id = canvas.create_window((0, 0), window=inner, anchor="nw")
+        outer._scroll_canvas = canvas  # type: ignore[attr-defined]
+        canvas._scroll_canvas = canvas  # type: ignore[attr-defined]
+        inner._scroll_canvas = canvas  # type: ignore[attr-defined]
 
         def sync_scroll_region(_event=None) -> None:
             canvas.configure(scrollregion=canvas.bbox("all"))
@@ -410,34 +504,8 @@ class PatientJournalsApp:
         def sync_width(event) -> None:
             canvas.itemconfigure(window_id, width=event.width)
 
-        def on_mousewheel(event) -> None:
-            if getattr(event, "num", None) == 4:
-                canvas.yview_scroll(-1, "units")
-                return
-            if getattr(event, "num", None) == 5:
-                canvas.yview_scroll(1, "units")
-                return
-            delta = getattr(event, "delta", 0)
-            if delta:
-                steps = int(-delta / 120) if abs(delta) >= 120 else (-1 if delta > 0 else 1)
-                canvas.yview_scroll(steps, "units")
-
-        def bind_scroll(_event=None) -> None:
-            canvas.bind_all("<MouseWheel>", on_mousewheel)
-            canvas.bind_all("<Button-4>", on_mousewheel)
-            canvas.bind_all("<Button-5>", on_mousewheel)
-
-        def unbind_scroll(_event=None) -> None:
-            canvas.unbind_all("<MouseWheel>")
-            canvas.unbind_all("<Button-4>")
-            canvas.unbind_all("<Button-5>")
-
         inner.bind("<Configure>", sync_scroll_region)
         canvas.bind("<Configure>", sync_width)
-        canvas.bind("<Enter>", bind_scroll)
-        canvas.bind("<Leave>", unbind_scroll)
-        inner.bind("<Enter>", bind_scroll)
-        inner.bind("<Leave>", unbind_scroll)
 
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y", padx=(8, 0))
@@ -487,6 +555,186 @@ class PatientJournalsApp:
             bar = ttk.Progressbar(row, maximum=max_count, value=count)
             bar.pack(side="left", fill="x", expand=True, padx=(8, 8))
             ttk.Label(row, text=str(count), width=8, style="App.TLabel").pack(side="left")
+
+    def show_setup(self) -> None:
+        self._clear_content()
+        self._heading("Setup")
+        self._subheading("Check local Google Cloud access before submitting jobs.")
+
+        footer = ttk.Frame(self.content, style="App.TFrame")
+        footer.pack(side="bottom", fill="x", pady=(8, 0))
+
+        frame = self._section(self.content, "Connection")
+        frame.columnconfigure(1, weight=1)
+
+        auth_var = tk.StringVar(value=self.settings.auth_mode)
+        project_var = tk.StringVar(value=self.settings.gcp_project_id)
+        bucket_var = tk.StringVar(value=self.settings.gcs_bucket_name)
+        service_var = tk.StringVar(value=self.settings.service_account_file)
+        location_var = tk.StringVar(value=self.settings.gcp_location)
+        vertex_location_var = tk.StringVar(value=self.settings.vertex_model_location)
+
+        ttk.Label(frame, text="Auth mode", style="App.TLabel").grid(
+            row=0, column=0, sticky="w", pady=8
+        )
+        ttk.Combobox(
+            frame,
+            textvariable=auth_var,
+            values=("adc", "service_account"),
+            state="readonly",
+            width=24,
+        ).grid(row=0, column=1, sticky="w", pady=8, padx=(14, 0))
+        self._grid_help(
+            frame,
+            0,
+            2,
+            "Use adc for gcloud user login. Use service_account when sharing a JSON key file.",
+        )
+        self._field(frame, "GCP project", project_var, 1)
+        self._field(frame, "GCS bucket", bucket_var, 2)
+        self._field(frame, "Service account JSON", service_var, 3)
+        self._button(
+            frame,
+            "Browse",
+            lambda: self._select_file(service_var),
+            kind="secondary",
+        ).grid(row=3, column=2, padx=(10, 0), pady=8)
+        self._field(frame, "GCP location", location_var, 4)
+        self._field(frame, "Vertex model location", vertex_location_var, 5)
+
+        results_frame = ttk.LabelFrame(
+            self.content,
+            text="Access Checks",
+            padding=(8, 8),
+            style="Section.TLabelframe",
+        )
+        results_frame.pack(fill="both", expand=True, pady=(8, 0))
+
+        columns = ("status", "check", "detail", "fix")
+        tree = ttk.Treeview(
+            results_frame,
+            columns=columns,
+            show="headings",
+            height=12,
+            selectmode="browse",
+        )
+        for column, heading, width in (
+            ("status", "Status", 80),
+            ("check", "Check", 190),
+            ("detail", "Detail", 420),
+            ("fix", "Fix", 420),
+        ):
+            tree.heading(column, text=heading)
+            tree.column(column, width=width, anchor="w")
+        tree.tag_configure("pass", background="#E7F6EE")
+        tree.tag_configure("warn", background="#FFF7D6")
+        tree.tag_configure("fail", background="#FCE8E6")
+        tree.pack(side="left", fill="both", expand=True)
+        scroll = ttk.Scrollbar(results_frame, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=scroll.set)
+        scroll.pack(side="right", fill="y")
+
+        status_var = tk.StringVar(value="")
+        ttk.Label(footer, textvariable=status_var, style="Muted.TLabel").pack(
+            side="bottom", anchor="w", pady=(8, 0)
+        )
+        result_fix_by_iid: dict[str, str] = {}
+
+        def draft_settings() -> AppSettings:
+            return replace(
+                self.settings,
+                auth_mode=auth_var.get(),  # type: ignore[arg-type]
+                service_account_file=service_var.get(),
+                gcp_project_id=project_var.get(),
+                gcp_location=location_var.get(),
+                vertex_model_location=vertex_location_var.get(),
+                gcs_bucket_name=bucket_var.get(),
+            )
+
+        def save_connection() -> AppSettings:
+            self.settings = draft_settings()
+            save_app_settings(self.settings, self.settings_path)
+            return self.settings
+
+        def insert_result_rows(report) -> None:
+            tree.delete(*tree.get_children())
+            result_fix_by_iid.clear()
+            for index, result in enumerate(report.results, start=1):
+                iid = f"check_{index}"
+                result_fix_by_iid[iid] = result.fix
+                tree.insert(
+                    "",
+                    "end",
+                    iid=iid,
+                    values=(
+                        result.status.upper(),
+                        result.name,
+                        result.detail,
+                        result.fix,
+                    ),
+                    tags=(result.status,),
+                )
+            if report.failed:
+                status_var.set(
+                    f"{report.failed} failed, {report.warnings} warning(s), "
+                    f"{report.passed} passed."
+                )
+            else:
+                status_var.set(
+                    f"Access ready. {report.warnings} warning(s), {report.passed} passed."
+                )
+
+        def run_checks() -> None:
+            settings = save_connection()
+            status_var.set("Running access checks...")
+            tree.delete(*tree.get_children())
+
+            def worker() -> None:
+                try:
+                    report = run_access_checks(settings)
+                except Exception as exc:  # noqa: BLE001
+                    message = str(exc)
+                    self.root.after(
+                        0,
+                        lambda message=message: messagebox.showerror(
+                            "Access check failed", message
+                        ),
+                    )
+                    return
+                self.root.after(0, lambda: insert_result_rows(report))
+
+            threading.Thread(target=worker, daemon=True).start()
+
+        def copy_selected_fix() -> None:
+            selection = tree.selection()
+            if not selection:
+                status_var.set("Select a check row first.")
+                return
+            fix = result_fix_by_iid.get(selection[0], "")
+            if not fix:
+                status_var.set("Selected row has no fix command.")
+                return
+            self.root.clipboard_clear()
+            self.root.clipboard_append(fix)
+            status_var.set("Copied fix text.")
+
+        buttons = self._button_row(footer)
+        self._button(buttons, "Run access check", run_checks).pack(side="left")
+        self._button(buttons, "Copy selected fix", copy_selected_fix, kind="secondary").pack(
+            side="left", padx=(10, 0)
+        )
+        self._button(
+            buttons,
+            "Open Settings",
+            lambda: self._navigate("settings", self.show_settings),
+            kind="secondary",
+        ).pack(side="left", padx=(10, 0))
+        self._button(
+            buttons,
+            "Submit job",
+            lambda: self._navigate("submit", self.show_submit),
+            kind="secondary",
+        ).pack(side="left", padx=(10, 0))
 
     def show_datasets(self) -> None:
         self._clear_content()
@@ -572,10 +820,11 @@ class PatientJournalsApp:
                         datasets_prefix=self.settings.datasets_gcs_prefix,
                     )
                 except Exception as exc:  # noqa: BLE001
+                    message = str(exc)
                     self.root.after(
                         0,
-                        lambda: messagebox.showerror(
-                            "Shared dataset library failed", str(exc)
+                        lambda message=message: messagebox.showerror(
+                            "Shared dataset library failed", message
                         ),
                     )
                     return
@@ -614,9 +863,12 @@ class PatientJournalsApp:
                 try:
                     path = download_cloud_dataset(item.gcs_uri or item.location)
                 except Exception as exc:  # noqa: BLE001
+                    message = str(exc)
                     self.root.after(
                         0,
-                        lambda: messagebox.showerror("Download failed", str(exc)),
+                        lambda message=message: messagebox.showerror(
+                            "Download failed", message
+                        ),
                     )
                     return
 
@@ -1001,8 +1253,9 @@ class PatientJournalsApp:
         self._clear_content()
         self._heading("Settings")
         self._subheading("Keep the daily defaults visible; cloud routing details live under Advanced.")
+        page = self._scrollable_frame(self.content)
 
-        frame = self._section(self.content, "Workspace")
+        frame = self._section(page, "Workspace")
         frame.columnconfigure(1, weight=1)
 
         auth_var = tk.StringVar(value=self.settings.auth_mode)
@@ -1027,6 +1280,9 @@ class PatientJournalsApp:
         )
         api_threshold_var = tk.StringVar(
             value=str(self.settings.api_recovery_threshold)
+        )
+        key_status_var = tk.StringVar(
+            value="configured" if self._gemini_key_is_configured() else "missing"
         )
 
         ttk.Label(frame, text="Auth mode", style="App.TLabel").grid(row=0, column=0, sticky="w", pady=8)
@@ -1056,8 +1312,36 @@ class PatientJournalsApp:
         self._button(frame, "Browse", lambda: self._select_folder(validation_images_var), kind="secondary").grid(
             row=5, column=2, padx=(10, 0), pady=8
         )
+        ttk.Label(frame, text="Gemini API key", style="App.TLabel").grid(
+            row=6, column=0, sticky="w", pady=8
+        )
 
-        advanced, _advanced_open = self._advanced_section(self.content)
+        key_frame = ttk.Frame(frame, style="App.TFrame")
+        key_frame.grid(row=6, column=1, sticky="w", pady=8, padx=(14, 0))
+        ttk.Label(key_frame, textvariable=key_status_var, style="Muted.TLabel").pack(
+            side="left"
+        )
+
+        def set_local_gemini_key() -> None:
+            if self._prompt_for_gemini_api_key(
+                reason="Enter the Gemini key used for local API runs and failed-page recovery."
+            ):
+                key_status_var.set("configured")
+
+        self._button(
+            frame,
+            "Set local key",
+            set_local_gemini_key,
+            kind="secondary",
+        ).grid(row=6, column=2, padx=(10, 0), pady=8)
+        self._grid_help(
+            frame,
+            6,
+            3,
+            f"Stored outside the repo in {local_secrets_path()}. It is never written to app_config.json.",
+        )
+
+        advanced, _advanced_open = self._advanced_section(page)
         advanced.columnconfigure(1, weight=1)
         ttk.Label(advanced, text="Batch backend", style="App.TLabel").grid(row=0, column=0, sticky="w", pady=8)
         backend_combo = ttk.Combobox(
@@ -1100,7 +1384,7 @@ class PatientJournalsApp:
         self._field(advanced, "API recovery threshold (failures)", api_threshold_var, 12)
 
         status_var = tk.StringVar(value="")
-        ttk.Label(self.content, textvariable=status_var, style="Muted.TLabel").pack(anchor="w", pady=(12, 0))
+        ttk.Label(page, textvariable=status_var, style="Muted.TLabel").pack(anchor="w", pady=(12, 0))
 
         def save() -> None:
             try:
@@ -1143,7 +1427,7 @@ class PatientJournalsApp:
             path = save_app_settings(self.settings, self.settings_path)
             status_var.set(f"Saved {path}")
 
-        buttons = self._button_row(self.content)
+        buttons = self._button_row(page)
         self._button(buttons, "Save settings", save).pack(side="left")
         self._button(
             buttons,
@@ -1156,8 +1440,9 @@ class PatientJournalsApp:
         self._clear_content()
         self._heading("Submit")
         self._subheading("Choose the input and model, then start the run.")
+        page = self._scrollable_frame(self.content)
 
-        frame = self._section(self.content, "Run")
+        frame = self._section(page, "Run")
         frame.columnconfigure(1, weight=1)
 
         source_var = tk.StringVar(value="local")
@@ -1389,7 +1674,7 @@ class PatientJournalsApp:
             "The standard model is selected by default. Change it only when comparing model behavior.",
         )
 
-        advanced, _advanced_open = self._advanced_section(self.content)
+        advanced, _advanced_open = self._advanced_section(page)
         advanced.columnconfigure(1, weight=1)
         ttk.Label(advanced, text="Output format", style="App.TLabel").grid(row=0, column=0, sticky="w", pady=8)
         ttk.Combobox(
@@ -1404,7 +1689,7 @@ class PatientJournalsApp:
 
         preview = ttk.Label(advanced, textvariable=command_var, wraplength=850, style="Muted.TLabel")
         preview.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(12, 0))
-        ttk.Label(self.content, textvariable=status_var, style="Muted.TLabel").pack(anchor="w", pady=(8, 0))
+        ttk.Label(page, textvariable=status_var, style="Muted.TLabel").pack(anchor="w", pady=(8, 0))
 
         def draft() -> SubmitJobDraft:
             num_batches = None
@@ -1446,6 +1731,11 @@ class PatientJournalsApp:
             try:
                 current = draft()
                 if current.run_mode == "local_api":
+                    if not self._ensure_gemini_api_key(
+                        reason="A Gemini API key is required for local API runs."
+                    ):
+                        status_var.set("Local run cancelled; no Gemini API key saved.")
+                        return
                     status_var.set("Starting local run...")
 
                     def progress(progress_event) -> None:
@@ -1475,9 +1765,12 @@ class PatientJournalsApp:
                                 ),
                             )
                         except Exception as exc:  # noqa: BLE001
+                            message = str(exc)
                             self.root.after(
                                 0,
-                                lambda: messagebox.showerror("Submit failed", str(exc)),
+                                lambda message=message: messagebox.showerror(
+                                    "Submit failed", message
+                                ),
                             )
 
                     threading.Thread(target=worker, daemon=True).start()
@@ -1535,9 +1828,12 @@ class PatientJournalsApp:
                     try:
                         outcome = run_batch_draft_direct(current, self.settings)
                     except Exception as exc:  # noqa: BLE001
+                        message = str(exc)
                         self.root.after(
                             0,
-                            lambda: messagebox.showerror("Submit failed", str(exc)),
+                            lambda message=message: messagebox.showerror(
+                                "Submit failed", message
+                            ),
                         )
                         return
                     if outcome is None:
@@ -1574,7 +1870,7 @@ class PatientJournalsApp:
             except Exception as exc:  # noqa: BLE001
                 messagebox.showerror("Submit failed", str(exc))
 
-        buttons = self._button_row(self.content)
+        buttons = self._button_row(page)
         self._button(buttons, "Submit", run_job).pack(side="left")
         self._button(buttons, "Preview command", preview_command, kind="secondary").pack(side="left", padx=(10, 0))
 
@@ -1627,15 +1923,81 @@ class PatientJournalsApp:
             anchor="w", padx=18, pady=(0, 4)
         )
 
+        failure_actions = ttk.LabelFrame(
+            win,
+            text="Failed pages",
+            padding=(12, 10),
+            style="Section.TLabelframe",
+        )
+        failure_action_text_var = tk.StringVar(value="")
+        ttk.Label(
+            failure_actions,
+            textvariable=failure_action_text_var,
+            style="Muted.TLabel",
+        ).pack(anchor="w", pady=(0, 8))
+        failure_action_buttons = ttk.Frame(failure_actions, style="App.TFrame")
+        failure_action_buttons.pack(fill="x")
+        api_recover_button = self._button(
+            failure_action_buttons,
+            "Retrieve with API",
+            lambda: rerun("api"),
+        )
+        api_recover_button.pack(side="left")
+        self._help_icon(
+            failure_action_buttons,
+            "Uses the Gemini API key now and appends recovered rows to the same dataset.",
+        ).pack(side="left", padx=(6, 14))
+        batch_resubmit_button = self._button(
+            failure_action_buttons,
+            "Resubmit as batch",
+            lambda: rerun("batch"),
+            kind="secondary",
+        )
+        batch_resubmit_button.pack(side="left")
+        self._help_icon(
+            failure_action_buttons,
+            "Creates a new batch submission only for the failed or missing pages.",
+        ).pack(side="left", padx=(6, 0))
+        retry_advanced, _retry_advanced_open = self._advanced_section(
+            failure_actions,
+            title="Retry options",
+        )
+        retry_advanced.columnconfigure(1, weight=1)
+        retry_chunk_count_var = tk.StringVar(value="1")
+        ttk.Label(retry_advanced, text="Retry chunks", style="App.TLabel").grid(
+            row=0,
+            column=0,
+            sticky="w",
+        )
+        retry_chunk_spinbox = ttk.Spinbox(
+            retry_advanced,
+            from_=1,
+            to=100,
+            increment=1,
+            textvariable=retry_chunk_count_var,
+            width=6,
+        )
+        retry_chunk_spinbox.grid(row=0, column=1, sticky="w", padx=(14, 0))
+        self._grid_help(
+            retry_advanced,
+            0,
+            2,
+            "Leave this at 1 unless the retry has many pages and you want several smaller batch jobs.",
+        )
+
         preview_frame = ttk.LabelFrame(
             win, text="Sample of extracted rows", padding=(8, 8), style="Section.TLabelframe"
         )
         preview_frame.pack(fill="both", expand=True, padx=18, pady=(8, 8))
         preview = ttk.Treeview(preview_frame, show="headings", height=10)
-        preview.pack(side="left", fill="both", expand=True)
+        preview.grid(row=0, column=0, sticky="nsew")
         pscroll = ttk.Scrollbar(preview_frame, orient="vertical", command=preview.yview)
-        preview.configure(yscrollcommand=pscroll.set)
-        pscroll.pack(side="right", fill="y")
+        hscroll = ttk.Scrollbar(preview_frame, orient="horizontal", command=preview.xview)
+        preview.configure(yscrollcommand=pscroll.set, xscrollcommand=hscroll.set)
+        pscroll.grid(row=0, column=1, sticky="ns")
+        hscroll.grid(row=1, column=0, sticky="ew")
+        preview_frame.rowconfigure(0, weight=1)
+        preview_frame.columnconfigure(0, weight=1)
 
         error_box = tk.Text(
             win, height=4, wrap="word", bg=MUTED_BG, fg=INK, relief="flat", padx=10, pady=8
@@ -1643,6 +2005,8 @@ class PatientJournalsApp:
 
         footer = ttk.Frame(win, style="App.TFrame", padding=(18, 12))
         footer.pack(fill="x", side="bottom")
+        button_strip = ttk.Frame(footer, style="App.TFrame")
+        button_strip.pack(fill="x")
 
         state = {
             "dataset": "",
@@ -1650,7 +2014,92 @@ class PatientJournalsApp:
             "done": False,
             "mode": "request",
             "rerun_method": "batch",
+            "reviewing_api_recovery": False,
+            "api_recovery_blocked": False,
+            "api_action_allowed": False,
         }
+
+        def hide_failure_actions() -> None:
+            failure_actions.pack_forget()
+            state["api_action_allowed"] = False
+            api_recover_button.configure(state="disabled")
+            batch_resubmit_button.configure(state="disabled")
+
+        def set_failure_action_busy(busy: bool) -> None:
+            if not state.get("failed"):
+                hide_failure_actions()
+                return
+            api_state = (
+                "normal"
+                if not busy and state.get("api_action_allowed")
+                else "disabled"
+            )
+            batch_resubmit_button.configure(state="disabled" if busy else "normal")
+            api_recover_button.configure(state=api_state)
+            retry_chunk_spinbox.configure(
+                state=(
+                    "normal"
+                    if not busy and state.get("mode") == "request"
+                    else "disabled"
+                )
+            )
+
+        def show_failure_actions(
+            failed: int,
+            *,
+            mode: str = "request",
+            allow_api: bool = True,
+        ) -> None:
+            state["failed"] = max(0, int(failed or 0))
+            state["mode"] = mode
+            state["api_action_allowed"] = bool(allow_api and mode == "request")
+            retry_chunk_spinbox.configure(to=max(1, state["failed"]))
+            if not state["failed"]:
+                hide_failure_actions()
+                return
+            label = "page" if state["failed"] == 1 else "pages"
+            if mode == "chunk":
+                failure_action_text_var.set(
+                    f"No rows were retrieved. Resubmit the job to try again."
+                )
+                api_recover_button.configure(state="disabled")
+                batch_resubmit_button.configure(text="Resubmit job", state="normal")
+                retry_chunk_spinbox.configure(state="disabled")
+            else:
+                suffix = (
+                    "Choose whether to recover them immediately with API or send "
+                    "them as a new batch."
+                    if state["api_action_allowed"]
+                    else "API recovery is only available for Gemini jobs; resubmit "
+                    "them as a new batch."
+                )
+                failure_action_text_var.set(
+                    f"{state['failed']} failed or missing {label}. {suffix}"
+                )
+                api_recover_button.configure(
+                    text="Retrieve with API",
+                    state="normal" if state["api_action_allowed"] else "disabled",
+                )
+                batch_resubmit_button.configure(text="Resubmit as batch", state="normal")
+                retry_chunk_spinbox.configure(state="normal")
+            if not failure_actions.winfo_ismapped():
+                failure_actions.pack(
+                    fill="x",
+                    padx=18,
+                    pady=(8, 0),
+                    before=preview_frame,
+                )
+
+        def columns_for_rows(rows: list[dict]) -> list[str]:
+            columns: list[str] = []
+            for preferred in ("image_name", "file_name"):
+                if any(preferred in row for row in rows):
+                    columns.append(preferred)
+            for row in rows:
+                for key in row:
+                    if key not in columns:
+                        columns.append(key)
+            return columns
 
         def populate_preview(columns, rows) -> None:
             # Clear any rows from a previous load so re-retrieve/recover can repaint.
@@ -1668,7 +2117,10 @@ class PatientJournalsApp:
                 )
 
         def show_error(text: str) -> None:
+            error_box.configure(state="normal")
             if not text:
+                error_box.delete("1.0", "end")
+                error_box.pack_forget()
                 return
             error_box.pack(fill="x", padx=18, pady=(0, 8))
             error_box.delete("1.0", "end")
@@ -1678,6 +2130,10 @@ class PatientJournalsApp:
         def finish(payload, dataset_path, columns, rows, error_text) -> None:
             state["done"] = True
             if payload is not None:
+                state["reviewing_api_recovery"] = False
+                state["api_recovery_blocked"] = False
+                preview_frame.configure(text="Sample of extracted rows")
+                keep_button.configure(text="Keep results", state="normal")
                 expected = int(payload.get("expected_pages") or job.image_count or 0)
                 succeeded = int(payload.get("successful_pages") or 0)
                 recovered = int(payload.get("recovered_pages") or 0)
@@ -1705,20 +2161,13 @@ class PatientJournalsApp:
                 path_var.set(f"Dataset: {state['dataset'] or '(none written)'}")
                 if missing > 0:
                     provider = batch_run_provider(job.run_dir)
-                    threshold = int(self.settings.api_recovery_threshold or 0)
-                    use_api = provider == "gemini" and missing <= threshold
-                    state["rerun_method"] = "api" if use_api else "batch"
-                    rerun_button.configure(
-                        text=(
-                            f"Recover {missing} via API"
-                            if use_api
-                            else f"Resubmit {missing} as batch"
-                        ),
-                        state="normal",
+                    show_failure_actions(
+                        missing,
+                        mode="request",
+                        allow_api=provider == "gemini",
                     )
                 else:
-                    state["rerun_method"] = "batch"
-                    rerun_button.configure(text="Rerun failed", state="disabled")
+                    hide_failure_actions()
                 validate_button.configure(
                     state="normal" if state["dataset"] else "disabled"
                 )
@@ -1730,12 +2179,111 @@ class PatientJournalsApp:
                 ok_var.set("0")
                 fail_var.set(str(expected) if expected else "—")
                 state["mode"] = "chunk"
-                state["failed"] = expected or 1
                 state_var.set(
                     "No results could be retrieved. You can rerun the failed job."
                 )
-                rerun_button.configure(text="Rerun job", state="normal")
+                show_failure_actions(expected or 1, mode="chunk", allow_api=False)
             show_error(error_text)
+
+        def show_recovered_rows(payload: dict) -> None:
+            rows = [
+                row
+                for row in (payload.get("api_recovered_rows") or [])
+                if isinstance(row, dict)
+            ]
+            failure_rows = [
+                row
+                for row in (payload.get("api_recovery_errors") or [])
+                if isinstance(row, dict)
+            ]
+            dataset_path = find_dataset_near(payload.get("dataset_path") or "")
+            expected = int(payload.get("expected_pages") or job.image_count or 0)
+            succeeded = int(payload.get("successful_pages") or 0)
+            missing = int(payload.get("missing_pages") or 0)
+            recovered_count = int(payload.get("api_recovered_row_count") or len(rows))
+            recovery_failed = bool(payload.get("api_recovery_failed")) or missing > 0
+            error_summary = str(payload.get("api_recovery_error_summary") or "").strip()
+            state["done"] = True
+            state["reviewing_api_recovery"] = True
+            state["api_recovery_blocked"] = recovery_failed
+            state["dataset"] = dataset_path or str(payload.get("dataset_path") or "")
+            state["failed"] = missing
+            total_var.set(str(expected))
+            ok_var.set(f"{succeeded} ({recovered_count} recovered with API)")
+            fail_var.set(str(missing))
+            path_var.set(f"Dataset: {state['dataset'] or '(none written)'}")
+            preview_rows = rows if rows else failure_rows
+            preview_frame.configure(
+                text="Recovered API rows" if rows else "API recovery errors"
+            )
+            populate_preview(columns_for_rows(preview_rows), preview_rows)
+            if missing > 0:
+                provider = batch_run_provider(job.run_dir)
+                show_failure_actions(
+                    missing,
+                    mode="request",
+                    allow_api=provider == "gemini",
+                )
+            else:
+                hide_failure_actions()
+            can_use_dataset = bool(state["dataset"]) and not recovery_failed and missing == 0
+            validate_button.configure(state="normal" if can_use_dataset else "disabled")
+            keep_button.configure(
+                text=(
+                    "Keep saved dataset"
+                    if can_use_dataset
+                    else "Cannot keep incomplete recovery"
+                ),
+                state="normal" if can_use_dataset else "disabled",
+            )
+            if error_summary:
+                show_error(error_summary)
+            elif failure_rows:
+                show_error(
+                    "API recovery failed for one or more pages. Review the error "
+                    "rows above, then resubmit the remaining pages as a batch."
+                )
+            elif recovery_failed:
+                show_error(
+                    "API recovery did not produce a complete dataset, but no "
+                    "detailed API error was recorded. Check the run folder for "
+                    "error files or the processing manifest."
+                )
+            else:
+                show_error("")
+            if rows and recovery_failed:
+                state_var.set(
+                    "Some API rows were recovered, but recovery is incomplete. "
+                    "Review the errors, then resubmit the remaining pages as a batch."
+                )
+            elif rows:
+                state_var.set(
+                    "Review the recovered API rows below. If they look correct, "
+                    "keep the saved dataset; otherwise close this window and inspect "
+                    "the run before using it."
+                )
+            elif recovered_count and recovery_failed:
+                state_var.set(
+                    f"API recovery reported {recovered_count} recovered row(s), "
+                    f"but {missing} page(s) are still missing. Review the error "
+                    "details and resubmit the remaining pages as a batch."
+                )
+            elif recovered_count:
+                state_var.set(
+                    f"API recovery finished and reported {recovered_count} recovered "
+                    "row(s), but the recovered-row preview was not available. Review "
+                    "the dataset path below before keeping it."
+                )
+            elif missing > 0:
+                state_var.set(
+                    f"API recovery failed: no rows were recovered. {missing} page(s) "
+                    "are still missing; review the error details and resubmit them "
+                    "as a batch."
+                )
+            else:
+                state_var.set(
+                    "API recovery finished; there are no missing pages left."
+                )
 
         def show_not_ready(message: str) -> None:
             state["done"] = False
@@ -1744,7 +2292,7 @@ class PatientJournalsApp:
             fail_var.set("—")
             state_var.set(message)
             path_var.set("")
-            rerun_button.configure(text="Rerun failed", state="disabled")
+            hide_failure_actions()
             validate_button.configure(state="disabled")
 
         def load(force_retrieve: bool = False) -> None:
@@ -1755,7 +2303,7 @@ class PatientJournalsApp:
                 # still on disk, show it directly instead of re-running a full
                 # (slow, networked) retrieve.
                 payload: dict | None = None
-                if not force_retrieve:
+                if not force_retrieve and job.status != "retry_submitted":
                     recorded = read_recorded_results(job.run_dir)
                     if recorded:
                         existing = find_dataset_near(recorded.get("dataset_path") or "")
@@ -1799,16 +2347,48 @@ class PatientJournalsApp:
                 self.root.after(0, lambda: finish(None, "", [], [], message))
 
         def keep_results() -> None:
+            if state.get("api_recovery_blocked"):
+                messagebox.showerror(
+                    "Recovery incomplete",
+                    "API recovery did not produce a complete dataset. Review the "
+                    "error details and resubmit the remaining pages before keeping "
+                    "or validating the results.",
+                    parent=win,
+                )
+                return
             win.destroy()
             if on_change:
                 on_change(f"Kept results for {job.job_id}.")
 
-        def rerun() -> None:
+        def rerun(method: str = "batch") -> None:
             if not state.get("failed"):
                 return
             mode = state.get("mode")
-            method = state.get("rerun_method", "batch")
-            rerun_button.configure(state="disabled")
+            method = "batch" if mode == "chunk" else method
+            if method == "api" and not self._ensure_gemini_api_key(
+                reason="A Gemini API key is required to recover failed pages via API."
+            ):
+                state_var.set("API recovery cancelled; no Gemini API key saved.")
+                return
+            retry_num_batches = 1
+            if mode != "chunk" and method == "batch":
+                try:
+                    retry_num_batches = int(retry_chunk_count_var.get().strip() or "1")
+                except ValueError:
+                    messagebox.showerror(
+                        "Invalid retry chunks",
+                        "Retry chunks must be a whole number.",
+                        parent=win,
+                    )
+                    return
+                if retry_num_batches < 1:
+                    messagebox.showerror(
+                        "Invalid retry chunks",
+                        "Retry chunks must be at least 1.",
+                        parent=win,
+                    )
+                    return
+            set_failure_action_busy(True)
 
             if mode == "chunk":
                 state_var.set("Resubmitting the failed job as a batch…")
@@ -1822,37 +2402,47 @@ class PatientJournalsApp:
                 reload_after = True
             else:
                 state_var.set(
-                    f"Resubmitting {state['failed']} failed page(s) as a batch…"
+                    f"Resubmitting {state['failed']} failed page(s) as up to "
+                    f"{retry_num_batches} retry chunk(s)…"
                 )
-                action = lambda: resubmit_failed_requests(job.run_dir, self.settings)
+                action = lambda: resubmit_failed_requests(
+                    job.run_dir,
+                    self.settings,
+                    num_batches=retry_num_batches,
+                )
                 reload_after = False
 
             def worker() -> None:
                 try:
-                    action()
+                    result = action()
                 except Exception as exc:  # noqa: BLE001
+                    message = str(exc)
 
                     def on_err() -> None:
-                        messagebox.showerror("Rerun failed", str(exc), parent=win)
-                        rerun_button.configure(state="normal")
+                        messagebox.showerror("Rerun failed", message, parent=win)
+                        set_failure_action_busy(False)
 
                     self.root.after(0, on_err)
                     return
 
-                def done() -> None:
+                def done(result=result) -> None:
                     self._live_batch_status.pop(job.run_dir, None)
                     if reload_after:
-                        # API recovery completes the dataset immediately; refresh
-                        # this window in place instead of closing it.
                         if on_change:
                             on_change(f"Recovered failed pages via API for {job.job_id}.")
-                        start_load()
+                        if isinstance(result, dict) and result.get(
+                            "api_recovery_completed"
+                        ):
+                            show_recovered_rows(result)
+                        else:
+                            start_load()
                     else:
                         win.destroy()
                         if on_change:
                             on_change(
-                                f"Resubmitted failed work for {job.job_id}. "
-                                "Refresh status, then view results again."
+                                f"Resubmitted failed pages as a retry batch for {job.job_id}. "
+                                "Refresh status until the retry chunk(s) succeed, then click "
+                                "View results to retrieve the updated dataset."
                             )
 
                 self.root.after(0, done)
@@ -1872,32 +2462,30 @@ class PatientJournalsApp:
                 target=lambda: load(force_retrieve=force_retrieve), daemon=True
             ).start()
 
-        self._button(footer, "Keep results", keep_results).pack(side="left")
-        rerun_button = self._button(footer, "Rerun failed", rerun, kind="secondary")
-        rerun_button.pack(side="left", padx=(10, 0))
-        rerun_button.configure(state="disabled")
+        keep_button = self._button(button_strip, "Keep results", keep_results)
+        keep_button.pack(side="left")
         self._button(
-            footer,
+            button_strip,
             "Re-retrieve",
             lambda: start_load(force_retrieve=True),
             kind="secondary",
         ).pack(side="left", padx=(10, 0))
         validate_button = self._button(
-            footer, "Validate dataset", validate_in_dashboard, kind="secondary"
+            button_strip, "Validate dataset", validate_in_dashboard, kind="secondary"
         )
         validate_button.pack(side="left", padx=(10, 0))
         self._help_icon(
-            footer,
+            button_strip,
             "Opens the validation dashboard with this dataset selected.",
         ).pack(side="left", padx=(6, 0))
         validate_button.configure(state="disabled")
         self._button(
-            footer,
+            button_strip,
             "Open folder",
             lambda: _open_in_file_browser(job.run_dir),
             kind="secondary",
         ).pack(side="left", padx=(10, 0))
-        self._button(footer, "Close", win.destroy, kind="secondary").pack(
+        self._button(button_strip, "Close", win.destroy, kind="secondary").pack(
             side="right"
         )
 
@@ -1973,13 +2561,40 @@ class PatientJournalsApp:
             side="bottom", anchor="w", pady=(8, 0)
         )
         all_jobs_by_id: dict[str, object] = {}
+        status_refresh_inflight: set[str] = set()
         AUTO_REFRESH_MS = 5000
 
         def effective_status(job) -> str:
+            live = self._live_batch_status.get(job.run_dir)
+            if live and job.status in {"retry_submitted", "submitted", "running", "unknown"}:
+                return live
             if job.retrieved:
                 return job.status
-            live = self._live_batch_status.get(job.run_dir)
             return live or job.status
+
+        def display_status(status: str) -> str:
+            value = str(status or "").strip()
+            if not value:
+                return "not checked"
+            if value.lower() == "unknown":
+                return "not checked"
+            if value.startswith("error:"):
+                return f"status error: {value.split(':', 1)[1]}"
+            labels = {
+                "retry_submitted": "retry submitted",
+                "submitted": "submitted",
+                "running": "running",
+                "retrieved": "retrieved",
+                "succeeded": "succeeded",
+                "failed": "failed",
+                "finalizing": "finalizing outputs",
+            }
+            if value in labels:
+                return labels[value]
+            upper = value.upper()
+            if upper.startswith("JOB_STATE_"):
+                return upper.removeprefix("JOB_STATE_").lower().replace("_", " ")
+            return value
 
         def job_values(job):
             success_text = ""
@@ -1992,7 +2607,7 @@ class PatientJournalsApp:
                 job.model,
                 job.input_location,
                 job.image_count,
-                effective_status(job),
+                display_status(effective_status(job)),
                 success_text,
                 "" if job.failed is None else str(job.failed),
             )
@@ -2040,7 +2655,7 @@ class PatientJournalsApp:
                     iid=chunk.batch_job_name,
                     values=(
                         chunk.chunk_label,
-                        chunk.status,
+                        display_status(chunk.status),
                         chunk.request_count,
                         chunk.provider,
                         chunk.output_destination,
@@ -2059,23 +2674,42 @@ class PatientJournalsApp:
                 insert_chunks([])
                 return
             if not with_state:
-                insert_chunks(list_batch_chunks(job.run_dir))
+                chunks = list_batch_chunks(job.run_dir)
+                insert_chunks(chunks)
+                state = effective_status(job)
+                if state == "retry_submitted":
+                    status_var.set(
+                        "Retry batch submitted. Refresh status until it succeeds, "
+                        "then click View results to retrieve the updated dataset."
+                    )
+                elif state in {"submitted", "running", "unknown"}:
+                    status_var.set(
+                        "Batch submitted. Refresh status to check whether outputs are ready."
+                    )
                 return
 
             status_var.set("Querying batch status from the API...")
             run_dir = job.run_dir
+            if run_dir in status_refresh_inflight:
+                status_var.set("Status check already running for this job...")
+                return
+            status_refresh_inflight.add(run_dir)
 
             def worker() -> None:
                 try:
                     chunks = list_batch_chunks_with_state(run_dir)
                 except Exception as exc:  # noqa: BLE001
-                    self.root.after(
-                        0,
-                        lambda: messagebox.showerror("Status check failed", str(exc)),
-                    )
+                    message = str(exc)
+
+                    def on_error() -> None:
+                        status_refresh_inflight.discard(run_dir)
+                        messagebox.showerror("Status check failed", message)
+
+                    self.root.after(0, on_error)
                     return
 
                 def apply() -> None:
+                    status_refresh_inflight.discard(run_dir)
                     insert_chunks(chunks)
                     readiness = resolve_batch_run_readiness(run_dir, chunks=chunks)
                     state = readiness.state
@@ -2086,12 +2720,25 @@ class PatientJournalsApp:
                         status_var.set(
                             f"Status: {state} ({len(chunks)} chunk(s)).{detail}"
                         )
+                    else:
+                        status_var.set(
+                            "Status unavailable. Check the chunk rows for provider errors."
+                        )
 
                 self.root.after(0, apply)
 
             threading.Thread(target=worker, daemon=True).start()
 
-        recover_missing_var = tk.BooleanVar(value=False)
+        def on_job_selected(_event=None) -> None:
+            job = selected_job()
+            if job is None:
+                insert_chunks([])
+                return
+            state = effective_status(job)
+            if state in {"submitted", "unknown", "retry_submitted"}:
+                show_chunks_for_selection(with_state=True)
+            else:
+                show_chunks_for_selection(with_state=False)
 
         def after_results(message: str = "") -> None:
             refresh(quiet=True)
@@ -2103,18 +2750,27 @@ class PatientJournalsApp:
             if job is None or not job.run_dir:
                 status_var.set("Select a batch job to view results.")
                 return
-            if not job.retrieved:
-                state = effective_status(job)
+            state = effective_status(job)
+            needs_ready_check = (not job.retrieved) or job.status == "retry_submitted"
+            if needs_ready_check:
                 if state not in {"succeeded", "failed"}:
+                    if job.status == "retry_submitted":
+                        status_var.set(
+                            "Retry outputs are not ready yet. Refresh status until the "
+                            f"retry chunk(s) succeed, then click View results again "
+                            f"(current: {display_status(state)})."
+                        )
+                        return
                     status_var.set(
                         "Batch outputs are not ready yet. Refresh status and wait "
-                        f"for succeeded before viewing results (current: {state})."
+                        f"for succeeded before viewing results "
+                        f"(current: {display_status(state)})."
                     )
                     return
             self._open_results_window(
                 job,
                 on_change=after_results,
-                recover_missing=recover_missing_var.get(),
+                recover_missing=False,
                 duplicate_strategy=duplicate_strategy_var.get(),
             )
 
@@ -2136,8 +2792,12 @@ class PatientJournalsApp:
                 try:
                     cancelled = cancel_batch_run(run_dir, self.settings)
                 except Exception as exc:  # noqa: BLE001
+                    message = str(exc)
                     self.root.after(
-                        0, lambda: messagebox.showerror("Cancel failed", str(exc))
+                        0,
+                        lambda message=message: messagebox.showerror(
+                            "Cancel failed", message
+                        ),
                     )
                     return
 
@@ -2156,22 +2816,25 @@ class PatientJournalsApp:
 
         def repair_metadata() -> None:
             try:
-                repaired = repair_all_missing_recorded_results(
+                result_records = repair_all_missing_recorded_results(
                     self.settings.local_runs_root
                 )
+                retry_links = repair_retry_metadata_links(self.settings.local_runs_root)
             except Exception as exc:  # noqa: BLE001
                 messagebox.showerror("Repair failed", str(exc))
                 return
             refresh(quiet=True)
-            status_var.set(
-                f"Repaired {repaired} job result record(s)."
-                if repaired
-                else "No missing result records found."
-            )
+            if result_records or retry_links:
+                status_var.set(
+                    f"Repaired {result_records} result record(s) and "
+                    f"{retry_links} retry link(s)."
+                )
+            else:
+                status_var.set("No missing result records or retry links found.")
 
         tree.bind(
             "<<TreeviewSelect>>",
-            lambda _event: show_chunks_for_selection(with_state=False),
+            on_job_selected,
         )
         tree.bind("<Double-1>", lambda _event: view_results())
 
@@ -2193,13 +2856,8 @@ class PatientJournalsApp:
 
         advanced, _advanced_open = self._advanced_section(footer)
         advanced.columnconfigure(1, weight=1)
-        ttk.Checkbutton(
-            advanced,
-            text="Recover missing pages via API when viewing results",
-            variable=recover_missing_var,
-        ).grid(row=0, column=0, columnspan=2, sticky="w")
         ttk.Label(advanced, text="Duplicates", style="App.TLabel").grid(
-            row=1, column=0, sticky="w", pady=(14, 0)
+            row=0, column=0, sticky="w"
         )
         ttk.Combobox(
             advanced,
@@ -2207,18 +2865,18 @@ class PatientJournalsApp:
             values=("first_successful", "provide_all"),
             state="readonly",
             width=18,
-        ).grid(row=1, column=1, sticky="w", pady=(14, 0), padx=(14, 0))
+        ).grid(row=0, column=1, sticky="w", padx=(14, 0))
         self._button(advanced, "Cancel selected job", cancel_selected, kind="secondary").grid(
-            row=2, column=0, sticky="w", pady=(14, 0)
+            row=1, column=0, sticky="w", pady=(14, 0)
         )
         self._button(advanced, "Repair metadata", repair_metadata, kind="secondary").grid(
-            row=2, column=1, sticky="w", pady=(14, 0), padx=(14, 0)
+            row=1, column=1, sticky="w", pady=(14, 0), padx=(14, 0)
         )
         self._grid_help(
             advanced,
+            1,
             2,
-            2,
-            "Repair metadata only fills in missing result summaries from existing dataset and output files.",
+            "Repairs missing result summaries and links retry batches back to their original job.",
         )
         self._jobs_repaint = lambda: refresh(quiet=True)
         refresh()

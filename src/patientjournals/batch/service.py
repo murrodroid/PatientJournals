@@ -121,6 +121,7 @@ class BatchRetrieveRequest:
     wait: bool = False
     allow_partial: bool = False
     submit_failed: bool = False
+    failed_retry_num_batches: int | None = None
     recover_missing_with_api: bool = False
     duplicate_strategy: str | None = None
 
@@ -135,6 +136,7 @@ class BatchRetrieveRequest:
             wait=self.wait,
             allow_partial=self.allow_partial,
             submit_failed=self.submit_failed,
+            failed_retry_num_batches=self.failed_retry_num_batches,
             recover_missing_with_api=self.recover_missing_with_api,
             duplicate_strategy=self.duplicate_strategy,
         )

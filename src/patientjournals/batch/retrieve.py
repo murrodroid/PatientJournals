@@ -109,6 +109,16 @@ def _parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--failed-retry-num-batches",
+        dest="failed_retry_num_batches",
+        type=int,
+        default=None,
+        help=(
+            "When --submit-failed is used, split failed pages into this many "
+            "retry batch jobs. Defaults to 1."
+        ),
+    )
+    parser.add_argument(
         "--recover-missing-with-api",
         dest="recover_missing_with_api",
         action="store_true",
@@ -132,6 +142,16 @@ def _parse_args() -> argparse.Namespace:
 
 def _should_submit_failed_batch(args: argparse.Namespace) -> bool:
     return bool(args.submit_failed or config.batch_submit_failed_pages)
+
+
+def _failed_retry_num_batches(args: argparse.Namespace) -> int:
+    value = getattr(args, "failed_retry_num_batches", None)
+    if value is None:
+        return 1
+    value = int(value)
+    if value <= 0:
+        raise ValueError(f"failed_retry_num_batches must be >= 1 (received {value}).")
+    return value
 
 
 def _normalize_key(value: object) -> str | None:
@@ -301,6 +321,50 @@ def _record_failure(
         failures[failure_key] = reason
 
 
+def _redact_error_text(text: str) -> str:
+    redacted = text
+    secrets = [getattr(config, "api_key", "")]
+    secrets.extend((getattr(config, "provider_api_keys", {}) or {}).values())
+    for secret in secrets:
+        if isinstance(secret, str) and len(secret.strip()) >= 8:
+            redacted = redacted.replace(secret.strip(), "<redacted>")
+    return redacted
+
+
+def _compact_exception_text(exc: BaseException, *, limit: int = 500) -> str:
+    parts: list[str] = []
+    for attr in ("code", "status", "reason", "message"):
+        value = getattr(exc, attr, None)
+        if value is None:
+            continue
+        text = " ".join(str(value).strip().split())
+        if text:
+            parts.append(f"{attr}={text}")
+    fallback = " ".join(str(exc).strip().split())
+    if fallback and fallback not in parts:
+        parts.append(fallback)
+
+    seen: set[str] = set()
+    unique_parts: list[str] = []
+    for part in parts:
+        if part in seen:
+            continue
+        seen.add(part)
+        unique_parts.append(part)
+    compact = _redact_error_text("; ".join(unique_parts))
+    if len(compact) > limit:
+        compact = f"{compact[: limit - 3].rstrip()}..."
+    return compact
+
+
+def _api_key_recovery_failure_reason(exc: BaseException) -> str:
+    error_type = type(exc).__name__
+    detail = _compact_exception_text(exc)
+    if detail:
+        return f"api_key_recovery_failed:{error_type}: {detail}"
+    return f"api_key_recovery_failed:{error_type}"
+
+
 def _sample_keys(values: set[str], limit: int) -> list[str]:
     return sorted(values)[: max(1, limit)]
 
@@ -329,21 +393,37 @@ def _guess_blob_mime_type(blob: storage.Blob, key: str) -> str:
 
 
 def _resolve_recovery_api_key() -> str:
-    configured = (config.api_key or "").strip()
-    if configured:
-        return configured
+    try:
+        return config.api_key_for_provider("gemini")
+    except ValueError:
+        pass
 
     try:
-        from api_keys import gemini_maarten as fallback_api_key
+        import api_keys as key_module
     except Exception:
-        fallback_api_key = ""
+        key_module = None
 
-    value = str(fallback_api_key).strip() if fallback_api_key else ""
-    if value:
-        return value
+    aliases = ("gemini_maarten", "gemini", "google", "google_gemini")
+    for alias in aliases:
+        value = getattr(key_module, alias, "") if key_module is not None else ""
+        value = str(value).strip() if value else ""
+        if value:
+            return value
+
+    env_names = ("GEMINI_API_KEY", "GOOGLE_API_KEY")
+    for env_name in env_names:
+        try:
+            import os
+
+            value = os.getenv(env_name, "").strip()
+        except Exception:
+            value = ""
+        if value:
+            return value
 
     raise ValueError(
-        "API key recovery requires config.api_key or api_keys.gemini_maarten."
+        "API key recovery requires a Gemini key in config.provider_api_keys, "
+        "config.api_key, GEMINI_API_KEY/GOOGLE_API_KEY, or api_keys.py."
     )
 
 
@@ -464,7 +544,7 @@ async def _recover_one_missing_page_via_api_key(
             return _RecoveryResult(
                 key=key,
                 line_number=line_number,
-                failure_reason=f"api_key_recovery_failed:{type(exc).__name__}",
+                failure_reason=_api_key_recovery_failure_reason(exc),
                 exception=exc,
                 attempts=attempt,
                 total_seconds=time.perf_counter() - total_started,
@@ -1373,6 +1453,7 @@ def _flush_rows(
 def retrieve_batch(args: argparse.Namespace | None = None) -> RetrieveBatchResult:
     args = args or _parse_args()
     submit_failed_requested = _should_submit_failed_batch(args)
+    failed_retry_num_batches = _failed_retry_num_batches(args)
     batch_names, submit_run_dir = _resolve_batch_targets(args)
     if not batch_names:
         raise ValueError("No batch jobs resolved for retrieval.")
@@ -2132,12 +2213,15 @@ def retrieve_batch(args: argparse.Namespace | None = None) -> RetrieveBatchResul
                 batch_names=batch_names,
                 submit_run_dir=submit_run_dir,
                 log=log,
+                num_batches=failed_retry_num_batches,
             )
             if retry_submission is not None:
-                retry_run_dir, retry_batch_name, retry_count = retry_submission
+                retry_run_dir, retry_batch_names, retry_count = retry_submission
+                batch_label = "batch" if len(retry_batch_names) == 1 else "batches"
                 print(
-                    f"Submitted failed-page retry batch ({retry_count} key(s)): "
-                    f"{retry_batch_name} [{retry_run_dir}]"
+                    f"Submitted failed-page retry {batch_label} "
+                    f"({retry_count} key(s), {len(retry_batch_names)} chunk(s)): "
+                    f"{', '.join(retry_batch_names)} [{retry_run_dir}]"
                 )
         else:
             log(

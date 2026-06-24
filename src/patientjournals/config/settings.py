@@ -7,6 +7,7 @@ from typing import Any, Literal, Optional
 from pydantic import BaseModel
 
 from patientjournals.config.schemas import FrontPage
+from patientjournals.shared.local_secrets import load_local_api_keys
 
 
 _PROVIDER_NAMES: tuple[str, ...] = ("gemini", "openai", "anthropic")
@@ -14,6 +15,29 @@ _PROVIDER_NAMES: tuple[str, ...] = ("gemini", "openai", "anthropic")
 
 def _load_provider_api_keys() -> dict[str, str]:
     keys = {name: "" for name in _PROVIDER_NAMES}
+
+    try:
+        import api_keys as key_module
+    except Exception:
+        key_module = None
+
+    aliases: dict[str, tuple[str, ...]] = {
+        "gemini": ("gemini_maarten", "gemini", "google", "google_gemini"),
+        "openai": ("openai", "openai_api_key", "gpt"),
+        "anthropic": ("anthropic", "anthropic_api_key", "claude"),
+    }
+    if key_module is not None:
+        for provider, names in aliases.items():
+            for name in names:
+                value = getattr(key_module, name, "")
+                if isinstance(value, str) and value.strip():
+                    keys[provider] = value.strip()
+                    break
+
+    for provider, value in load_local_api_keys().items():
+        if provider in keys and value:
+            keys[provider] = value
+
     env_aliases: dict[str, tuple[str, ...]] = {
         "gemini": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
         "openai": ("OPENAI_API_KEY",),
@@ -22,28 +46,9 @@ def _load_provider_api_keys() -> dict[str, str]:
     for provider, names in env_aliases.items():
         for name in names:
             try:
-                import os
-
                 value = os.getenv(name, "")
             except Exception:
                 value = ""
-            if isinstance(value, str) and value.strip():
-                keys[provider] = value.strip()
-                break
-
-    try:
-        import api_keys as key_module
-    except Exception:
-        return keys
-
-    aliases: dict[str, tuple[str, ...]] = {
-        "gemini": ("gemini_maarten", "gemini", "google", "google_gemini"),
-        "openai": ("openai", "openai_api_key", "gpt"),
-        "anthropic": ("anthropic", "anthropic_api_key", "claude"),
-    }
-    for provider, names in aliases.items():
-        for name in names:
-            value = getattr(key_module, name, "")
             if isinstance(value, str) and value.strip():
                 keys[provider] = value.strip()
                 break
@@ -122,7 +127,7 @@ class Config:
     header_validation_sample_size: int = 5
     api_recovery_enabled: bool = True
     api_recovery_max_missing_pages: int = 50
-    api_recovery_model: str = ""
+    api_recovery_model: str = "gemini-3.1-pro-preview"
     batch_submit_failed_pages: bool = False
     batch_duplicate_strategy: Literal["first_successful", "provide_all"] = (
         "first_successful"

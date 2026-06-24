@@ -660,6 +660,8 @@ def _write_batch_job_meta(
     first = jobs[0]
     meta = {
         "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "job_group_id": run_dir.name,
+        "job_group_role": "root",
         "batch_job_name": first.get("batch_job_name"),
         "batch_job_names": [
             item.get("batch_job_name") for item in jobs if item.get("batch_job_name")

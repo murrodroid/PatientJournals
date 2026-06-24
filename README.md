@@ -63,8 +63,11 @@ uv run app
 
 The app stores UI settings in `~/.patientjournals/app_config.json`. Per-job model, schema, output format, and cloud settings are passed to CLI-compatible jobs through a temporary JSON override file, so the app can run without editing `src/patientjournals/config/settings.py` for each job.
 
+Start new machines or new users on the app's **Setup** page. It checks that `gcloud` is installed, a Google account/project is active, Application Default Credentials or service-account auth is available, the configured GCS bucket can be reached, the expected prefixes can be listed, and a temporary object can be written/read/deleted under `diagnostics/access-checks/`. Failed rows include copyable admin commands for the expected Vertex and Storage IAM roles.
+
 The current app architecture is split into small service modules:
 
+- `patientjournals.app.access`: Google Cloud CLI, auth, bucket, prefix, and write/read/delete access checks.
 - `patientjournals.app.catalog`: schema and Google model choices.
 - `patientjournals.app.dashboard`: dataset, validation, and processing metric summaries.
 - `patientjournals.app.datasets`: local/cloud dataset inspection and image-name matching.

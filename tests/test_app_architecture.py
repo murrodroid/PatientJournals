@@ -3,6 +3,7 @@ import json
 from types import SimpleNamespace
 
 from patientjournals.app import datasets as app_datasets
+from patientjournals.app.access import run_access_checks
 from patientjournals.app.catalog import (
     list_google_model_options,
     list_schema_options,
@@ -22,6 +23,7 @@ from patientjournals.app.jobs import (
     read_dataset_preview,
     read_recorded_results,
     read_run_error,
+    record_batch_chunk_statuses,
     resolve_batch_run_readiness,
 )
 from patientjournals.app.models import AppSettings, BatchChunkSummary, SubmitJobDraft
@@ -187,6 +189,7 @@ def test_batch_chunks_are_grouped_from_submit_metadata(tmp_path) -> None:
 
     assert [chunk.batch_job_name for chunk in chunks] == ["batch-a", "batch-b"]
     assert [chunk.request_count for chunk in chunks] == [5, 4]
+    assert [chunk.status for chunk in chunks] == ["submitted", "submitted"]
 
 
 def test_partial_success_state_is_not_clean_success() -> None:
@@ -420,6 +423,81 @@ def test_settings_store_roundtrip(tmp_path) -> None:
     assert loaded.gcp_project_id == "project"
 
 
+def test_access_checks_pass_with_gcloud_and_bucket_probe() -> None:
+    import subprocess
+
+    commands: list[tuple[str, ...]] = []
+
+    def runner(command):
+        commands.append(tuple(command))
+        if command[:2] == ("gcloud", "--version"):
+            return subprocess.CompletedProcess(command, 0, stdout="Google Cloud SDK 999\n", stderr="")
+        if command[:3] == ("gcloud", "auth", "list"):
+            return subprocess.CompletedProcess(command, 0, stdout="person@example.com\n", stderr="")
+        if command[:3] == ("gcloud", "config", "get-value"):
+            return subprocess.CompletedProcess(command, 0, stdout="project\n", stderr="")
+        if command[:4] == ("gcloud", "auth", "application-default", "print-access-token"):
+            return subprocess.CompletedProcess(command, 0, stdout="token\n", stderr="")
+        return subprocess.CompletedProcess(command, 1, stdout="", stderr="unexpected")
+
+    class Blob:
+        def __init__(self, name: str) -> None:
+            self.name = name
+            self.deleted = False
+
+        def upload_from_string(self, _text: str, *, content_type: str) -> None:
+            assert content_type == "text/plain"
+
+        def download_as_text(self) -> str:
+            return "patientjournals access check\n"
+
+        def delete(self) -> None:
+            self.deleted = True
+
+    class Bucket:
+        def exists(self) -> bool:
+            return True
+
+        def list_blobs(self, *, prefix=None, max_results=None):
+            assert max_results == 1
+            return iter([])
+
+        def blob(self, name: str) -> Blob:
+            return Blob(name)
+
+    report = run_access_checks(
+        AppSettings(
+            auth_mode="adc",
+            gcp_project_id="project",
+            gcs_bucket_name="bucket",
+            gcs_pages_prefix="pages",
+            batch_requests_gcs_prefix="batch/requests",
+            batch_outputs_gcs_prefix="batch/outputs",
+        ),
+        runner=runner,
+        bucket_factory=lambda _name: Bucket(),
+    )
+
+    assert report.failed == 0
+    assert any(result.name == "GCS write/read/delete" for result in report.results)
+    assert ("gcloud", "--version") in commands
+
+
+def test_access_checks_report_missing_gcloud() -> None:
+    def runner(_command):
+        raise FileNotFoundError("gcloud")
+
+    report = run_access_checks(
+        AppSettings(auth_mode="adc", gcs_bucket_name=""),
+        runner=runner,
+    )
+
+    assert report.failed >= 1
+    assert report.results[0].name == "gcloud installed"
+    assert report.results[0].status == "fail"
+    assert "Google Cloud CLI" in report.results[0].fix
+
+
 def test_job_registry_roundtrip(tmp_path) -> None:
     registry = JobRegistry(tmp_path / "jobs.json")
     job = RegisteredJob(
@@ -510,6 +588,73 @@ def test_list_submit_jobs_folds_in_retrieval_results(tmp_path) -> None:
     assert job.succeeded == 90
     assert job.failed == 10
     assert job.recovered == 2
+
+
+def test_list_submit_jobs_groups_failed_retry_submissions(tmp_path) -> None:
+    parent = _write_submit_run(
+        tmp_path,
+        "submit_20260101_000000",
+        batch_meta={
+            "model": "gemini-3.1-pro-preview",
+            "request_count": 100,
+            "batch_job_names": ["b1"],
+            "batch_jobs": [
+                {
+                    "chunk_index": 1,
+                    "total_chunks": 1,
+                    "chunk_label": "chunk_001_of_001",
+                    "batch_job_name": "b1",
+                    "request_count": 100,
+                }
+            ],
+        },
+        results={"successful_pages": 90, "expected_pages": 100},
+    )
+    _write_submit_run(
+        tmp_path,
+        "submit_20260101_010000",
+        batch_meta={
+            "model": "gemini-3.1-pro-preview",
+            "request_count": 10,
+            "batch_job_names": ["b2"],
+            "batch_jobs": [
+                {
+                    "chunk_index": 1,
+                    "total_chunks": 1,
+                    "chunk_label": "chunk_001_of_001",
+                    "batch_job_name": "b2",
+                    "request_count": 10,
+                }
+            ],
+            "retry_source_run": str(parent),
+            "retry_failed_keys_file": "failed_keys.jsonl",
+        },
+    )
+
+    jobs = list_submit_jobs(tmp_path)
+
+    assert [job.job_id for job in jobs] == ["submit_20260101_000000"]
+    job = jobs[0]
+    assert job.image_count == 100
+    assert job.chunk_count == 2
+    assert job.status == "retry_submitted"
+    assert "1 retry batch" in job.detail
+
+    chunks = list_batch_chunks(parent)
+    assert [chunk.batch_job_name for chunk in chunks] == ["b1", "b2"]
+    assert [chunk.status for chunk in chunks] == ["submitted", "submitted"]
+
+    record_batch_chunk_statuses(parent, {"b2": "JOB_STATE_SUCCEEDED"})
+    chunks = list_batch_chunks(parent)
+    assert [chunk.status for chunk in chunks] == ["submitted", "JOB_STATE_SUCCEEDED"]
+
+    repaired_parent = json.loads((parent / "batch_job.json").read_text(encoding="utf-8"))
+    assert repaired_parent["job_group_id"] == parent.name
+    assert repaired_parent["job_group_role"] == "root"
+    assert repaired_parent["request_count"] == 100
+    assert repaired_parent["batch_job_names"] == ["b1", "b2"]
+    assert repaired_parent["batch_jobs"][1]["is_retry"] is True
+    assert repaired_parent["batch_jobs"][1]["status"] == "JOB_STATE_SUCCEEDED"
 
 
 def test_read_dataset_preview_jsonl(tmp_path) -> None:
@@ -670,6 +815,20 @@ def test_batch_run_provider_reads_metadata(tmp_path) -> None:
     assert batch_run_provider(tmp_path) == "gemini"
 
 
+def test_batch_run_provider_infers_legacy_gemini_metadata(tmp_path) -> None:
+    (tmp_path / "batch_job.json").write_text(
+        json.dumps(
+            {
+                "model": "gemini-3.1-pro-preview",
+                "batch_job_name": "projects/p/locations/europe-north1/batchPredictionJobs/1",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert batch_run_provider(tmp_path) == "gemini"
+
+
 def test_app_settings_api_recovery_threshold_roundtrip(tmp_path) -> None:
     path = tmp_path / "app_config.json"
     save_app_settings(AppSettings(api_recovery_threshold=8), path)
@@ -741,5 +900,72 @@ def test_recover_dataset_gaps_only_targets_missing_pages(tmp_path, monkeypatch) 
     assert len(result["recovery_history"]) == 2
     assert result["successful_pages"] == 5
     assert result["missing_pages"] == 0
+    assert result["api_recovery_attempted"] is True
+    assert result["api_recovery_completed"] is True
+    assert result["api_recovery_failed"] is False
+    assert result["api_recovery_errors"] == []
+    assert result["api_recovered_row_count"] == 2
+    assert {row["image_name"] for row in result["api_recovered_rows"]} == {
+        "p3.png",
+        "p4.png",
+    }
     # The recovered rows were appended to the existing dataset (3 -> 5).
     assert dataset.read_text(encoding="utf-8").strip().count("\n") + 1 == 5
+
+
+def test_recover_dataset_gaps_reports_zero_row_api_completion(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from patientjournals.app import jobs as app_jobs
+    from patientjournals.batch import retrieve as retrieve_module
+
+    run_dir = tmp_path / "submit_x"
+    run_dir.mkdir()
+    (run_dir / "batch_job.json").write_text(
+        json.dumps(
+            {
+                "provider": "gemini",
+                "batch_jobs": [{"batch_job_name": "b1", "request_count": 2}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    dataset = run_dir / "submit_x_dataset.jsonl"
+    dataset.write_text('{"image_name": "p0.png", "field": "ok"}\n', encoding="utf-8")
+    (run_dir / "batch_results.json").write_text(
+        json.dumps({"dataset_path": str(dataset)}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        retrieve_module,
+        "_resolve_expected_request_keys",
+        lambda **kwargs: {"pages/dir/p0.png", "pages/dir/p1.png"},
+    )
+
+    def fake_recover(*, failures, **kwargs):
+        failures["pages/dir/p1.png"] = "api_key_recovery_failed:permission_denied"
+        return 0
+
+    monkeypatch.setattr(
+        retrieve_module,
+        "_recover_missing_pages_via_api_key",
+        fake_recover,
+    )
+
+    result = app_jobs.recover_dataset_gaps(run_dir, AppSettings())
+
+    assert result["api_recovery_attempted"] is True
+    assert result["api_recovery_completed"] is True
+    assert result["api_recovery_failed"] is True
+    assert result["api_recovered_row_count"] == 0
+    assert result["api_recovered_rows"] == []
+    assert result["api_recovery_errors"] == [
+        {
+            "image_name": "p1.png",
+            "key": "pages/dir/p1.png",
+            "failure_reason": "api_key_recovery_failed:permission_denied",
+        }
+    ]
+    assert "permission_denied" in result["api_recovery_error_summary"]
+    assert result["missing_pages"] == 1
