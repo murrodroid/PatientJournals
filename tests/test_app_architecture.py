@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 from patientjournals.app import datasets as app_datasets
@@ -10,6 +11,7 @@ from patientjournals.app.catalog import (
     resolve_schema_class,
 )
 from patientjournals.app.dashboard import latest_dataset_path, summarize_dashboard
+from patientjournals.app.job_store import JobStore
 from patientjournals.app.jobs import (
     JobRegistry,
     RegisteredJob,
@@ -25,6 +27,7 @@ from patientjournals.app.jobs import (
     read_run_error,
     record_batch_chunk_statuses,
     resolve_batch_run_readiness,
+    run_retrieve_direct,
 )
 from patientjournals.app.models import AppSettings, BatchChunkSummary, SubmitJobDraft
 from patientjournals.app.settings_store import load_app_settings, save_app_settings
@@ -590,6 +593,94 @@ def test_list_submit_jobs_folds_in_retrieval_results(tmp_path) -> None:
     assert job.recovered == 2
 
 
+def test_job_store_migrates_legacy_submit_results(tmp_path) -> None:
+    run_dir = _write_submit_run(
+        tmp_path,
+        "submit_20260101_000000",
+        batch_meta={
+            "model": "gemini-3.1-pro-preview",
+            "request_count": 2,
+            "batch_jobs": [
+                {"chunk_index": 1, "total_chunks": 1, "batch_job_name": "b1", "request_count": 2}
+            ],
+        },
+        results={
+            "dataset_path": str(tmp_path / "submit_20260101_000000" / "dataset.jsonl"),
+            "successful_pages": 2,
+            "expected_pages": 2,
+            "rows_written": 2,
+        },
+    )
+    dataset = run_dir / "dataset.jsonl"
+    dataset.write_text('{"image_name": "a.png"}\n{"image_name": "b.png"}\n', encoding="utf-8")
+
+    jobs = list_submit_jobs(tmp_path)
+
+    assert [job.job_id for job in jobs] == ["submit_20260101_000000"]
+    record = JobStore(tmp_path).read("submit_20260101_000000")
+    assert record["legacy"]["submit_run_dir"] == str(run_dir)
+    assert record["metrics"]["successful_pages"] == 2
+    current_path = record["dataset"]["current_path"]
+    assert current_path.endswith("jobs/submit_20260101_000000/datasets/current.jsonl")
+    assert Path(current_path).read_text(encoding="utf-8") == dataset.read_text(
+        encoding="utf-8"
+    )
+
+
+def test_run_retrieve_direct_reuses_job_store_cache(tmp_path, monkeypatch) -> None:
+    run_dir = _write_submit_run(
+        tmp_path,
+        "submit_20260101_000000",
+        batch_meta={
+            "model": "gemini-3.1-pro-preview",
+            "provider": "gemini",
+            "request_count": 1,
+            "batch_jobs": [
+                {"chunk_index": 1, "total_chunks": 1, "batch_job_name": "b1", "request_count": 1}
+            ],
+        },
+    )
+    dataset = run_dir / "dataset.jsonl"
+    dataset.write_text('{"image_name": "a.png"}\n', encoding="utf-8")
+    settings = AppSettings(batch_duplicate_strategy="first_successful")
+    store = JobStore(tmp_path)
+    signature = store.build_retrieval_signature(
+        run_dir,
+        allow_partial=True,
+        duplicate_strategy="first_successful",
+    )
+    cached = store.record_retrieval(
+        run_dir,
+        {
+            "retrieved_at": "2026-01-01T00:00:00",
+            "dataset_path": str(dataset),
+            "provider": "gemini",
+            "batch_count": 1,
+            "rows_written": 1,
+            "error_rows": 0,
+            "expected_pages": 1,
+            "observed_pages": 1,
+            "successful_pages": 1,
+            "recovered_pages": 0,
+            "missing_pages": 0,
+        },
+        signature=signature,
+        operation="retrieve",
+    )
+
+    def fail_retrieve(*_args, **_kwargs):
+        raise AssertionError("retrieval backend should not run for cached signature")
+
+    from patientjournals.batch import service as batch_service
+
+    monkeypatch.setattr(batch_service.BatchResultService, "retrieve", fail_retrieve)
+
+    result = run_retrieve_direct(run_dir, settings, allow_partial=True)
+
+    assert result["dataset_path"] == cached["dataset_path"]
+    assert result["successful_pages"] == 1
+
+
 def test_list_submit_jobs_groups_failed_retry_submissions(tmp_path) -> None:
     parent = _write_submit_run(
         tmp_path,
@@ -909,8 +1000,10 @@ def test_recover_dataset_gaps_only_targets_missing_pages(tmp_path, monkeypatch) 
         "p3.png",
         "p4.png",
     }
-    # The recovered rows were appended to the existing dataset (3 -> 5).
-    assert dataset.read_text(encoding="utf-8").strip().count("\n") + 1 == 5
+    # The recovered rows were appended to the canonical job dataset (3 -> 5).
+    current_dataset = Path(result["dataset_path"])
+    assert current_dataset.read_text(encoding="utf-8").strip().count("\n") + 1 == 5
+    assert "jobs/submit_x/datasets/current.jsonl" in str(current_dataset)
 
 
 def test_recover_dataset_gaps_reports_zero_row_api_completion(

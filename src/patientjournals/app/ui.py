@@ -2330,6 +2330,7 @@ class PatientJournalsApp:
                         allow_partial=True,
                         recover_missing_with_api=recover_missing,
                         duplicate_strategy=duplicate_strategy,
+                        force=force_retrieve,
                     )
 
                 dataset_path = find_dataset_near(payload.get("dataset_path") or "")

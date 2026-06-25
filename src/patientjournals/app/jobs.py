@@ -20,6 +20,7 @@ from patientjournals.app.models import (
     SubmitJobDraft,
     app_settings_path,
 )
+from patientjournals.app.job_store import JobStore
 from patientjournals.app.settings_store import (
     command_override_payload,
     write_command_overrides,
@@ -402,6 +403,7 @@ def run_retrieve_direct(
     failed_retry_num_batches: int | None = None,
     duplicate_strategy: str = "",
     record_results: bool = True,
+    force: bool = False,
 ) -> dict[str, object]:
     """Retrieve a submitted batch in-process and record the result on the submit run.
 
@@ -416,6 +418,18 @@ def run_retrieve_direct(
         or settings.batch_duplicate_strategy
         or "first_successful"
     )
+    store = JobStore.for_run_dir(run_dir)
+    signature = store.build_retrieval_signature(
+        run_dir,
+        allow_partial=allow_partial,
+        recover_missing_with_api=recover_missing_with_api,
+        duplicate_strategy=str(effective_strategy),
+    )
+    if record_results and not force and not submit_failed and not recover_missing_with_api:
+        cached = store.cached_retrieval(run_dir, signature=signature)
+        if cached:
+            return cached
+
     overrides = command_override_payload(
         settings,
         duplicate_strategy=str(effective_strategy),
@@ -457,6 +471,13 @@ def run_retrieve_direct(
         payload["api_recovery_completed"] = True
         payload["api_recovered_row_count"] = int(result.recovered_pages or 0)
         payload["api_recovered_rows"] = []
+    if record_results and not submit_failed:
+        payload = store.record_retrieval(
+            run_dir,
+            payload,
+            signature=signature,
+            operation="api_recovery" if recover_missing_with_api else "retrieve",
+        )
     if record_results:
         results_path = Path(run_dir).expanduser() / BATCH_RESULTS_FILE
         results_path.write_text(
@@ -487,6 +508,7 @@ def resubmit_failed_requests(
     )
     results_path = Path(run_dir).expanduser() / BATCH_RESULTS_FILE
     results_path.unlink(missing_ok=True)
+    JobStore.for_run_dir(run_dir).mark_retry_submitted(run_dir)
     return payload
 
 
@@ -692,6 +714,19 @@ def recover_dataset_gaps(
             "api_recovered_rows": recovered_rows,
             "api_recovered_row_count": len(recovered_rows),
         }
+        store = JobStore.for_run_dir(run_path)
+        signature = store.build_retrieval_signature(
+            run_path,
+            allow_partial=True,
+            recover_missing_with_api=True,
+            duplicate_strategy=str(config.batch_duplicate_strategy or ""),
+        )
+        payload = store.record_retrieval(
+            run_path,
+            payload,
+            signature=signature,
+            operation="api_recovery",
+        )
         (run_path / BATCH_RESULTS_FILE).write_text(
             json.dumps(payload, indent=2, ensure_ascii=False),
             encoding="utf-8",
@@ -906,8 +941,31 @@ def run_failure_diagnostics(run_dir: str | Path, *, limit: int = 12) -> str:
 def read_recorded_results(run_dir: str | Path) -> dict:
     """Return the recorded retrieval results for a run, if it has been retrieved."""
     run_path = Path(run_dir).expanduser()
-    return _read_json_file(run_path / BATCH_RESULTS_FILE) or _derived_results_from_artifacts(
+    store = JobStore.for_run_dir(run_path)
+    cached = store.current_results_for_run_dir(run_path)
+    if cached:
+        return cached
+
+    results = _read_json_file(run_path / BATCH_RESULTS_FILE) or _derived_results_from_artifacts(
         run_path
+    )
+    if not results:
+        return {}
+    signature = store.build_retrieval_signature(
+        run_path,
+        allow_partial=True,
+        recover_missing_with_api=bool(results.get("api_recovery_attempted")),
+        duplicate_strategy=str(
+            results.get("duplicate_strategy")
+            or config.batch_duplicate_strategy
+            or ""
+        ),
+    )
+    return store.record_retrieval(
+        run_path,
+        results,
+        signature=signature,
+        operation="legacy_retrieval",
     )
 
 
@@ -916,9 +974,19 @@ def repair_recorded_results(run_dir: str | Path) -> dict:
     run_path = Path(run_dir).expanduser()
     existing = _read_json_file(run_path / BATCH_RESULTS_FILE)
     if existing:
-        return existing
+        return read_recorded_results(run_path)
     derived = _derived_results_from_artifacts(run_path)
     if derived:
+        derived = JobStore.for_run_dir(run_path).record_retrieval(
+            run_path,
+            derived,
+            signature=JobStore.for_run_dir(run_path).build_retrieval_signature(
+                run_path,
+                allow_partial=True,
+                duplicate_strategy=str(config.batch_duplicate_strategy or ""),
+            ),
+            operation="legacy_retrieval",
+        )
         (run_path / BATCH_RESULTS_FILE).write_text(
             json.dumps(derived, indent=2, ensure_ascii=False),
             encoding="utf-8",
@@ -1762,6 +1830,7 @@ def list_submit_jobs(run_root: str | Path | None = None) -> list[JobSummary]:
     if not root.exists() or not root.is_dir():
         return []
     repair_retry_metadata_links(root)
+    store = JobStore(root)
     summaries: list[JobSummary] = []
     for run_dir in run_layout.iter_run_dirs(root, "submit"):
         batch_meta = _read_json_file(run_dir / "batch_job.json")
@@ -1796,6 +1865,18 @@ def list_submit_jobs(run_root: str | Path | None = None) -> list[JobSummary]:
             status = "retrieved"
         if retry_count and failed:
             status = "retry_submitted"
+
+        store.sync_legacy_submit_run(
+            run_dir,
+            batch_meta=batch_meta,
+            created_at=created_at,
+            model=model,
+            input_location=location,
+            image_count=images,
+            chunk_count=chunk_count,
+            status=status,
+            results=results,
+        )
 
         detail = f"{images} image(s)"
         if chunk_count:
