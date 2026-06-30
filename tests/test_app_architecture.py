@@ -33,6 +33,7 @@ from patientjournals.app.jobs import (
 )
 from patientjournals.app.models import AppSettings, BatchChunkSummary, SubmitJobDraft
 from patientjournals.app.settings_store import load_app_settings, save_app_settings
+from patientjournals.app.workflows import WorkflowService
 from patientjournals.config.schemas import FrontPage, TextPage, resolve_output_schema
 from patientjournals.validation import sync as validation_sync
 
@@ -366,6 +367,118 @@ def test_dataset_library_lists_local_and_cloud_datasets(tmp_path, monkeypatch) -
     assert cloud_items[0].source == "cloud"
     assert cloud_items[0].row_count == 1068
     assert cloud_items[0].gcs_uri.startswith("gs://bucket/datasets/")
+
+
+def test_combine_dataset_files_prefers_first_successful_duplicate(tmp_path) -> None:
+    first = tmp_path / "first_dataset.jsonl"
+    first.write_text(
+        '{"image_name":"a.png","value":"failed","failed":true}\n'
+        '{"image_name":"b.png","value":"kept"}\n',
+        encoding="utf-8",
+    )
+    second = tmp_path / "second_dataset.jsonl"
+    second.write_text(
+        '{"image_name":"a.png","value":"success","failed":false}\n'
+        '{"file_name":"/images/c.png","value":"identity-filled"}\n',
+        encoding="utf-8",
+    )
+
+    result = app_datasets.combine_dataset_files(
+        [
+            {"name": "first", "location": str(first), "local_path": str(first)},
+            {"name": "second", "location": str(second), "local_path": str(second)},
+        ],
+        output_name="combined 0618",
+        output_root=tmp_path / "runs",
+        duplicate_strategy="first_successful",
+    )
+
+    rows = [
+        json.loads(line)
+        for line in Path(result["dataset_path"]).read_text(encoding="utf-8").splitlines()
+    ]
+    manifest = json.loads(Path(result["manifest_path"]).read_text(encoding="utf-8"))
+
+    assert result["row_count"] == 3
+    assert result["duplicates_detected"] == 1
+    assert result["duplicates_replaced"] == 1
+    assert {row["image_name"] for row in rows} == {"a.png", "b.png", "c.png"}
+    assert next(row for row in rows if row["image_name"] == "a.png")["value"] == "success"
+    assert manifest["duplicate_rows"][0]["action"] == "replaced_failed_duplicate"
+    assert manifest["duplicate_image_names"] == ["a.png"]
+
+
+def test_combine_dataset_files_can_include_all_duplicates(tmp_path) -> None:
+    first = tmp_path / "first_dataset.jsonl"
+    first.write_text('{"image_name":"a.png","value":"one"}\n', encoding="utf-8")
+    second = tmp_path / "second_dataset.jsonl"
+    second.write_text('{"image_name":"a.png","value":"two"}\n', encoding="utf-8")
+
+    result = app_datasets.combine_dataset_files(
+        [
+            {"name": "first", "location": str(first), "local_path": str(first)},
+            {"name": "second", "location": str(second), "local_path": str(second)},
+        ],
+        output_name="all duplicates",
+        output_root=tmp_path / "runs",
+        duplicate_strategy="provide_all",
+    )
+
+    rows = [
+        json.loads(line)
+        for line in Path(result["dataset_path"]).read_text(encoding="utf-8").splitlines()
+    ]
+
+    assert result["row_count"] == 2
+    assert result["duplicates_included"] == 1
+    assert result["duplicates_skipped"] == 0
+    assert [row["value"] for row in rows] == ["one", "two"]
+
+
+def test_workflow_combine_datasets_uploads_dataset_and_manifest(tmp_path, monkeypatch) -> None:
+    dataset = tmp_path / "source_dataset.jsonl"
+    dataset.write_text('{"image_name":"a.png","value":"one"}\n', encoding="utf-8")
+    uploaded: dict[str, dict[str, object]] = {}
+
+    class Blob:
+        def __init__(self, name: str) -> None:
+            self.name = name
+            self.metadata = {}
+
+        def upload_from_filename(self, filename: str, *, content_type: str) -> None:
+            uploaded[self.name] = {
+                "filename": filename,
+                "content_type": content_type,
+                "metadata": self.metadata,
+            }
+
+    class Bucket:
+        name = "bucket"
+
+        def blob(self, name: str) -> Blob:
+            return Blob(name)
+
+    monkeypatch.setattr(app_datasets, "build_storage_bucket", lambda _name: Bucket())
+    service = WorkflowService(
+        AppSettings(
+            local_runs_root=str(tmp_path / "runs"),
+            gcs_bucket_name="bucket",
+            datasets_gcs_prefix="shared/datasets",
+        )
+    )
+
+    result = service.combine_datasets(
+        [{"source": "local", "name": "source", "local_path": str(dataset)}],
+        output_name="merged",
+        duplicate_strategy="first_successful",
+    )
+
+    assert result["cloud_uri"] == "gs://bucket/shared/datasets/merged/merged_dataset.jsonl"
+    assert result["manifest_cloud_uri"] == "gs://bucket/shared/datasets/merged/dataset_manifest.json"
+    assert "shared/datasets/merged/merged_dataset.jsonl" in uploaded
+    assert "shared/datasets/merged/dataset_manifest.json" in uploaded
+    assert uploaded["shared/datasets/merged/merged_dataset.jsonl"]["content_type"] == "application/jsonl"
+    assert uploaded["shared/datasets/merged/dataset_manifest.json"]["content_type"] == "application/json"
 
 
 def test_validation_upload_writes_metadata_and_uploads_files(tmp_path, monkeypatch) -> None:

@@ -10,12 +10,16 @@ from typing import Any
 from patientjournals.app.access import run_access_checks
 from patientjournals.app.dashboard import analyze_dataset_file, summarize_dashboard
 from patientjournals.app.datasets import (
+    combine_dataset_files,
     list_cloud_dataset_choices,
     list_cloud_dataset_library,
     list_local_dataset_library,
+    prepare_dataset_sources,
 )
 from patientjournals.app.job_store import JobStore, utc_now_iso
 from patientjournals.app.jobs import (
+    _apply_runtime_overrides,
+    _restore_runtime_overrides,
     build_validation_command,
     cancel_batch_run,
     finalize_dataset_with_failed_rows,
@@ -32,7 +36,11 @@ from patientjournals.app.jobs import (
     start_command,
 )
 from patientjournals.app.models import AppSettings, SubmitJobDraft
-from patientjournals.app.settings_store import load_app_settings, save_app_settings
+from patientjournals.app.settings_store import (
+    command_override_payload,
+    load_app_settings,
+    save_app_settings,
+)
 from patientjournals.config import config
 
 
@@ -278,23 +286,65 @@ class WorkflowService:
 
     def list_datasets(self, *, include_cloud: bool = False) -> dict[str, Any]:
         local_items = list_local_dataset_library(self.settings.local_runs_root)
-        cloud_items = (
-            list_cloud_dataset_library(
-                bucket_name=self.settings.gcs_bucket_name,
-                datasets_prefix=self.settings.datasets_gcs_prefix,
-            )
-            if include_cloud
-            else []
-        )
+        cloud_items = []
+        if include_cloud:
+            previous = _apply_runtime_overrides(command_override_payload(self.settings))
+            try:
+                cloud_items = list_cloud_dataset_library(
+                    bucket_name=self.settings.gcs_bucket_name,
+                    datasets_prefix=self.settings.datasets_gcs_prefix,
+                )
+            finally:
+                _restore_runtime_overrides(previous)
         return {"local": serializable(local_items), "cloud": serializable(cloud_items)}
 
     def cloud_input_choices(self) -> list[dict[str, Any]]:
-        return serializable(
-            list_cloud_dataset_choices(
-                bucket_name=self.settings.gcs_bucket_name,
-                pages_prefix=self.settings.gcs_pages_prefix,
+        previous = _apply_runtime_overrides(command_override_payload(self.settings))
+        try:
+            return serializable(
+                list_cloud_dataset_choices(
+                    bucket_name=self.settings.gcs_bucket_name,
+                    pages_prefix=self.settings.gcs_pages_prefix,
+                )
             )
-        )
+        finally:
+            _restore_runtime_overrides(previous)
+
+    def combine_datasets(
+        self,
+        dataset_items: list[dict[str, Any]] | tuple[dict[str, Any], ...],
+        *,
+        output_name: str,
+        duplicate_strategy: str = "first_successful",
+    ) -> dict[str, Any]:
+        if not output_name.strip():
+            raise ValueError("Enter a name for the combined dataset.")
+        previous = _apply_runtime_overrides(command_override_payload(self.settings))
+        try:
+            sources = prepare_dataset_sources(
+                dataset_items,
+                download_root=(
+                    Path(self.settings.local_runs_root)
+                    / "datasets"
+                    / "_cloud_cache"
+                ),
+            )
+            return serializable(
+                combine_dataset_files(
+                    sources,
+                    output_name=output_name,
+                    output_root=self.settings.local_runs_root,
+                    duplicate_strategy=duplicate_strategy,
+                    upload_to_cloud=bool(
+                        self.settings.gcs_bucket_name
+                        and getattr(config, "upload_dataset_to_gcs", True)
+                    ),
+                    bucket_name=self.settings.gcs_bucket_name,
+                    datasets_prefix=self.settings.datasets_gcs_prefix,
+                )
+            )
+        finally:
+            _restore_runtime_overrides(previous)
 
     def local_input_choices(self, *, limit: int = 200) -> list[dict[str, Any]]:
         root_value = (

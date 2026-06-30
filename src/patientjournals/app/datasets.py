@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import csv
+import json
+import re
 from datetime import datetime
 from pathlib import Path
+from typing import Any, Iterable, Mapping
 
 from patientjournals.app.models import (
     CloudDatasetChoice,
@@ -22,7 +25,9 @@ from patientjournals.data.inspection import collect_files, summarize_batch_data
 from patientjournals.shared.identity import (
     build_image_name_set,
     duplicate_image_names,
+    ensure_row_image_name,
     image_name_from_reference,
+    row_image_name,
 )
 
 
@@ -92,6 +97,383 @@ def count_dataset_rows(path: str | Path) -> int:
     if suffix == ".csv":
         return _count_csv_rows(dataset)
     return 0
+
+
+def _dataset_content_type(dataset_path: Path) -> str:
+    suffix = dataset_path.suffix.lower().lstrip(".")
+    if suffix == "jsonl":
+        return "application/jsonl"
+    if suffix == "json":
+        return "application/json"
+    if suffix == "csv":
+        return "text/csv"
+    return "application/octet-stream"
+
+
+def _safe_dataset_slug(value: str) -> str:
+    text = re.sub(r"[^a-zA-Z0-9._-]+", "_", value.strip())
+    text = re.sub(r"_+", "_", text).strip("._-")
+    return text or datetime.now().strftime("combined_%Y%m%d_%H%M%S")
+
+
+def _unique_dataset_dir(root: Path, slug: str) -> tuple[Path, str]:
+    candidate = root / slug
+    if not candidate.exists():
+        return candidate, slug
+    stamped = f"{slug}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    candidate = root / stamped
+    index = 2
+    while candidate.exists():
+        candidate = root / f"{stamped}_{index}"
+        index += 1
+    return candidate, candidate.name
+
+
+def _source_location(item: Mapping[str, Any] | str | Path) -> str:
+    if isinstance(item, Mapping):
+        for key in ("local_path", "path", "gcs_uri", "location"):
+            value = item.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return ""
+    return str(item)
+
+
+def _source_name(item: Mapping[str, Any] | str | Path, location: str) -> str:
+    if isinstance(item, Mapping):
+        value = item.get("name") or item.get("run_id")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return Path(location).name if location else "dataset"
+
+
+def _iter_dataset_rows(path: Path) -> Iterable[dict[str, Any]]:
+    suffix = path.suffix.lower()
+    if suffix == ".jsonl":
+        with open(path, "r", encoding="utf-8") as handle:
+            for line_number, line in enumerate(handle, start=1):
+                text = line.strip()
+                if not text:
+                    continue
+                payload = json.loads(text)
+                if not isinstance(payload, dict):
+                    raise ValueError(f"{path} line {line_number} is not a JSON object.")
+                yield dict(payload)
+        return
+    if suffix == ".csv":
+        with open(path, "r", encoding="utf-8", newline="") as handle:
+            reader = csv.DictReader(handle, delimiter=config.csv_sep)
+            for row in reader:
+                yield dict(row)
+        return
+    raise ValueError(f"Unsupported dataset format: {path}")
+
+
+def _row_failed(row: Mapping[str, Any]) -> bool:
+    value = row.get("failed")
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "failed", "error"}
+    status = row.get("status")
+    if isinstance(status, str):
+        return status.strip().lower() in {"failed", "error", "missing"}
+    return False
+
+
+def prepare_dataset_sources(
+    items: Iterable[Mapping[str, Any] | str | Path],
+    *,
+    download_root: str | Path,
+) -> list[dict[str, Any]]:
+    sources: list[dict[str, Any]] = []
+    for index, item in enumerate(items):
+        location = _source_location(item)
+        if not location:
+            raise ValueError(f"Dataset selection {index + 1} is missing a location.")
+        if location.startswith("gs://"):
+            local_path = download_cloud_dataset(
+                location,
+                destination_root=Path(download_root).expanduser() / f"source_{index + 1}",
+            )
+        else:
+            local_path = Path(location).expanduser()
+        if not local_path.is_file():
+            raise FileNotFoundError(f"Dataset not found: {local_path}")
+        sources.append(
+            {
+                "name": _source_name(item, location),
+                "location": location,
+                "local_path": str(local_path),
+                "source": (
+                    str(item.get("source") or "cloud")
+                    if isinstance(item, Mapping) and location.startswith("gs://")
+                    else str(item.get("source") or "local")
+                    if isinstance(item, Mapping)
+                    else "cloud"
+                    if location.startswith("gs://")
+                    else "local"
+                ),
+            }
+        )
+    if not sources:
+        raise ValueError("Select at least one dataset to combine.")
+    return sources
+
+
+def upload_dataset_to_cloud(
+    dataset_path: str | Path,
+    *,
+    dataset_name: str,
+    bucket_name: str | None = None,
+    datasets_prefix: str | None = None,
+    metadata: Mapping[str, Any] | None = None,
+) -> str:
+    path = Path(dataset_path).expanduser()
+    if not path.is_file():
+        raise FileNotFoundError(f"Dataset not found: {path}")
+    bucket = build_storage_bucket(bucket_name)
+    resolved_bucket = str(getattr(bucket, "name", "") or bucket_name or "")
+    prefix = normalize_prefix(datasets_prefix or config.datasets_gcs_prefix)
+    object_name = f"{prefix}{dataset_name}/{path.name}"
+    blob = bucket.blob(object_name)
+    if metadata:
+        blob.metadata = {
+            str(key): json.dumps(value, ensure_ascii=False)
+            if isinstance(value, (dict, list, tuple))
+            else str(value)
+            for key, value in metadata.items()
+            if value is not None
+        }
+    blob.upload_from_filename(str(path), content_type=_dataset_content_type(path))
+    return f"gs://{resolved_bucket}/{object_name}"
+
+
+def combine_dataset_files(
+    sources: Iterable[Mapping[str, Any]],
+    *,
+    output_name: str,
+    output_root: str | Path = "runs",
+    duplicate_strategy: str = "first_successful",
+    upload_to_cloud: bool = False,
+    bucket_name: str | None = None,
+    datasets_prefix: str | None = None,
+) -> dict[str, Any]:
+    strategy = (duplicate_strategy or "first_successful").strip().lower()
+    aliases = {
+        "first": "first_successful",
+        "ignore_duplicates": "first_successful",
+        "ignore": "first_successful",
+        "include_all": "provide_all",
+        "all": "provide_all",
+    }
+    strategy = aliases.get(strategy, strategy)
+    if strategy not in {"first_successful", "provide_all"}:
+        raise ValueError(
+            "Duplicate strategy must be first_successful or provide_all."
+        )
+
+    resolved_sources = list(sources)
+    if not resolved_sources:
+        raise ValueError("Select at least one dataset to combine.")
+
+    output_slug = _safe_dataset_slug(output_name)
+    library_root = Path(output_root).expanduser() / "datasets"
+    output_dir, final_slug = _unique_dataset_dir(library_root, output_slug)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    dataset_path = output_dir / f"{final_slug}_dataset.jsonl"
+    manifest_path = output_dir / "dataset_manifest.json"
+
+    output_rows: list[dict[str, Any]] = []
+    seen: dict[str, int] = {}
+    first_seen: dict[str, dict[str, Any]] = {}
+    source_stats: list[dict[str, Any]] = []
+    duplicate_rows: list[dict[str, Any]] = []
+    duplicate_names: set[str] = set()
+    rows_read = 0
+    duplicates_skipped = 0
+    duplicates_included = 0
+    duplicates_replaced = 0
+
+    for source in resolved_sources:
+        path = Path(str(source.get("local_path") or source.get("path") or "")).expanduser()
+        if not path.is_file():
+            raise FileNotFoundError(f"Dataset not found: {path}")
+        source_rows = 0
+        source_duplicate_rows = 0
+        source_name = str(source.get("name") or path.name)
+        source_location = str(source.get("location") or path)
+        for source_row_number, raw_row in enumerate(_iter_dataset_rows(path), start=1):
+            rows_read += 1
+            source_rows += 1
+            row = dict(raw_row)
+            image_name = ensure_row_image_name(row) or row_image_name(row)
+            if not image_name:
+                output_rows.append(row)
+                continue
+            if image_name not in seen:
+                seen[image_name] = len(output_rows)
+                first_seen[image_name] = {
+                    "source": source_name,
+                    "location": source_location,
+                    "row_number": source_row_number,
+                    "failed": _row_failed(row),
+                }
+                output_rows.append(row)
+                continue
+
+            duplicate_names.add(image_name)
+            source_duplicate_rows += 1
+            original = first_seen.get(image_name, {})
+            duplicate_record = {
+                "image_name": image_name,
+                "source": source_name,
+                "location": source_location,
+                "row_number": source_row_number,
+                "first_source": original.get("source", ""),
+                "first_location": original.get("location", ""),
+                "first_row_number": original.get("row_number", ""),
+                "action": "",
+            }
+            if strategy == "provide_all":
+                duplicate_record["action"] = "included_duplicate"
+                output_rows.append(row)
+                duplicates_included += 1
+            else:
+                existing_index = seen[image_name]
+                existing_failed = _row_failed(output_rows[existing_index])
+                current_failed = _row_failed(row)
+                if existing_failed and not current_failed:
+                    output_rows[existing_index] = row
+                    first_seen[image_name] = {
+                        "source": source_name,
+                        "location": source_location,
+                        "row_number": source_row_number,
+                        "failed": False,
+                    }
+                    duplicate_record["action"] = "replaced_failed_duplicate"
+                    duplicates_replaced += 1
+                else:
+                    duplicate_record["action"] = "skipped_duplicate"
+                duplicates_skipped += 1
+            duplicate_rows.append(duplicate_record)
+        source_stats.append(
+            {
+                "name": source_name,
+                "source": source.get("source", ""),
+                "location": source_location,
+                "local_path": str(path),
+                "rows_read": source_rows,
+                "duplicate_rows": source_duplicate_rows,
+            }
+        )
+
+    with open(dataset_path, "w", encoding="utf-8") as handle:
+        for row in output_rows:
+            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+    manifest: dict[str, Any] = {
+        "schema_version": 1,
+        "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "dataset_name": output_name.strip(),
+        "final_dataset_name": final_slug,
+        "dataset_path": str(dataset_path),
+        "duplicate_strategy": strategy,
+        "source_count": len(source_stats),
+        "sources": source_stats,
+        "rows_read": rows_read,
+        "rows_written": len(output_rows),
+        "duplicates_detected": len(duplicate_rows),
+        "duplicate_image_count": len(duplicate_names),
+        "duplicates_skipped": duplicates_skipped,
+        "duplicates_included": duplicates_included,
+        "duplicates_replaced": duplicates_replaced,
+        "duplicate_image_names": sorted(duplicate_names),
+        "duplicate_rows": duplicate_rows,
+        "cloud_uri": "",
+        "manifest_cloud_uri": "",
+        "cloud_sync_error": "",
+    }
+
+    cloud_uri = ""
+    manifest_cloud_uri = ""
+    cloud_error = ""
+    if upload_to_cloud:
+        try:
+            cloud_uri = upload_dataset_to_cloud(
+                dataset_path,
+                dataset_name=final_slug,
+                bucket_name=bucket_name,
+                datasets_prefix=datasets_prefix,
+                metadata={
+                    "rows": len(output_rows),
+                    "row_count": len(output_rows),
+                    "source_count": len(source_stats),
+                    "duplicate_strategy": strategy,
+                    "duplicates_detected": len(duplicate_rows),
+                    "duplicates_skipped": duplicates_skipped,
+                    "duplicates_included": duplicates_included,
+                    "duplicates_replaced": duplicates_replaced,
+                    "combined": True,
+                },
+            )
+        except Exception as exc:  # noqa: BLE001
+            cloud_error = str(exc)
+    manifest["cloud_uri"] = cloud_uri
+    manifest["manifest_cloud_uri"] = manifest_cloud_uri
+    manifest["cloud_sync_error"] = cloud_error
+    manifest_path.write_text(
+        json.dumps(manifest, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    if upload_to_cloud and cloud_uri and not cloud_error:
+        try:
+            manifest_cloud_uri = upload_dataset_to_cloud(
+                manifest_path,
+                dataset_name=final_slug,
+                bucket_name=bucket_name,
+                datasets_prefix=datasets_prefix,
+                metadata={
+                    "kind": "dataset_manifest",
+                    "dataset_name": final_slug,
+                    "dataset_uri": cloud_uri,
+                    "rows": len(output_rows),
+                    "duplicates_detected": len(duplicate_rows),
+                },
+            )
+            manifest["manifest_cloud_uri"] = manifest_cloud_uri
+            manifest_path.write_text(
+                json.dumps(manifest, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+        except Exception as exc:  # noqa: BLE001
+            cloud_error = f"Dataset uploaded, but manifest upload failed: {exc}"
+            manifest["cloud_sync_error"] = cloud_error
+            manifest_path.write_text(
+                json.dumps(manifest, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+
+    return {
+        "dataset_name": final_slug,
+        "dataset_path": str(dataset_path),
+        "manifest_path": str(manifest_path),
+        "cloud_uri": cloud_uri,
+        "manifest_cloud_uri": manifest_cloud_uri,
+        "cloud_sync_error": cloud_error,
+        "row_count": len(output_rows),
+        "rows_read": rows_read,
+        "source_count": len(source_stats),
+        "duplicate_strategy": strategy,
+        "duplicates_detected": len(duplicate_rows),
+        "duplicate_image_count": len(duplicate_names),
+        "duplicates_skipped": duplicates_skipped,
+        "duplicates_included": duplicates_included,
+        "duplicates_replaced": duplicates_replaced,
+        "duplicate_image_names": sorted(duplicate_names)[:100],
+    }
 
 
 def _format_blob_updated(blob: object) -> str:

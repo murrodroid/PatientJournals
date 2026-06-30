@@ -82,9 +82,12 @@ const state = {
   tab: 'dashboard',
   jobs: [],
   datasets: [],
+  datasetItems: [],
   localInputs: [],
   cloudInputs: [],
   selectedDataset: '',
+  selectedDatasetKeys: new Set(),
+  datasetsIncludeCloud: false,
   selectedJobIds: new Set(),
   selectedCloudPrefixes: new Set(),
   selectedLocalPath: ''
@@ -280,23 +283,103 @@ async function jobAction(action) {
 }
 
 async function datasets() {
-  $('#main').innerHTML = `<h1>Datasets</h1><div class="sub">Canonical datasets from the app store and shared bucket.</div><div id="status" class="status">Loading...</div><div class="toolbar"><button class="btn" onclick="datasets()">Refresh Local</button><button class="btn secondary" onclick="loadCloudDatasets()">Load Shared</button></div><div id="datasetsBody"></div>`;
+  state.datasetsIncludeCloud = false;
+  $('#main').innerHTML = `<h1>Datasets</h1><div class="sub">Combine local and shared datasets into a named research dataset.</div><div id="status" class="status">Loading...</div>
+  <section class="panel">
+    <div class="toolbar"><button class="btn" onclick="datasets()">Refresh Local</button><button class="btn secondary" onclick="loadCloudDatasets()">Load Shared</button></div>
+    <label>New dataset name</label><input id="combinedDatasetName" placeholder="for example: journals_0618_complete">
+    <label>Duplicates</label><select id="datasetDuplicateStrategy"><option value="first_successful">One row per image, prefer first successful</option><option value="provide_all">Include all rows</option></select>
+    <div class="toolbar"><button class="btn" onclick="combineSelectedDatasets()">Combine selected</button></div>
+  </section>
+  <div id="datasetsBody"></div>`;
   try {
     const data = await api('/api/datasets');
-    state.datasets = data.local || [];
-    renderDatasets(state.datasets);
+    state.datasetItems = data.local || [];
+    state.datasets = state.datasetItems;
+    renderDatasets(state.datasetItems);
     setStatus(`${state.datasets.length} local dataset(s).`);
   } catch (e) { setStatus(e.message, true); }
 }
 async function loadCloudDatasets() {
   try {
+    state.datasetsIncludeCloud = true;
     const data = await api('/api/datasets?cloud=1');
-    renderDatasets([...(data.local || []), ...(data.cloud || [])]);
+    state.datasetItems = [...(data.local || []), ...(data.cloud || [])];
+    state.datasets = state.datasetItems;
+    renderDatasets(state.datasetItems);
     setStatus(`Loaded ${(data.cloud || []).length} shared dataset(s).`);
   } catch (e) { setStatus(e.message, true); }
 }
+function datasetKey(item) {
+  return item.gcs_uri || item.local_path || item.location || item.name || '';
+}
+function selectedDatasetItems() {
+  return state.datasetItems.filter(item => state.selectedDatasetKeys.has(datasetKey(item)));
+}
 function renderDatasets(items) {
-  $('#datasetsBody').innerHTML = table(['Source','Name','Rows','Updated','Run','Location'], items.map(d => [d.source, d.name, d.row_count ?? '', d.updated_at, d.run_id, d.location]));
+  state.selectedDatasetKeys = new Set([...state.selectedDatasetKeys].filter(key => items.some(item => datasetKey(item) === key)));
+  const allChecked = items.length > 0 && items.every(item => state.selectedDatasetKeys.has(datasetKey(item)));
+  const rows = items.map((d, i) => {
+    const key = datasetKey(d);
+    const checked = state.selectedDatasetKeys.has(key) ? 'checked' : '';
+    return `<tr class="clickable ${checked ? 'selected' : ''}" onclick="toggleDataset(${i})">
+      <td class="select-cell"><input type="checkbox" ${checked} onclick="event.stopPropagation(); toggleDataset(${i}, this.checked)"></td>
+      <td>${esc(d.source)}</td><td>${esc(d.name)}</td><td>${esc(d.row_count ?? '')}</td><td>${esc(d.updated_at)}</td><td>${esc(d.run_id)}</td><td class="mono">${esc(d.location)}</td>
+    </tr>`;
+  }).join('');
+  $('#datasetsBody').innerHTML = rawTable(
+    [`<th class="select-cell"><input type="checkbox" ${allChecked ? 'checked' : ''} onchange="toggleAllDatasets(this.checked)"></th>`, '<th>Source</th>', '<th>Name</th>', '<th>Rows</th>', '<th>Updated</th>', '<th>Run</th>', '<th>Location</th>'],
+    rows
+  );
+}
+function toggleDataset(index, checked=null) {
+  const item = state.datasetItems[index];
+  if (!item) return;
+  const key = datasetKey(item);
+  const next = checked === null ? !state.selectedDatasetKeys.has(key) : checked;
+  if (next) state.selectedDatasetKeys.add(key); else state.selectedDatasetKeys.delete(key);
+  renderDatasets(state.datasetItems);
+  setStatus(`${state.selectedDatasetKeys.size} dataset(s) selected.`);
+}
+function toggleAllDatasets(checked) {
+  state.selectedDatasetKeys = checked ? new Set(state.datasetItems.map(datasetKey).filter(Boolean)) : new Set();
+  renderDatasets(state.datasetItems);
+  setStatus(`${state.selectedDatasetKeys.size} dataset(s) selected.`);
+}
+async function refreshDatasetsAfterCombine(message) {
+  const data = await api(state.datasetsIncludeCloud ? '/api/datasets?cloud=1' : '/api/datasets');
+  state.datasetItems = state.datasetsIncludeCloud ? [...(data.local || []), ...(data.cloud || [])] : (data.local || []);
+  state.datasets = state.datasetItems;
+  renderDatasets(state.datasetItems);
+  setStatus(message);
+}
+async function combineSelectedDatasets() {
+  const items = selectedDatasetItems();
+  const outputName = ($('#combinedDatasetName')?.value || '').trim();
+  if (!items.length) return setStatus('Select at least one dataset to combine.', true);
+  if (!outputName) return setStatus('Enter a name for the combined dataset.', true);
+  setStatus('Combining datasets...');
+  try {
+    const result = await api('/api/datasets/combine', {
+      method:'POST',
+      body: JSON.stringify({
+        datasets: items.map(item => ({
+          source: item.source || '',
+          name: item.name || '',
+          location: item.location || '',
+          local_path: item.local_path || '',
+          gcs_uri: item.gcs_uri || '',
+          run_id: item.run_id || ''
+        })),
+        output_name: outputName,
+        duplicate_strategy: $('#datasetDuplicateStrategy')?.value || 'first_successful'
+      }),
+      headers:{'Content-Type':'application/json'}
+    });
+    state.selectedDatasetKeys = new Set();
+    const syncText = result.cloud_uri ? ` Shared: ${result.cloud_uri}` : (result.cloud_sync_error ? ` Cloud sync failed: ${result.cloud_sync_error}` : ' Shared sync skipped.');
+    await refreshDatasetsAfterCombine(`Created ${result.dataset_name} with ${result.row_count} row(s). Duplicates detected: ${result.duplicates_detected}. ${syncText}`);
+  } catch (e) { setStatus(e.message, true); }
 }
 
 async function submit() {
@@ -664,6 +747,19 @@ class AppHandler(BaseHTTPRequestHandler):
                 run_dir = str(payload.get("run_dir") or "")
                 count = int(payload.get("num_batches") or 1)
                 self._task("resubmit_failed", lambda: self.service.resubmit_failed(run_dir, num_batches=count), payload)
+            elif parsed.path == "/api/datasets/combine":
+                raw_items = payload.get("datasets") or ()
+                if not isinstance(raw_items, list):
+                    raise ValueError("datasets must be a list.")
+                self._send_json(
+                    self.service.combine_datasets(
+                        [item for item in raw_items if isinstance(item, dict)],
+                        output_name=str(payload.get("output_name") or ""),
+                        duplicate_strategy=str(
+                            payload.get("duplicate_strategy") or "first_successful"
+                        ),
+                    )
+                )
             elif parsed.path == "/api/validation/start":
                 self._task(
                     "validation",
