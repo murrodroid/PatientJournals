@@ -46,6 +46,7 @@ from patientjournals.shared.processing_metrics import (
 )
 from patientjournals.shared.response_parsing import extract_response_metadata
 from patientjournals.shared import run_layout
+from patientjournals.shared.identity import identity_columns
 from patientjournals.shared.tools import create_subfolder, flush_rows, get_run_logger
 
 
@@ -126,6 +127,15 @@ def _parse_args() -> argparse.Namespace:
             "For Gemini retrieval, send missing expected pages through the live API "
             "after partial batch output parsing. This is parallelized with "
             "config.api_concurrent_tasks."
+        ),
+    )
+    parser.add_argument(
+        "--ignore-failed",
+        dest="ignore_failed",
+        action="store_true",
+        help=(
+            "Write a dataset even when pages failed, adding one placeholder row "
+            "per failed image with failed=True and failure_reason set."
         ),
     )
     parser.add_argument(
@@ -319,6 +329,19 @@ def _record_failure(
     failure_key = key or f"<line:{line_number}>"
     if failure_key not in failures:
         failures[failure_key] = reason
+
+
+def _mark_success_rows(rows: list[dict]) -> None:
+    for row in rows:
+        row.setdefault("failed", False)
+        row.setdefault("failure_reason", "")
+
+
+def _failed_dataset_row(key: str, reason: str) -> dict[str, object]:
+    row: dict[str, object] = identity_columns(key)
+    row["failed"] = True
+    row["failure_reason"] = reason or "failed"
+    return row
 
 
 def _redact_error_text(text: str) -> str:
@@ -1722,6 +1745,7 @@ def retrieve_batch(args: argparse.Namespace | None = None) -> RetrieveBatchResul
     error_rows = 0
     duplicate_rows_skipped = 0
     recovered_pages = 0
+    failed_rows_included = 0
 
     output_keys_seen: set[str] = set()
     successful_page_keys: set[str] = set()
@@ -2095,6 +2119,7 @@ def retrieve_batch(args: argparse.Namespace | None = None) -> RetrieveBatchResul
                         "field_confidence_by_pointer"
                     ),
                 )
+                _mark_success_rows(rows)
                 add_response_metadata_columns(rows, metadata)
                 rows_to_flush.extend(rows)
                 append_processing_record(
@@ -2195,6 +2220,7 @@ def retrieve_batch(args: argparse.Namespace | None = None) -> RetrieveBatchResul
         successful_page_keys=successful_page_keys,
         failures=failures,
     )
+    ignore_failed = bool(getattr(args, "ignore_failed", False))
     if submit_failed_requested:
         if incomplete_batches:
             log(
@@ -2229,6 +2255,36 @@ def retrieve_batch(args: argparse.Namespace | None = None) -> RetrieveBatchResul
             )
             print("No failed keys detected; retry batch was not submitted.")
 
+    if ignore_failed and failed_retry_keys:
+        failed_rows = [
+            _failed_dataset_row(key, failed_retry_reasons.get(key, "failed"))
+            for key in sorted(failed_retry_keys)
+        ]
+        rows_to_flush.extend(failed_rows)
+        failed_rows_included = len(failed_rows)
+        for row in failed_rows:
+            append_processing_record(
+                manifest_path,
+                base_image_record(
+                    image_reference=str(row.get("file_name") or ""),
+                    source="batch_retrieve",
+                    status="failed_included",
+                    model=config.model,
+                    provider=provider,
+                    attempts=1,
+                    max_attempts=1,
+                    rows_written=1,
+                    failure_reason=str(row.get("failure_reason") or "failed"),
+                    extra={
+                        "ignore_failed": True,
+                    },
+                ),
+            )
+        log(
+            "Ignore-failed enabled: included "
+            f"{failed_rows_included} failed page placeholder row(s) in the dataset."
+        )
+
     try:
         if bool(getattr(args, "allow_partial", False)):
             log(
@@ -2243,10 +2299,12 @@ def retrieve_batch(args: argparse.Namespace | None = None) -> RetrieveBatchResul
             require_all_expected_pages=(
                 bool(config.require_all_expected_pages)
                 and not bool(getattr(args, "allow_partial", False))
+                and not ignore_failed
             ),
             require_all_pages_successful=(
                 bool(config.require_all_pages_successful)
                 and not bool(getattr(args, "allow_partial", False))
+                and not ignore_failed
             ),
             log=log,
         )
@@ -2279,7 +2337,7 @@ def retrieve_batch(args: argparse.Namespace | None = None) -> RetrieveBatchResul
         f"Retrieved {total_rows} processed row(s) from {len(batch_jobs)} completed "
         f"batch job(s) into {out_path.name} "
         f"(errors={error_rows}, duplicates_skipped={duplicate_rows_skipped}, "
-        f"recovered={recovered_pages})."
+        f"recovered={recovered_pages}, failed_included={failed_rows_included})."
     )
     summary_path = write_processing_summary(run_dir)
     log(f"Wrote image processing manifest: {manifest_path.name}")
@@ -2298,6 +2356,7 @@ def retrieve_batch(args: argparse.Namespace | None = None) -> RetrieveBatchResul
         successful_pages=len(successful_page_keys),
         duplicate_rows_skipped=duplicate_rows_skipped,
         recovered_pages=recovered_pages,
+        failed_rows_included=failed_rows_included,
         manifest_path=manifest_path,
         dataset_gcs_uri=dataset_gcs_uri,
     )

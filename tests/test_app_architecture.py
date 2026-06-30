@@ -19,6 +19,7 @@ from patientjournals.app.jobs import (
     batch_run_provider,
     build_retrieve_command,
     build_submit_command,
+    finalize_dataset_with_failed_rows,
     find_dataset_near,
     list_batch_chunks,
     list_submit_jobs,
@@ -27,6 +28,7 @@ from patientjournals.app.jobs import (
     read_run_error,
     record_batch_chunk_statuses,
     resolve_batch_run_readiness,
+    reusable_recorded_results,
     run_retrieve_direct,
 )
 from patientjournals.app.models import AppSettings, BatchChunkSummary, SubmitJobDraft
@@ -141,6 +143,7 @@ def test_retrieve_command_supports_selected_chunks_and_strategy() -> None:
         batch_names=("batch-a", "batch-b"),
         allow_partial=True,
         recover_missing_with_api=True,
+        ignore_failed=True,
     )
 
     assert command.args == (
@@ -152,6 +155,7 @@ def test_retrieve_command_supports_selected_chunks_and_strategy() -> None:
         "batch-b",
         "--allow-partial",
         "--recover-missing-with-api",
+        "--ignore-failed",
         "--duplicate-strategy",
         "provide_all",
     )
@@ -323,11 +327,18 @@ def test_dataset_library_lists_local_and_cloud_datasets(tmp_path, monkeypatch) -
     run_dir.mkdir(parents=True)
     dataset = run_dir / "20260618_094819_dataset.jsonl"
     dataset.write_text('{"image_name": "a.png"}\n{"image_name": "b.png"}\n', encoding="utf-8")
+    current = tmp_path / "runs" / "jobs" / "20260618_094819" / "datasets" / "current.jsonl"
+    current.parent.mkdir(parents=True)
+    current.write_text(
+        '{"image_name": "a.png"}\n{"image_name": "b.png"}\n{"image_name": "c.png"}\n',
+        encoding="utf-8",
+    )
 
     local_items = app_datasets.list_local_dataset_library(tmp_path / "runs")
 
     assert len(local_items) == 1
-    assert local_items[0].row_count == 2
+    assert local_items[0].local_path == str(current)
+    assert local_items[0].row_count == 3
     assert local_items[0].run_id == "20260618_094819"
 
     class Blob:
@@ -679,6 +690,202 @@ def test_run_retrieve_direct_reuses_job_store_cache(tmp_path, monkeypatch) -> No
 
     assert result["dataset_path"] == cached["dataset_path"]
     assert result["successful_pages"] == 1
+
+
+def test_reusable_recorded_results_survives_retry_submitted_state(tmp_path) -> None:
+    run_dir = _write_submit_run(
+        tmp_path,
+        "submit_20260101_000000",
+        batch_meta={
+            "model": "gemini-3.1-pro-preview",
+            "provider": "gemini",
+            "request_count": 2,
+            "batch_jobs": [
+                {"chunk_index": 1, "total_chunks": 1, "batch_job_name": "b1", "request_count": 2}
+            ],
+        },
+    )
+    dataset = run_dir / "dataset.jsonl"
+    dataset.write_text('{"image_name": "a.png"}\n', encoding="utf-8")
+    store = JobStore(tmp_path)
+    signature = store.build_retrieval_signature(
+        run_dir,
+        allow_partial=True,
+        duplicate_strategy="first_successful",
+    )
+    cached = store.record_retrieval(
+        run_dir,
+        {
+            "retrieved_at": "2026-01-01T00:00:00",
+            "dataset_path": str(dataset),
+            "provider": "gemini",
+            "batch_count": 1,
+            "rows_written": 1,
+            "error_rows": 1,
+            "expected_pages": 2,
+            "observed_pages": 2,
+            "successful_pages": 1,
+            "recovered_pages": 0,
+            "missing_pages": 1,
+        },
+        signature=signature,
+        operation="retrieve",
+    )
+    store.mark_retry_submitted(run_dir)
+
+    result = reusable_recorded_results(run_dir)
+
+    assert result["dataset_path"] == cached["dataset_path"]
+    assert result["missing_pages"] == 1
+    assert Path(result["dataset_path"]).is_file()
+
+
+def test_find_dataset_near_prefers_job_store_current_dataset(tmp_path) -> None:
+    run_dir = _write_submit_run(
+        tmp_path,
+        "submit_20260101_000000",
+        batch_meta={
+            "model": "gemini-3.1-pro-preview",
+            "provider": "gemini",
+            "request_count": 1,
+            "batch_jobs": [
+                {"chunk_index": 1, "total_chunks": 1, "batch_job_name": "b1", "request_count": 1}
+            ],
+        },
+    )
+    legacy = run_dir / "submit_20260101_000000_dataset.jsonl"
+    legacy.write_text('{"image_name": "legacy.png"}\n', encoding="utf-8")
+    source = run_dir / "dataset.jsonl"
+    source.write_text('{"image_name": "current.png"}\n', encoding="utf-8")
+    store = JobStore(tmp_path)
+    current = store.record_retrieval(
+        run_dir,
+        {
+            "retrieved_at": "2026-01-01T00:00:00",
+            "dataset_path": str(source),
+            "provider": "gemini",
+            "batch_count": 1,
+            "rows_written": 1,
+            "error_rows": 0,
+            "expected_pages": 1,
+            "observed_pages": 1,
+            "successful_pages": 1,
+            "recovered_pages": 0,
+            "missing_pages": 0,
+        },
+        signature=store.build_retrieval_signature(
+            run_dir,
+            allow_partial=True,
+            duplicate_strategy="first_successful",
+        ),
+        operation="retrieve",
+    )["dataset_path"]
+
+    assert find_dataset_near(run_dir) == current
+    assert find_dataset_near(run_dir / "gone.jsonl") == current
+    assert find_dataset_near(legacy) == str(legacy)
+
+
+def test_finalize_dataset_with_failed_rows_completes_current_dataset(tmp_path) -> None:
+    run_dir = _write_submit_run(
+        tmp_path,
+        "submit_20260101_000000",
+        batch_meta={
+            "model": "gemini-3.1-pro-preview",
+            "provider": "gemini",
+            "request_count": 2,
+            "batch_jobs": [
+                {
+                    "chunk_index": 1,
+                    "total_chunks": 1,
+                    "batch_job_name": "b1",
+                    "requests_file": "batch_requests.jsonl",
+                    "request_count": 2,
+                }
+            ],
+        },
+        results={
+            "retrieved_at": "2026-01-01T00:00:00",
+            "dataset_path": str(tmp_path / "submit_20260101_000000" / "dataset.jsonl"),
+            "provider": "gemini",
+            "batch_count": 1,
+            "rows_written": 1,
+            "error_rows": 1,
+            "expected_pages": 2,
+            "observed_pages": 2,
+            "successful_pages": 1,
+            "recovered_pages": 0,
+            "failed_rows_included": 0,
+            "missing_pages": 1,
+            "ignore_failed": False,
+        },
+    )
+    (run_dir / "batch_requests.jsonl").write_text(
+        "\n".join(
+            [
+                json.dumps({"key": "pages/a.png"}),
+                json.dumps({"key": "pages/b.png"}),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "dataset.jsonl").write_text(
+        json.dumps({"image_name": "a.png", "file_name": "pages/a.png"}) + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "image_processing_manifest.jsonl").write_text(
+        json.dumps(
+            {
+                "image_reference": "pages/b.png",
+                "image_name": "b.png",
+                "status": "failed",
+                "failure_reason": "schema_validation_failed",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = finalize_dataset_with_failed_rows(run_dir, AppSettings())
+
+    assert result["rows_written"] == 2
+    assert result["successful_pages"] == 1
+    assert result["failed_rows_included"] == 1
+    assert result["missing_pages"] == 0
+    assert result["ignore_failed"] is True
+    job = list_submit_jobs(tmp_path)[0]
+    assert job.status == "retrieved"
+    assert job.failed == 0
+    assert job.failed_included == 1
+    current_path = Path(result["dataset_path"])
+    assert "jobs/submit_20260101_000000/datasets/current.jsonl" in str(current_path)
+    rows = [
+        json.loads(line)
+        for line in current_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert rows == [
+        {
+            "image_name": "a.png",
+            "file_name": "pages/a.png",
+            "failed": False,
+            "failure_reason": "",
+        },
+        {
+            "image_name": "b.png",
+            "file_name": "pages/b.png",
+            "failed": True,
+            "failure_reason": "schema_validation_failed",
+        },
+    ]
+    recorded = json.loads((run_dir / "batch_results.json").read_text(encoding="utf-8"))
+    assert recorded["missing_pages"] == 0
+    assert JobStore(tmp_path).read("submit_20260101_000000")["status"] == "retrieved_complete"
+    JobStore(tmp_path).mark_retry_submitted(run_dir)
+    reopened = reusable_recorded_results(run_dir, ignore_failed=True)
+    assert reopened["dataset_path"] == str(current_path)
+    assert reopened["ignore_failed"] is True
+    assert reopened["failed_rows_included"] == 1
 
 
 def test_list_submit_jobs_groups_failed_retry_submissions(tmp_path) -> None:

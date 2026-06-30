@@ -19,6 +19,7 @@ def write_validation_metadata(
     dataset_path: str | Path,
     validator_id: str,
     decision_count: int,
+    sampling_mode: str = "",
 ) -> Path:
     run_path = Path(run_dir).expanduser()
     dataset = Path(dataset_path).expanduser()
@@ -26,6 +27,7 @@ def write_validation_metadata(
     metadata = {
         "run_id": run_path.name,
         "validator_id": validator_id,
+        "sampling_mode": sampling_mode,
         "dataset_file": dataset.name,
         "dataset_path": str(dataset),
         "validation_file": csv_file.name,

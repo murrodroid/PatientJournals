@@ -33,5 +33,6 @@ class RetrieveBatchResult:
     successful_pages: int
     duplicate_rows_skipped: int = 0
     recovered_pages: int = 0
+    failed_rows_included: int = 0
     manifest_path: Path | None = None
     dataset_gcs_uri: str = ""

@@ -1,25 +1,47 @@
 import argparse
 import csv
 import json
+import math
 import random
 import secrets
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from tkinter import Tk, Label, Button, StringVar, messagebox, Frame, Canvas, Scrollbar, Entry
-from typing import get_args, get_origin
+from typing import Literal, get_args, get_origin
 
 import pandas as pd
 from PIL import Image, ImageTk
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
+from patientjournals.config import config
 from patientjournals.config.schemas import FrontPage
+from patientjournals.shared.field_classification import is_metadata_field as is_support_field
 from patientjournals.shared.identity import row_image_name
 from patientjournals.validation.sync import (
     upload_validation_run,
     write_validation_metadata,
 )
 
-_COLUMNS_NOT_INCLUDED = ['generation_seconds','image_name','file_name']
+SamplingMode = Literal["random", "balanced_ucb"]
+
+_SCORE_BY_LABEL = {
+    "accept": 1.0,
+    "somewhat_accept": 0.5,
+    "reject": 0.0,
+    "corrected": 0.0,
+}
+_BALANCED_UCB_LAMBDA = 0.5
+_BALANCED_UCB_GAMMA = 0.25
+
+
+@dataclass(frozen=True)
+class ValidationDatapoint:
+    row: dict
+    image_path: Path
+    image_name: str
+    field_name: str
+    field_value: object
 
 def build_image_index(root_dir: Path) -> dict[str, Path]:
     index: dict[str, Path] = {}
@@ -54,20 +76,109 @@ def flatten_row(row: dict) -> dict:
     return flat[0] if flat else {}
 
 
-def pick_flat_field(row: dict, rng: random.Random) -> tuple[str, object] | None:
+def eligible_flat_fields(row: dict) -> list[tuple[str, object]]:
     flat = flatten_row(row)
-    candidates = []
+    candidates: list[tuple[str, object]] = []
     for key, value in flat.items():
-        if key in _COLUMNS_NOT_INCLUDED:
+        if not _is_validation_schema_field(key):
             continue
         if value is None or (isinstance(value, float) and pd.isna(value)):
             continue
         if isinstance(value, (dict, list)):
             continue
         candidates.append((key, value))
-    if not candidates:
+    return candidates
+
+
+def pick_flat_field(row: dict, rng: random.Random) -> tuple[str, object] | None:
+    candidates = eligible_flat_fields(row)
+    return rng.choice(candidates) if candidates else None
+
+
+def build_validation_datapoints(
+    rows: list[dict],
+    image_index: dict[str, Path],
+) -> list[ValidationDatapoint]:
+    datapoints: list[ValidationDatapoint] = []
+    for row in rows:
+        image_name = display_image_name(row)
+        if not image_name:
+            continue
+        image_path = image_index.get(image_name)
+        if image_path is None:
+            continue
+        for field_name, field_value in eligible_flat_fields(row):
+            datapoints.append(
+                ValidationDatapoint(
+                    row=row,
+                    image_path=image_path,
+                    image_name=image_name,
+                    field_name=field_name,
+                    field_value=field_value,
+                )
+            )
+    return datapoints
+
+
+def _score_for_label(label: str) -> float | None:
+    return _SCORE_BY_LABEL.get(label)
+
+
+def choose_random_datapoint(
+    datapoints: list[ValidationDatapoint],
+    validated_pairs: set[tuple[str, str]],
+    rng: random.Random,
+) -> ValidationDatapoint | None:
+    remaining = [
+        item
+        for item in datapoints
+        if (item.image_name, item.field_name) not in validated_pairs
+    ]
+    return rng.choice(remaining) if remaining else None
+
+
+def choose_balanced_ucb_datapoint(
+    datapoints: list[ValidationDatapoint],
+    validated_pairs: set[tuple[str, str]],
+    selection_counts: dict[str, int],
+    scored_counts: dict[str, int],
+    score_sums: dict[str, float],
+    rng: random.Random,
+    *,
+    target_lambda: float = _BALANCED_UCB_LAMBDA,
+    gamma: float = _BALANCED_UCB_GAMMA,
+) -> ValidationDatapoint | None:
+    remaining_by_field: dict[str, list[ValidationDatapoint]] = {}
+    total_by_field: dict[str, int] = {}
+    for item in datapoints:
+        total_by_field[item.field_name] = total_by_field.get(item.field_name, 0) + 1
+        if (item.image_name, item.field_name) not in validated_pairs:
+            remaining_by_field.setdefault(item.field_name, []).append(item)
+    if not remaining_by_field:
         return None
-    return rng.choice(candidates)
+
+    total_datapoints = max(1, len(datapoints))
+    group_count = max(1, len(total_by_field))
+    t = sum(selection_counts.values())
+    denominator = max(t, 1)
+    log_term = math.log(max(t, 2))
+    scored_groups = []
+    for field_name in remaining_by_field:
+        n_g = selection_counts.get(field_name, 0)
+        m_g = scored_counts.get(field_name, 0)
+        # Smoothed field accuracy is kept for diagnostics and future reporting;
+        # selection uses coverage deficit plus uncertainty, not reward maximization.
+        _p_hat_g = (score_sums.get(field_name, 0.0) + 1.0) / (m_g + 2.0)
+        q_g = (1.0 - target_lambda) * (1.0 / group_count) + target_lambda * (
+            total_by_field[field_name] / total_datapoints
+        )
+        deficit = q_g - (n_g / denominator)
+        uncertainty = math.sqrt((2.0 * log_term) / (m_g + 1.0))
+        score = deficit + gamma * uncertainty
+        scored_groups.append((score, rng.random(), field_name))
+
+    _score, _tie_breaker, selected_field = max(scored_groups)
+    return rng.choice(remaining_by_field[selected_field])
 
 def _stringify_value(value: object) -> str:
     if value is None:
@@ -85,8 +196,24 @@ def _unwrap_optional(field_type: object) -> object:
     args = [arg for arg in get_args(field_type) if arg is not type(None)]
     return args[0] if len(args) == 1 else field_type
 
+
+def _schema_model() -> type[BaseModel]:
+    candidate = getattr(config, "output_model", None)
+    if isinstance(candidate, type) and hasattr(candidate, "model_fields"):
+        return candidate
+    return FrontPage
+
+
+def _is_metadata_field(path: str) -> bool:
+    return is_support_field(path)
+
+
+def _is_validation_schema_field(path: str) -> bool:
+    return not _is_metadata_field(path) and _get_field_type(path) is not None
+
+
 def _get_field_type(path: str) -> object | None:
-    current = FrontPage
+    current = _schema_model()
     field_type: object | None = None
     for part in path.split("."):
         if not hasattr(current, "model_fields"):
@@ -132,21 +259,34 @@ def display_image_name(row: dict) -> str:
 
 
 class ValidatorApp:
-    def __init__(self, dataset_path: Path, image_root: Path, username: str, allow_corrections: bool):
+    def __init__(
+        self,
+        dataset_path: Path,
+        image_root: Path,
+        username: str,
+        allow_corrections: bool,
+        sampling_mode: SamplingMode = "random",
+    ):
         self.dataset_path = dataset_path
         self.image_root = image_root
         self.username = username
         self.allow_corrections = allow_corrections
+        self.sampling_mode = sampling_mode
         self.seed = secrets.randbits(64)
         self.rng = random.Random(self.seed)
         self.rows = load_dataset(dataset_path)
         self.image_index = build_image_index(image_root)
+        self.datapoints = build_validation_datapoints(self.rows, self.image_index)
         self.results: list[dict] = []
         self.validated_pairs: set[tuple[str, str]] = set()
-        self.total_pairs = self._count_total_pairs()
+        self.selection_counts: dict[str, int] = {}
+        self.scored_counts: dict[str, int] = {}
+        self.score_sums: dict[str, float] = {}
+        self.total_pairs = len(self.datapoints)
         self.current_row = None
         self.current_field = None
         self.current_image = None
+        self.current_datapoint: ValidationDatapoint | None = None
         self.run_dir = self._create_run_dir()
         self.log_path = self.run_dir / "validation.log"
 
@@ -319,25 +459,8 @@ class ValidatorApp:
             self.on_exit()
             return
 
-        self.log(f"Started validation. Seed={self.seed}")
+        self.log(f"Started validation. Seed={self.seed} SamplingMode={self.sampling_mode}")
         self.next_sample()
-
-    def _count_total_pairs(self) -> int:
-        total = 0
-        for row in self.rows:
-            file_name = display_image_name(row)
-            if not file_name:
-                continue
-            flat = flatten_row(row)
-            for key, value in flat.items():
-                if key in _COLUMNS_NOT_INCLUDED:
-                    continue
-                if value is None or (isinstance(value, float) and pd.isna(value)):
-                    continue
-                if isinstance(value, (dict, list)):
-                    continue
-                total += 1
-        return total
 
     def _set_window_size(self) -> None:
         try:
@@ -422,28 +545,37 @@ class ValidatorApp:
             handle.write(line)
 
     def next_sample(self):
-        for _ in range(1000):
-            row = self.rng.choice(self.rows)
-            image_path = resolve_image_path(row, self.image_index)
-            field = pick_flat_field(row, self.rng)
-            if image_path and field:
-                file_name = display_image_name(row)
-                pair = (file_name, field[0])
-                if pair in self.validated_pairs:
-                    continue
-                self.current_row = row
-                self.current_image = image_path
-                self.current_field = field
-                self.show_sample()
-                return
+        datapoint = self._choose_next_datapoint()
+        if datapoint is not None:
+            self.current_datapoint = datapoint
+            self.current_row = datapoint.row
+            self.current_image = datapoint.image_path
+            self.current_field = (datapoint.field_name, datapoint.field_value)
+            self.selection_counts[datapoint.field_name] = (
+                self.selection_counts.get(datapoint.field_name, 0) + 1
+            )
+            self.show_sample()
+            return
         if len(self.validated_pairs) >= self.total_pairs:
             print("All datapoints have been validated.")
             self.log("All datapoints have been validated.")
             self.on_exit()
             return
         messagebox.showerror("No valid samples", "Unable to find a valid sample.")
-        self.log("No valid samples found after 1000 attempts.")
+        self.log("No valid samples found.")
         self.on_exit()
+
+    def _choose_next_datapoint(self) -> ValidationDatapoint | None:
+        if self.sampling_mode == "balanced_ucb":
+            return choose_balanced_ucb_datapoint(
+                self.datapoints,
+                self.validated_pairs,
+                self.selection_counts,
+                self.scored_counts,
+                self.score_sums,
+                self.rng,
+            )
+        return choose_random_datapoint(self.datapoints, self.validated_pairs, self.rng)
 
     def show_sample(self):
         self.original_image = Image.open(self.current_image)
@@ -519,9 +651,14 @@ class ValidatorApp:
                 "validator_id": self.username,
                 "decided_at": decided_at,
                 "corrected_field": corrected_field,
+                "sampling_mode": self.sampling_mode,
             }
         )
         self.validated_pairs.add((file_name, field_name))
+        score = _score_for_label(label)
+        if score is not None:
+            self.scored_counts[field_name] = self.scored_counts.get(field_name, 0) + 1
+            self.score_sums[field_name] = self.score_sums.get(field_name, 0.0) + score
         self.log(f"Marked {file_name} {field_name} label={label}")
         self.next_sample()
 
@@ -562,6 +699,7 @@ class ValidatorApp:
                     "validator_id",
                     "decided_at",
                     "corrected_field",
+                    "sampling_mode",
                 ],
             )
             writer.writeheader()
@@ -572,6 +710,7 @@ class ValidatorApp:
             dataset_path=self.dataset_path,
             validator_id=self.username,
             decision_count=len(self.results),
+            sampling_mode=self.sampling_mode,
         )
         try:
             uploaded = upload_validation_run(
@@ -595,6 +734,12 @@ def main():
     parser.add_argument("--images", required=True, help="Root folder containing images")
     parser.add_argument("--results", required=True, help="Path to dataset file (.csv or .jsonl)")
     parser.add_argument("--corrections", action="store_true", help="Enable correction editing")
+    parser.add_argument(
+        "--sampling-mode",
+        choices=("random", "balanced_ucb"),
+        default="random",
+        help="Datapoint sampling strategy for validation.",
+    )
     args = parser.parse_args()
 
     username = args.username.strip()
@@ -609,7 +754,13 @@ def main():
     if not image_root.exists() or not image_root.is_dir():
         raise SystemExit(f"Data folder not found or not a directory: {image_root}")
 
-    app = ValidatorApp(dataset_path, image_root, username=username, allow_corrections=args.corrections)
+    app = ValidatorApp(
+        dataset_path,
+        image_root,
+        username=username,
+        allow_corrections=args.corrections,
+        sampling_mode=args.sampling_mode,
+    )
     app.root.mainloop()
 
 

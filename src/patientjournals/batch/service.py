@@ -123,6 +123,7 @@ class BatchRetrieveRequest:
     submit_failed: bool = False
     failed_retry_num_batches: int | None = None
     recover_missing_with_api: bool = False
+    ignore_failed: bool = False
     duplicate_strategy: str | None = None
 
     def to_namespace(self) -> argparse.Namespace:
@@ -138,6 +139,7 @@ class BatchRetrieveRequest:
             submit_failed=self.submit_failed,
             failed_retry_num_batches=self.failed_retry_num_batches,
             recover_missing_with_api=self.recover_missing_with_api,
+            ignore_failed=self.ignore_failed,
             duplicate_strategy=self.duplicate_strategy,
         )
 

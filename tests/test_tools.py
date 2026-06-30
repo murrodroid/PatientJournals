@@ -5,6 +5,7 @@ import pandas as pd
 from patientjournals.shared.tools import (
     build_image_name_id_set,
     filter_dataset_by_input_ids,
+    flush_rows,
     list_input_files,
     load_existing_dataset,
 )
@@ -92,6 +93,52 @@ def test_load_existing_dataset_csv(tmp_path) -> None:
     assert fmt == "csv"
     assert files == {"a.png", "b.png"}
     assert row_count == 2
+
+
+def test_flush_rows_aligns_appended_csv_rows_to_existing_header(tmp_path) -> None:
+    path = tmp_path / "dataset.csv"
+
+    header_written = flush_rows(
+        [
+            {
+                "image_name": "a.png",
+                "file_name": "pages/a.png",
+                "value": "ok",
+                "failed": False,
+                "failure_reason": "",
+            }
+        ],
+        str(path),
+        header_written=False,
+        output_format="csv",
+    )
+    assert header_written is True
+
+    flush_rows(
+        [
+            {
+                "image_name": "b.png",
+                "file_name": "pages/b.png",
+                "failed": True,
+                "failure_reason": "schema_validation_failed",
+            }
+        ],
+        str(path),
+        header_written=True,
+        output_format="csv",
+    )
+
+    frame = pd.read_csv(path, sep="$")
+    assert list(frame.columns) == [
+        "image_name",
+        "file_name",
+        "value",
+        "failed",
+        "failure_reason",
+    ]
+    assert frame.loc[1, "image_name"] == "b.png"
+    assert bool(frame.loc[1, "failed"]) is True
+    assert frame.loc[1, "failure_reason"] == "schema_validation_failed"
 
 
 def test_build_image_name_id_set_uses_basename_identity(tmp_path) -> None:

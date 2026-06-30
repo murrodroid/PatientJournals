@@ -26,6 +26,7 @@ def test_batch_retrieve_request_namespace() -> None:
         wait=True,
         allow_partial=True,
         recover_missing_with_api=True,
+        ignore_failed=True,
         duplicate_strategy="provide_all",
     ).to_namespace()
 
@@ -35,6 +36,7 @@ def test_batch_retrieve_request_namespace() -> None:
     assert namespace.wait is True
     assert namespace.allow_partial is True
     assert namespace.recover_missing_with_api is True
+    assert namespace.ignore_failed is True
     assert namespace.duplicate_strategy == "provide_all"
 
 

@@ -30,6 +30,7 @@ from patientjournals.app.jobs import (
     build_submit_command,
     build_validation_command,
     cancel_batch_run,
+    finalize_dataset_with_failed_rows,
     find_dataset_near,
     recover_dataset_gaps,
     list_batch_chunks,
@@ -38,12 +39,12 @@ from patientjournals.app.jobs import (
     local_image_names,
     poll_local_batch_states,
     read_dataset_preview,
-    read_recorded_results,
     read_run_error,
     repair_all_missing_recorded_results,
     repair_retry_metadata_links,
     resubmit_failed_requests,
     resolve_batch_run_readiness,
+    reusable_recorded_results,
     run_batch_draft_direct,
     run_batch_rerun_direct,
     run_local_draft_direct,
@@ -1880,6 +1881,7 @@ class PatientJournalsApp:
         *,
         on_change=None,
         recover_missing: bool = False,
+        ignore_failed: bool = False,
         duplicate_strategy: str = "",
     ) -> None:
         """Retrieve a job's outputs, show a summary + sample, then let the user
@@ -1900,7 +1902,7 @@ class PatientJournalsApp:
         ).pack(anchor="w")
         ttk.Label(header, text=job.input_location, style="Muted.TLabel").pack(anchor="w")
 
-        state_var = tk.StringVar(value="Retrieving batch outputs…")
+        state_var = tk.StringVar(value="Loading saved results…")
         ttk.Label(win, textvariable=state_var, style="Muted.TLabel").pack(
             anchor="w", padx=18
         )
@@ -1946,6 +1948,17 @@ class PatientJournalsApp:
         self._help_icon(
             failure_action_buttons,
             "Uses the Gemini API key now and appends recovered rows to the same dataset.",
+        ).pack(side="left", padx=(6, 14))
+        finalize_failed_button = self._button(
+            failure_action_buttons,
+            "Finalize with failed rows",
+            lambda: finalize_failed_rows(),
+            kind="secondary",
+        )
+        finalize_failed_button.pack(side="left")
+        self._help_icon(
+            failure_action_buttons,
+            "Keeps the dataset and adds one row per unresolved image with failed=True.",
         ).pack(side="left", padx=(6, 14))
         batch_resubmit_button = self._button(
             failure_action_buttons,
@@ -2023,6 +2036,7 @@ class PatientJournalsApp:
             failure_actions.pack_forget()
             state["api_action_allowed"] = False
             api_recover_button.configure(state="disabled")
+            finalize_failed_button.configure(state="disabled")
             batch_resubmit_button.configure(state="disabled")
 
         def set_failure_action_busy(busy: bool) -> None:
@@ -2035,6 +2049,13 @@ class PatientJournalsApp:
                 else "disabled"
             )
             batch_resubmit_button.configure(state="disabled" if busy else "normal")
+            finalize_failed_button.configure(
+                state=(
+                    "normal"
+                    if not busy and state.get("mode") == "request"
+                    else "disabled"
+                )
+            )
             api_recover_button.configure(state=api_state)
             retry_chunk_spinbox.configure(
                 state=(
@@ -2063,6 +2084,7 @@ class PatientJournalsApp:
                     f"No rows were retrieved. Resubmit the job to try again."
                 )
                 api_recover_button.configure(state="disabled")
+                finalize_failed_button.configure(state="disabled")
                 batch_resubmit_button.configure(text="Resubmit job", state="normal")
                 retry_chunk_spinbox.configure(state="disabled")
             else:
@@ -2080,6 +2102,7 @@ class PatientJournalsApp:
                     text="Retrieve with API",
                     state="normal" if state["api_action_allowed"] else "disabled",
                 )
+                finalize_failed_button.configure(state="normal")
                 batch_resubmit_button.configure(text="Resubmit as batch", state="normal")
                 retry_chunk_spinbox.configure(state="normal")
             if not failure_actions.winfo_ismapped():
@@ -2148,14 +2171,28 @@ class PatientJournalsApp:
                 state["failed"] = missing
                 state["mode"] = "request"
                 populate_preview(columns, rows)
+                loaded_saved = bool(payload.get("_loaded_from_saved_results"))
                 if rows:
-                    state_var.set(
-                        "Review the sample below, then keep the results or rerun "
-                        "what failed."
-                    )
+                    if loaded_saved and missing > 0 and job.status == "retry_submitted":
+                        state_var.set(
+                            "Showing the saved partial dataset. Use Re-retrieve after "
+                            "retry chunks succeed to pull newer outputs, or handle "
+                            "the remaining pages below."
+                        )
+                    elif loaded_saved:
+                        state_var.set(
+                            "Showing the saved dataset. Use Re-retrieve only when "
+                            "you need to pull batch outputs again."
+                        )
+                    else:
+                        state_var.set(
+                            "Review the sample below, then keep the results or rerun "
+                            "what failed."
+                        )
                 else:
+                    verb = "Loaded" if loaded_saved else "Retrieved"
                     state_var.set(
-                        f"Retrieved {succeeded} row(s), but no preview rows could be "
+                        f"{verb} {succeeded} row(s), but no preview rows could be "
                         "read from the dataset (see path below)."
                     )
                 path_var.set(f"Dataset: {state['dataset'] or '(none written)'}")
@@ -2299,17 +2336,15 @@ class PatientJournalsApp:
             import traceback
 
             try:
-                # Fast path: if this job was already retrieved and its dataset is
-                # still on disk, show it directly instead of re-running a full
-                # (slow, networked) retrieve.
                 payload: dict | None = None
-                if not force_retrieve and job.status != "retry_submitted":
-                    recorded = read_recorded_results(job.run_dir)
-                    if recorded:
-                        existing = find_dataset_near(recorded.get("dataset_path") or "")
-                        if existing:
-                            payload = dict(recorded)
-                            payload["dataset_path"] = existing
+                if not force_retrieve:
+                    payload = reusable_recorded_results(
+                        job.run_dir,
+                        ignore_failed=ignore_failed,
+                        recover_missing_with_api=recover_missing,
+                    )
+                    if payload:
+                        payload["_loaded_from_saved_results"] = True
 
                 if payload is None:
                     readiness = resolve_batch_run_readiness(job.run_dir)
@@ -2322,13 +2357,17 @@ class PatientJournalsApp:
                         self.root.after(0, lambda: show_not_ready(message))
                         return
                     self.root.after(
-                        0, lambda: state_var.set("Retrieving batch outputs… (this can take a while)")
+                        0,
+                        lambda: state_var.set(
+                            "Retrieving batch outputs… (this can take a while)"
+                        ),
                     )
                     payload = run_retrieve_direct(
                         job.run_dir,
                         self.settings,
                         allow_partial=True,
                         recover_missing_with_api=recover_missing,
+                        ignore_failed=ignore_failed,
                         duplicate_strategy=duplicate_strategy,
                         force=force_retrieve,
                     )
@@ -2360,6 +2399,49 @@ class PatientJournalsApp:
             win.destroy()
             if on_change:
                 on_change(f"Kept results for {job.job_id}.")
+
+        def finalize_failed_rows() -> None:
+            if not state.get("failed"):
+                return
+            if state.get("mode") != "request":
+                return
+            set_failure_action_busy(True)
+            state_var.set(
+                f"Finalizing {state['failed']} failed page(s) into the dataset..."
+            )
+
+            def worker() -> None:
+                try:
+                    payload = finalize_dataset_with_failed_rows(
+                        job.run_dir,
+                        self.settings,
+                    )
+                    dataset_path = find_dataset_near(payload.get("dataset_path") or "")
+                    columns, rows = read_dataset_preview(dataset_path, limit=25)
+                    local = read_run_error(job.run_dir)
+                except Exception as exc:  # noqa: BLE001
+                    message = str(exc)
+
+                    def on_err() -> None:
+                        messagebox.showerror("Finalize failed", message, parent=win)
+                        set_failure_action_busy(False)
+
+                    self.root.after(0, on_err)
+                    return
+
+                def done() -> None:
+                    self._live_batch_status.pop(job.run_dir, None)
+                    finish(payload, dataset_path, columns, rows, local)
+                    state_var.set(
+                        "Dataset finalized with failed row(s). "
+                        "Failed images are marked with failed=True."
+                    )
+                    if on_change:
+                        on_change(f"Finalized failed rows for {job.job_id}.")
+
+                self.root.after(0, done)
+
+            threading.Thread(target=worker, daemon=True).start()
 
         def rerun(method: str = "batch") -> None:
             if not state.get("failed"):
@@ -2558,6 +2640,7 @@ class PatientJournalsApp:
 
         status_var = tk.StringVar(value="")
         duplicate_strategy_var = tk.StringVar(value=self.settings.batch_duplicate_strategy)
+        ignore_failed_var = tk.BooleanVar(value=False)
         ttk.Label(footer, textvariable=status_var, style="Muted.TLabel").pack(
             side="bottom", anchor="w", pady=(8, 0)
         )
@@ -2603,6 +2686,11 @@ class PatientJournalsApp:
                 success_text = f"{job.succeeded} succeeded"
                 if getattr(job, "recovered", 0):
                     success_text += f" ({job.recovered} recovered with API)"
+                if getattr(job, "failed_included", 0):
+                    success_text += f", {job.failed_included} marked failed"
+            failed_text = ""
+            if job.failed is not None:
+                failed_text = str(job.failed)
             return (
                 job.created_at,
                 job.model,
@@ -2610,7 +2698,7 @@ class PatientJournalsApp:
                 job.image_count,
                 display_status(effective_status(job)),
                 success_text,
-                "" if job.failed is None else str(job.failed),
+                failed_text,
             )
 
         def insert_jobs(jobs, *, quiet: bool = False) -> None:
@@ -2752,7 +2840,7 @@ class PatientJournalsApp:
                 status_var.set("Select a batch job to view results.")
                 return
             state = effective_status(job)
-            needs_ready_check = (not job.retrieved) or job.status == "retry_submitted"
+            needs_ready_check = not job.retrieved
             if needs_ready_check:
                 if state not in {"succeeded", "failed"}:
                     if job.status == "retry_submitted":
@@ -2772,6 +2860,7 @@ class PatientJournalsApp:
                 job,
                 on_change=after_results,
                 recover_missing=False,
+                ignore_failed=ignore_failed_var.get(),
                 duplicate_strategy=duplicate_strategy_var.get(),
             )
 
@@ -2867,6 +2956,11 @@ class PatientJournalsApp:
             state="readonly",
             width=18,
         ).grid(row=0, column=1, sticky="w", padx=(14, 0))
+        ttk.Checkbutton(
+            advanced,
+            text="Ignore failed",
+            variable=ignore_failed_var,
+        ).grid(row=0, column=2, sticky="w", padx=(14, 0))
         self._button(advanced, "Cancel selected job", cancel_selected, kind="secondary").grid(
             row=1, column=0, sticky="w", pady=(14, 0)
         )

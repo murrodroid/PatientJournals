@@ -109,11 +109,36 @@ def list_local_dataset_library(
     root = Path(run_root).expanduser()
     if not root.exists() or not root.is_dir():
         return []
-    files = sorted(
-        [
+    files_by_path = {
+        path.resolve(): path
+        for path in [
             *root.rglob("*_dataset.jsonl"),
             *root.rglob("*_dataset.csv"),
-        ],
+            *root.rglob("jobs/*/datasets/current.jsonl"),
+            *root.rglob("jobs/*/datasets/current.csv"),
+        ]
+        if path.is_file()
+    }
+    def local_run_id(path: Path) -> str:
+        if path.parent.name == "datasets" and path.parent.parent.name:
+            return path.parent.parent.name
+        return path.parent.name
+
+    def is_current_dataset(path: Path) -> bool:
+        return path.parent.name == "datasets" and path.stem == "current"
+
+    canonical_run_ids = {
+        local_run_id(path)
+        for path in files_by_path.values()
+        if is_current_dataset(path)
+    }
+    visible_files = [
+        path
+        for path in files_by_path.values()
+        if is_current_dataset(path) or local_run_id(path) not in canonical_run_ids
+    ]
+    files = sorted(
+        visible_files,
         key=lambda path: path.stat().st_mtime,
         reverse=True,
     )
@@ -127,6 +152,7 @@ def list_local_dataset_library(
             )
         except OSError:
             continue
+        run_id = local_run_id(path)
         items.append(
             DatasetLibraryItem(
                 source="local",
@@ -135,7 +161,7 @@ def list_local_dataset_library(
                 row_count=row_count,
                 size_bytes=size_bytes,
                 updated_at=updated_at,
-                run_id=path.parent.name,
+                run_id=run_id,
                 local_path=str(path),
             )
         )

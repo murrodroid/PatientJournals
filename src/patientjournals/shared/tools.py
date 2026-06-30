@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import pandas as pd
 from datetime import datetime
 from pathlib import Path
@@ -68,7 +69,15 @@ def flush_rows(
 ) -> bool:
     fmt = _normalize_output_format(output_format)
     if fmt == "csv":
-        _rows_to_flat_dataframe(rows).to_csv(
+        frame = _rows_to_flat_dataframe(rows)
+        path = Path(out_path)
+        if header_written and path.exists():
+            with open(path, "r", encoding="utf-8", newline="") as handle:
+                reader = csv.reader(handle, delimiter=sep)
+                existing_header = next(reader, [])
+            if existing_header:
+                frame = frame.reindex(columns=existing_header)
+        frame.to_csv(
             out_path,
             mode="a",
             index=False,

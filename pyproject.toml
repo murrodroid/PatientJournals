@@ -19,8 +19,8 @@ dependencies = [
 ]
 
 [project.scripts]
-app = "patientjournals.app.ui:main"
-patientjournals-app = "patientjournals.app.ui:main"
+app = "patientjournals.app.web:main"
+patientjournals-app = "patientjournals.app.web:main"
 
 [dependency-groups]
 dev = [

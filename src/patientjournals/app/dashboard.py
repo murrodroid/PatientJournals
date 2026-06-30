@@ -7,8 +7,11 @@ from collections import Counter
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from statistics import mean, median
-from typing import Any, Iterable
+from typing import Any, Iterable, get_args, get_origin
 
+from patientjournals.config import config
+from patientjournals.shared.field_classification import is_schema_data_field
+from patientjournals.config.schemas import list_output_schemas
 from patientjournals.shared.processing_metrics import (
     MANIFEST_FILE_NAME,
     read_processing_records,
@@ -66,6 +69,30 @@ class DashboardSummary:
     validation_sync_error: str = ""
 
 
+@dataclass(frozen=True)
+class DatasetColumnSummary:
+    column: str
+    populated: int
+    missing: int
+    completeness: float
+
+
+@dataclass(frozen=True)
+class DatasetAnalysis:
+    dataset_path: str
+    row_count: int
+    column_count: int
+    columns: tuple[str, ...]
+    failed_rows: int
+    failure_reasons: dict[str, int]
+    field_completeness: tuple[DatasetColumnSummary, ...]
+    schema_field_completeness: tuple[DatasetColumnSummary, ...]
+    metadata_field_completeness: tuple[DatasetColumnSummary, ...]
+    attempts: dict[str, float | int | None]
+    avg_logprobs: dict[str, float | int | None]
+    sample_rows: tuple[dict[str, object], ...]
+
+
 def _count_jsonl_rows(path: Path) -> int:
     count = 0
     with open(path, "r", encoding="utf-8") as handle:
@@ -77,7 +104,7 @@ def _count_jsonl_rows(path: Path) -> int:
 
 def _count_csv_rows(path: Path) -> int:
     with open(path, "r", encoding="utf-8", newline="") as handle:
-        reader = csv.reader(handle, delimiter="$")
+        reader = csv.reader(handle, delimiter=config.csv_sep)
         rows = sum(1 for row in reader if row)
     return max(0, rows - 1)
 
@@ -95,13 +122,137 @@ def find_dataset_files(run_root: str | Path = "runs") -> list[Path]:
     root = Path(run_root).expanduser()
     if not root.exists() or not root.is_dir():
         return []
-    return sorted(
-        [
+    files_by_path = {
+        path.resolve(): path
+        for path in [
             *root.rglob("*_dataset.jsonl"),
             *root.rglob("*_dataset.csv"),
-        ],
+            *root.rglob("jobs/*/datasets/current.jsonl"),
+            *root.rglob("jobs/*/datasets/current.csv"),
+        ]
+        if path.is_file()
+    }
+
+    def run_id(path: Path) -> str:
+        if path.parent.name == "datasets":
+            return path.parent.parent.name
+        return path.parent.name
+
+    def is_current(path: Path) -> bool:
+        return path.parent.name == "datasets" and path.stem == "current"
+
+    canonical = {run_id(path) for path in files_by_path.values() if is_current(path)}
+    visible = [
+        path
+        for path in files_by_path.values()
+        if is_current(path) or run_id(path) not in canonical
+    ]
+    return sorted(
+        visible,
         key=lambda path: path.stat().st_mtime,
         reverse=True,
+    )
+
+
+def _dataset_rows(path: Path, *, limit: int | None = None) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    suffix = path.suffix.lower()
+    if suffix == ".csv":
+        with open(path, "r", encoding="utf-8", newline="") as handle:
+            reader = csv.DictReader(handle, delimiter=config.csv_sep)
+            for row in reader:
+                rows.append(dict(row))
+                if limit is not None and len(rows) >= limit:
+                    break
+        return rows
+    if suffix == ".jsonl":
+        with open(path, "r", encoding="utf-8") as handle:
+            for line in handle:
+                raw = line.strip()
+                if not raw:
+                    continue
+                try:
+                    payload = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(payload, dict):
+                    rows.append(payload)
+                    if limit is not None and len(rows) >= limit:
+                        break
+    return rows
+
+
+def _flatten_mapping(
+    value: dict[str, object],
+    *,
+    prefix: str = "",
+) -> dict[str, object]:
+    flat: dict[str, object] = {}
+    for key, item in value.items():
+        path = f"{prefix}.{key}" if prefix else str(key)
+        if isinstance(item, dict):
+            if item:
+                flat.update(_flatten_mapping(item, prefix=path))
+            else:
+                flat[path] = item
+        else:
+            flat[path] = item
+    return flat
+
+
+def analyze_dataset_file(
+    dataset_path: str | Path,
+    *,
+    sample_limit: int = 25,
+) -> DatasetAnalysis:
+    path = Path(dataset_path).expanduser()
+    rows = _dataset_rows(path)
+    flat_rows = [_flatten_mapping(row) for row in rows]
+    columns: list[str] = []
+    for row in flat_rows:
+        for key in row:
+            if key not in columns:
+                columns.append(str(key))
+
+    row_count = len(rows)
+    failed_rows = sum(1 for row in rows if _truthy(row.get("failed")))
+    failure_reasons = _counter(row.get("failure_reason") for row in rows)
+    schema_completeness: list[DatasetColumnSummary] = []
+    metadata_completeness: list[DatasetColumnSummary] = []
+    for column in columns:
+        populated = sum(1 for row in flat_rows if _is_populated(row.get(column)))
+        missing = max(0, row_count - populated)
+        summary = DatasetColumnSummary(
+            column=column,
+            populated=populated,
+            missing=missing,
+            completeness=(populated / row_count * 100.0) if row_count else 0.0,
+        )
+        if _is_schema_column(column):
+            schema_completeness.append(summary)
+        else:
+            metadata_completeness.append(summary)
+
+    sorted_schema = tuple(
+        sorted(schema_completeness, key=lambda item: (item.completeness, item.column))
+    )
+    sorted_metadata = tuple(
+        sorted(metadata_completeness, key=lambda item: (item.completeness, item.column))
+    )
+
+    return DatasetAnalysis(
+        dataset_path=str(path),
+        row_count=row_count,
+        column_count=len(columns),
+        columns=tuple(columns),
+        failed_rows=failed_rows,
+        failure_reasons=failure_reasons,
+        field_completeness=sorted_schema,
+        schema_field_completeness=sorted_schema,
+        metadata_field_completeness=sorted_metadata,
+        attempts=numeric_distribution(row.get("attempts") for row in rows),
+        avg_logprobs=numeric_distribution(row.get("avg_logprobs") for row in rows),
+        sample_rows=tuple(flat_rows[: max(1, sample_limit)]),
     )
 
 
@@ -189,8 +340,88 @@ def _dedupe_validation_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]:
     return list(unique.values())
 
 
+def _unwrap_optional(field_type: object) -> object:
+    origin = get_origin(field_type)
+    if origin is None:
+        return field_type
+    if origin in {list, tuple, set}:
+        return field_type
+    args = [arg for arg in get_args(field_type) if arg is not type(None)]
+    return args[0] if len(args) == 1 else field_type
+
+
+def _schema_models() -> tuple[type, ...]:
+    models: list[type] = []
+    configured = getattr(config, "output_model", None)
+    if isinstance(configured, type) and hasattr(configured, "model_fields"):
+        models.append(configured)
+    for model in list_output_schemas().values():
+        if model not in models:
+            models.append(model)
+    return tuple(models)
+
+
+def _field_type_for_model(model: type, path: str) -> object | None:
+    current: object = model
+    field_type: object | None = None
+    for part in path.split("."):
+        if not hasattr(current, "model_fields"):
+            return None
+        field_info = current.model_fields.get(part)
+        if field_info is None:
+            return None
+        field_type = _unwrap_optional(field_info.annotation)
+        origin = get_origin(field_type)
+        if origin in {list, tuple, set}:
+            args = get_args(field_type)
+            field_type = args[0] if args else None
+            origin = get_origin(field_type)
+        if isinstance(field_type, type) and hasattr(field_type, "model_fields"):
+            current = field_type
+        else:
+            current = None
+    return field_type
+
+
+def _is_metadata_column(column: str) -> bool:
+    return not is_schema_data_field(column)
+
+
+def _is_schema_column(column: str) -> bool:
+    if _is_metadata_column(column):
+        return False
+    return any(_field_type_for_model(model, column) is not None for model in _schema_models())
+
+
+def _is_populated(value: object) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (list, tuple, set, dict)):
+        return bool(value)
+    return True
+
+
+def _truthy(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y"}
+    return bool(value)
+
+
+def _counter_key(value: object) -> str:
+    if isinstance(value, (dict, list, tuple, set)):
+        try:
+            return json.dumps(value, ensure_ascii=False, sort_keys=True)
+        except TypeError:
+            return str(value)
+    return str(value)
+
+
 def _counter(values: Iterable[object]) -> dict[str, int]:
-    counts = Counter(str(value) for value in values if value not in {None, ""})
+    counts = Counter(_counter_key(value) for value in values if _is_populated(value))
     return dict(sorted(counts.items(), key=lambda item: (-item[1], item[0])))
 
 
@@ -199,8 +430,12 @@ def _number(value: object) -> float | None:
         return None
     if isinstance(value, (int, float)):
         return float(value)
+    if not _is_populated(value):
+        return None
+    if isinstance(value, (list, tuple, set, dict)):
+        return None
     try:
-        return float(value) if value not in {None, ""} else None
+        return float(value)
     except (TypeError, ValueError):
         return None
 

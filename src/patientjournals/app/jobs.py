@@ -33,7 +33,10 @@ from patientjournals.shared.dataset_coverage import load_dataset_image_coverage
 from patientjournals.shared.identity import image_name_from_reference
 from patientjournals.shared.processing_metrics import (
     MANIFEST_FILE_NAME,
+    append_processing_record,
+    base_image_record,
     read_processing_records,
+    write_processing_summary,
 )
 from patientjournals.shared import run_layout
 
@@ -339,7 +342,25 @@ def run_batch_draft_direct(
         )
         if run_dir is None:
             return None
-        return _summarize_batch_run(Path(run_dir))
+        outcome = _summarize_batch_run(Path(run_dir))
+        run_path = Path(run_dir)
+        batch_meta = _read_json_file(run_path / "batch_job.json")
+        JobStore.for_run_dir(run_path).sync_legacy_submit_run(
+            run_path,
+            batch_meta=batch_meta,
+            created_at=str(
+                (_read_json_file(run_path / "metadata.json") or {}).get("created_at")
+                or batch_meta.get("created_at")
+                or ""
+            ),
+            model=outcome.model,
+            input_location=_describe_input_location(run_path, batch_meta),
+            image_count=outcome.request_count,
+            chunk_count=outcome.chunk_count,
+            status=outcome.status,
+            results={},
+        )
+        return outcome
     finally:
         _restore_runtime_overrides(previous)
 
@@ -393,12 +414,236 @@ def _api_recovery_error_summary(error_rows: list[dict[str, str]]) -> str:
     return f"API recovery failed for {len(error_rows)} page(s): {summary}. {sample}"
 
 
+def _dataset_rows(path: Path, output_format: str) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    if output_format == "csv":
+        import csv
+
+        with open(path, "r", encoding="utf-8", newline="") as handle:
+            reader = csv.DictReader(handle, delimiter=config.csv_sep)
+            for row in reader:
+                rows.append(dict(row))
+        return rows
+
+    with open(path, "r", encoding="utf-8") as handle:
+        for line in handle:
+            raw = line.strip()
+            if not raw:
+                continue
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict):
+                rows.append(payload)
+    return rows
+
+
+def _rewrite_dataset_rows(
+    path: Path,
+    *,
+    rows: list[dict[str, object]],
+    output_format: str,
+) -> None:
+    from patientjournals.shared.tools import flush_rows
+
+    tmp_path = path.with_name(f".{path.name}.tmp")
+    tmp_path.unlink(missing_ok=True)
+    if rows:
+        flush_rows(
+            rows=rows,
+            out_path=str(tmp_path),
+            header_written=False,
+            output_format=output_format,
+            sep=config.csv_sep,
+        )
+    else:
+        tmp_path.write_text("", encoding="utf-8")
+    tmp_path.replace(path)
+
+
+def _failure_reasons_by_key(run_dir: Path) -> dict[str, str]:
+    reasons: dict[str, str] = {}
+    for record in read_processing_records(run_dir / MANIFEST_FILE_NAME):
+        status = str(record.get("status") or "")
+        if status not in {"failed", "failed_included"}:
+            continue
+        reason = str(record.get("failure_reason") or "failed")
+        references = [
+            str(record.get("image_reference") or ""),
+            str(record.get("file_name") or ""),
+            str(record.get("image_name") or ""),
+        ]
+        for reference in references:
+            if reference:
+                reasons[reference] = reason
+            image_name = image_name_from_reference(reference)
+            if image_name:
+                reasons[image_name] = reason
+    return reasons
+
+
+def finalize_dataset_with_failed_rows(
+    run_dir: str | Path,
+    settings: AppSettings,
+) -> dict[str, object]:
+    """Mark unresolved pages as failed rows in the current dataset.
+
+    This is an offline finalization step for runs where the user accepts the
+    remaining failures. It does not call GCS or an API; it uses local request
+    files, the current dataset, and the processing manifest.
+    """
+    from patientjournals.batch import retrieve as retrieve_module
+    from patientjournals.shared.tools import get_run_logger, load_existing_dataset
+
+    recorded = read_recorded_results(run_dir)
+    dataset_path_value = find_dataset_near(recorded.get("dataset_path") or "")
+    if not dataset_path_value:
+        return run_retrieve_direct(
+            run_dir,
+            settings,
+            allow_partial=True,
+            ignore_failed=True,
+            force=True,
+        )
+
+    overrides = command_override_payload(settings)
+    previous = _apply_runtime_overrides(overrides)
+    try:
+        run_path = Path(run_dir).expanduser()
+        dataset_path = Path(dataset_path_value).expanduser()
+        log = get_run_logger(run_path)
+        batch_meta = _read_json_file(run_path / "batch_job.json")
+        batch_names = [
+            str(item.get("batch_job_name"))
+            for item in (batch_meta.get("batch_jobs") or [])
+            if item.get("batch_job_name")
+        ]
+        output_format, covered_names, _existing_count = load_existing_dataset(
+            dataset_path,
+            csv_sep=config.csv_sep,
+        )
+        expected_keys = retrieve_module._resolve_expected_request_keys(
+            submit_run_dir=run_path,
+            batch_names=batch_names,
+            selected_batch_names=batch_names,
+            log=log,
+        )
+        if not expected_keys:
+            return run_retrieve_direct(
+                run_dir,
+                settings,
+                allow_partial=True,
+                ignore_failed=True,
+                force=True,
+            )
+
+        def basename(key: str) -> str:
+            return image_name_from_reference(key) or key
+
+        missing_keys = {
+            key for key in expected_keys if basename(key) not in covered_names
+        }
+        rows = _dataset_rows(dataset_path, output_format)
+        changed = False
+        for row in rows:
+            if "failed" not in row:
+                row["failed"] = False
+                changed = True
+            if "failure_reason" not in row:
+                row["failure_reason"] = ""
+                changed = True
+
+        reason_by_key = _failure_reasons_by_key(run_path)
+        failed_rows: list[dict[str, object]] = []
+        for key in sorted(missing_keys):
+            reason = (
+                reason_by_key.get(key)
+                or reason_by_key.get(basename(key))
+                or "missing_successful_output"
+            )
+            failed_rows.append(retrieve_module._failed_dataset_row(key, reason))
+
+        if failed_rows:
+            rows.extend(failed_rows)
+            changed = True
+            manifest_path = run_path / MANIFEST_FILE_NAME
+            for row in failed_rows:
+                append_processing_record(
+                    manifest_path,
+                    base_image_record(
+                        image_reference=str(row.get("file_name") or ""),
+                        source="batch_finalize",
+                        status="failed_included",
+                        model=str(batch_meta.get("model") or config.model),
+                        provider=str(batch_meta.get("provider") or ""),
+                        attempts=1,
+                        max_attempts=1,
+                        rows_written=1,
+                        failure_reason=str(row.get("failure_reason") or "failed"),
+                        extra={"ignore_failed": True},
+                    ),
+                )
+            write_processing_summary(run_path)
+            log(
+                "Finalized dataset with "
+                f"{len(failed_rows)} failed page placeholder row(s)."
+            )
+
+        if changed:
+            _rewrite_dataset_rows(dataset_path, rows=rows, output_format=output_format)
+
+        finalized_at = datetime.now().astimezone().isoformat(timespec="seconds")
+        failed_included_count = sum(1 for row in rows if bool(row.get("failed")))
+        successful_pages = len(covered_names)
+        payload = {
+            **recorded,
+            "retrieved_at": finalized_at,
+            "dataset_path": str(dataset_path),
+            "provider": str(batch_meta.get("provider") or recorded.get("provider") or ""),
+            "batch_count": len(batch_names)
+            or int(recorded.get("batch_count") or 0),
+            "rows_written": len(rows),
+            "expected_pages": len(expected_keys),
+            "observed_pages": int(recorded.get("observed_pages") or len(expected_keys)),
+            "successful_pages": successful_pages,
+            "recovered_pages": int(recorded.get("recovered_pages") or 0),
+            "failed_rows_included": failed_included_count,
+            "missing_pages": 0,
+            "submit_failed": False,
+            "ignore_failed": True,
+            "finalized_with_failed_rows": True,
+            "dataset_gcs_uri": "",
+        }
+        store = JobStore.for_run_dir(run_path)
+        signature = store.build_retrieval_signature(
+            run_path,
+            allow_partial=True,
+            ignore_failed=True,
+            duplicate_strategy=str(config.batch_duplicate_strategy or ""),
+        )
+        payload = store.record_retrieval(
+            run_path,
+            payload,
+            signature=signature,
+            operation="finalize_failed",
+        )
+        (run_path / BATCH_RESULTS_FILE).write_text(
+            json.dumps(payload, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        return payload
+    finally:
+        _restore_runtime_overrides(previous)
+
+
 def run_retrieve_direct(
     run_dir: str | Path,
     settings: AppSettings,
     *,
     allow_partial: bool = False,
     recover_missing_with_api: bool = False,
+    ignore_failed: bool = False,
     submit_failed: bool = False,
     failed_retry_num_batches: int | None = None,
     duplicate_strategy: str = "",
@@ -423,6 +668,7 @@ def run_retrieve_direct(
         run_dir,
         allow_partial=allow_partial,
         recover_missing_with_api=recover_missing_with_api,
+        ignore_failed=ignore_failed,
         duplicate_strategy=str(effective_strategy),
     )
     if record_results and not force and not submit_failed and not recover_missing_with_api:
@@ -443,6 +689,7 @@ def run_retrieve_direct(
                 output_dir=str(run_dir),
                 allow_partial=allow_partial,
                 recover_missing_with_api=recover_missing_with_api,
+                ignore_failed=ignore_failed,
                 submit_failed=submit_failed,
                 failed_retry_num_batches=failed_retry_num_batches,
                 duplicate_strategy=str(effective_strategy),
@@ -462,9 +709,11 @@ def run_retrieve_direct(
         "observed_pages": result.observed_pages,
         "successful_pages": result.successful_pages,
         "recovered_pages": result.recovered_pages,
+        "failed_rows_included": result.failed_rows_included,
         "missing_pages": max(0, result.expected_pages - result.successful_pages),
         "dataset_gcs_uri": result.dataset_gcs_uri,
         "submit_failed": bool(submit_failed),
+        "ignore_failed": bool(ignore_failed),
     }
     if recover_missing_with_api:
         payload["api_recovery_attempted"] = True
@@ -955,6 +1204,7 @@ def read_recorded_results(run_dir: str | Path) -> dict:
         run_path,
         allow_partial=True,
         recover_missing_with_api=bool(results.get("api_recovery_attempted")),
+        ignore_failed=bool(results.get("ignore_failed")),
         duplicate_strategy=str(
             results.get("duplicate_strategy")
             or config.batch_duplicate_strategy
@@ -967,6 +1217,33 @@ def read_recorded_results(run_dir: str | Path) -> dict:
         signature=signature,
         operation="legacy_retrieval",
     )
+
+
+def reusable_recorded_results(
+    run_dir: str | Path,
+    *,
+    ignore_failed: bool = False,
+    recover_missing_with_api: bool = False,
+) -> dict:
+    """Return saved results when they satisfy the requested retrieval options.
+
+    This is the app-facing fast path for opening a results view. It only reads
+    local job metadata and datasets; fresh output downloads stay behind explicit
+    retrieve actions.
+    """
+    recorded = read_recorded_results(run_dir)
+    if not recorded:
+        return {}
+    dataset_path = find_dataset_near(recorded.get("dataset_path") or run_dir)
+    if not dataset_path:
+        return {}
+    if ignore_failed and not bool(recorded.get("ignore_failed")):
+        return {}
+    if recover_missing_with_api and not bool(recorded.get("api_recovery_attempted")):
+        return {}
+    payload = dict(recorded)
+    payload["dataset_path"] = dataset_path
+    return payload
 
 
 def repair_recorded_results(run_dir: str | Path) -> dict:
@@ -1020,6 +1297,29 @@ def find_dataset_near(reference: str | Path) -> str:
     search_dir = path if path.is_dir() else path.parent
     if not search_dir.is_dir():
         return ""
+
+    store = JobStore.for_run_dir(search_dir)
+    record = store.record_for_run_dir(search_dir)
+    dataset = record.get("dataset") if isinstance(record, dict) else {}
+    if isinstance(dataset, dict):
+        current_path = Path(str(dataset.get("current_path") or "")).expanduser()
+        if current_path.is_file():
+            return str(current_path)
+    retrieval = record.get("retrieval") if isinstance(record, dict) else {}
+    payload = retrieval.get("payload") if isinstance(retrieval, dict) else {}
+    if isinstance(payload, dict):
+        dataset_path = Path(str(payload.get("dataset_path") or "")).expanduser()
+        if dataset_path.is_file():
+            return str(dataset_path)
+
+    for candidate in (
+        search_dir / "datasets" / "current.jsonl",
+        search_dir / "datasets" / "current.csv",
+        search_dir / "current.jsonl",
+        search_dir / "current.csv",
+    ):
+        if candidate.is_file():
+            return str(candidate)
     for pattern in ("*_dataset.jsonl", "*_dataset.csv", "*.jsonl", "*.csv"):
         matches = sorted(search_dir.glob(pattern))
         if matches:
@@ -1083,6 +1383,7 @@ def build_retrieve_command(
     allow_partial: bool = False,
     wait: bool = False,
     recover_missing_with_api: bool = False,
+    ignore_failed: bool = False,
     submit_failed: bool = False,
     duplicate_strategy: DuplicateStrategy | str = "",
 ) -> CommandSpec:
@@ -1108,6 +1409,8 @@ def build_retrieve_command(
         args.append("--wait")
     if recover_missing_with_api:
         args.append("--recover-missing-with-api")
+    if ignore_failed:
+        args.append("--ignore-failed")
     if submit_failed:
         args.append("--submit-failed")
     if effective_strategy:
@@ -1126,11 +1429,14 @@ def build_validation_command(
     results: str,
     username: str,
     corrections: bool = False,
+    sampling_mode: str = "random",
 ) -> CommandSpec:
     overrides = command_override_payload(settings)
     args = ["--user", username, "--images", images, "--results", results]
     if corrections:
         args.append("--corrections")
+    if sampling_mode:
+        args.extend(["--sampling-mode", sampling_mode])
     return CommandSpec(
         module="patientjournals.validation.cli",
         args=tuple(args),
@@ -1819,19 +2125,13 @@ def _describe_input_location(run_dir: Path, batch_meta: dict) -> str:
     return gs(pages)
 
 
-def list_submit_jobs(run_root: str | Path | None = None) -> list[JobSummary]:
-    """One row per batch submission. Retrieval is folded into the same row.
-
-    Only directories that actually submitted a batch (have ``batch_job.json``)
-    are returned — operational and incomplete runs are ignored, so a job appears
-    exactly once across its whole submit → retrieve → rerun lifecycle.
-    """
-    root = Path(run_root or config.output_root).expanduser()
+def _import_submit_artifacts_into_store(root: Path, store: JobStore) -> int:
+    """Bootstrap old submit artifacts into the authoritative SQLite store."""
+    root = Path(root).expanduser()
     if not root.exists() or not root.is_dir():
-        return []
+        return 0
     repair_retry_metadata_links(root)
-    store = JobStore(root)
-    summaries: list[JobSummary] = []
+    imported = 0
     for run_dir in run_layout.iter_run_dirs(root, "submit"):
         batch_meta = _read_json_file(run_dir / "batch_job.json")
         if not batch_meta:
@@ -1856,12 +2156,17 @@ def list_submit_jobs(run_root: str | Path | None = None) -> list[JobSummary]:
         succeeded: int | None = None
         failed: int | None = None
         recovered = 0
+        failed_included = 0
         status = _run_dir_status(run_dir)
         if retrieved:
             succeeded = int(results.get("successful_pages") or 0)
             expected = int(results.get("expected_pages") or images or 0)
-            failed = max(0, expected - succeeded)
+            if "missing_pages" in results:
+                failed = int(results.get("missing_pages") or 0)
+            else:
+                failed = max(0, expected - succeeded)
             recovered = int(results.get("recovered_pages") or 0)
+            failed_included = int(results.get("failed_rows_included") or 0)
             status = "retrieved"
         if retry_count and failed:
             status = "retry_submitted"
@@ -1877,34 +2182,68 @@ def list_submit_jobs(run_root: str | Path | None = None) -> list[JobSummary]:
             status=status,
             results=results,
         )
+        imported += 1
+    return imported
 
-        detail = f"{images} image(s)"
-        if chunk_count:
-            detail = f"{detail}, {chunk_count} chunk(s)"
-        if retry_count:
-            label = "retry batch" if retry_count == 1 else "retry batches"
-            detail = f"{detail}, {retry_count} {label}"
 
-        summaries.append(
-            JobSummary(
-                job_id=run_dir.name,
-                source="local",
-                kind="batch",
-                status=status,
-                created_at=created_at,
-                model=model,
-                run_dir=str(run_dir),
-                detail=detail,
-                input_location=location,
-                image_count=images,
-                chunk_count=chunk_count,
-                retrieved=retrieved,
-                succeeded=succeeded,
-                failed=failed,
-                recovered=recovered,
-            )
-        )
-    return summaries
+def _summary_from_store_record(record: dict) -> JobSummary:
+    metrics = record.get("metrics") if isinstance(record.get("metrics"), dict) else {}
+    input_payload = record.get("input") if isinstance(record.get("input"), dict) else {}
+    batches = record.get("batches") if isinstance(record.get("batches"), dict) else {}
+    legacy = record.get("legacy") if isinstance(record.get("legacy"), dict) else {}
+    status = str(record.get("status") or "unknown")
+    retrieved = status.startswith("retrieved") or bool(record.get("retrieval"))
+    image_count = int(input_payload.get("image_count") or 0)
+    chunk_count = int(batches.get("chunk_count") or 0)
+    attempts = batches.get("attempts")
+    retry_count = len(attempts) if isinstance(attempts, list) else 0
+
+    display_status = "retrieved" if status.startswith("retrieved") else status
+    succeeded = int(metrics.get("successful_pages") or 0) if retrieved else None
+    failed = int(metrics.get("missing_pages") or 0) if retrieved else None
+    recovered = int(metrics.get("recovered_pages") or 0) if retrieved else 0
+    failed_included = int(metrics.get("failed_rows_included") or 0) if retrieved else 0
+
+    detail = f"{image_count} image(s)"
+    if chunk_count:
+        detail = f"{detail}, {chunk_count} chunk(s)"
+    if retry_count:
+        label = "retry batch" if retry_count == 1 else "retry batches"
+        detail = f"{detail}, {retry_count} {label}"
+
+    return JobSummary(
+        job_id=str(record.get("job_id") or ""),
+        source="store",
+        kind=str(record.get("kind") or "batch"),
+        status=display_status,
+        created_at=str(record.get("created_at") or ""),
+        model=str(record.get("model") or ""),
+        run_dir=str(legacy.get("submit_run_dir") or batches.get("source_run_dir") or ""),
+        detail=detail,
+        input_location=str(input_payload.get("location") or ""),
+        image_count=image_count,
+        chunk_count=chunk_count,
+        retrieved=retrieved,
+        succeeded=succeeded,
+        failed=failed,
+        recovered=recovered,
+        failed_included=failed_included,
+    )
+
+
+def list_submit_jobs(run_root: str | Path | None = None) -> list[JobSummary]:
+    """One row per batch submission from the authoritative app store."""
+    root = Path(run_root or config.output_root).expanduser()
+    store = JobStore(root)
+    records = store.list_records(kind="batch")
+    if not records:
+        _import_submit_artifacts_into_store(root, store)
+        records = store.list_records(kind="batch")
+    return [
+        summary
+        for summary in (_summary_from_store_record(record) for record in records)
+        if summary.run_dir
+    ]
 
 
 # Submits are now tracked authoritatively by their run directory (see

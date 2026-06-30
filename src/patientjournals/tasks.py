@@ -145,6 +145,7 @@ def retrieve(
     allow_partial: bool = False,
     submit_failed: bool = False,
     recover_missing_with_api: bool = False,
+    ignore_failed: bool = False,
     duplicate_strategy: str | None = None,
     extra: str = "",
 ) -> None:
@@ -158,6 +159,7 @@ def retrieve(
     _add_flag(args, "--allow-partial", allow_partial)
     _add_flag(args, "--submit-failed", submit_failed)
     _add_flag(args, "--recover-missing-with-api", recover_missing_with_api)
+    _add_flag(args, "--ignore-failed", ignore_failed)
     _add_option(args, "--duplicate-strategy", duplicate_strategy)
     args.extend(_split_extra(extra))
     _run_module(context, "patientjournals.batch.retrieve", args)
@@ -214,6 +216,7 @@ def validate(
     results: str | None = None,
     user: str = "unspecified",
     corrections: bool = False,
+    sampling_mode: str | None = None,
     extra: str = "",
 ) -> None:
     args: list[str] = []
@@ -221,6 +224,7 @@ def validate(
     _add_option(args, "--images", images)
     _add_option(args, "--results", results)
     _add_flag(args, "--corrections", corrections)
+    _add_option(args, "--sampling-mode", sampling_mode)
     args.extend(_split_extra(extra))
     _run_module(context, "patientjournals.validation.cli", args)
 
@@ -254,7 +258,7 @@ def config_show(_context) -> None:
 
 @task(name="run")
 def app_run(context) -> None:
-    _run_module(context, "patientjournals.app.ui", [])
+    _run_module(context, "patientjournals.app.web", [])
 
 
 local = Collection("local")

@@ -51,7 +51,7 @@ Extra underlying CLI arguments can be passed with `--extra`, for example:
 uv run invoke batch.submit --extra='--downscale 0.1'
 ```
 
-## Desktop App
+## Web App
 
 Run the app with:
 
@@ -61,9 +61,13 @@ uv run app
 
 (`uv run patientjournals-app` is an equivalent alias, and `uv run invoke app.run` still works.)
 
-The app stores UI settings in `~/.patientjournals/app_config.json`. Per-job model, schema, output format, and cloud settings are passed to CLI-compatible jobs through a temporary JSON override file, so the app can run without editing `src/patientjournals/config/settings.py` for each job.
+For local development without opening a browser automatically:
 
-Start new machines or new users on the app's **Setup** page. It checks that `gcloud` is installed, a Google account/project is active, Application Default Credentials or service-account auth is available, the configured GCS bucket can be reached, the expected prefixes can be listed, and a temporary object can be written/read/deleted under `diagnostics/access-checks/`. Failed rows include copyable admin commands for the expected Vertex and Storage IAM roles.
+```bash
+uv run python -m patientjournals.app.web --no-open
+```
+
+The app stores UI settings in `~/.patientjournals/app_config.json`. Runtime job state is stored in SQLite at `runs/app_state.sqlite3`; old per-folder `job.json` files are treated as legacy import artifacts, not the authoritative app state. Current datasets for retrieved jobs are copied under `runs/jobs/<job_id>/datasets/current.*`, with previous versions kept under `runs/jobs/<job_id>/datasets/versions/`.
 
 The current app architecture is split into small service modules:
 
@@ -71,10 +75,16 @@ The current app architecture is split into small service modules:
 - `patientjournals.app.catalog`: schema and Google model choices.
 - `patientjournals.app.dashboard`: dataset, validation, and processing metric summaries.
 - `patientjournals.app.datasets`: local/cloud dataset inspection and image-name matching.
-- `patientjournals.app.jobs`: command construction, job registry, local run listing, and cloud batch listing.
+- `patientjournals.app.job_store`: SQLite-backed jobs, events, dataset versions, and background task state.
+- `patientjournals.app.jobs`: batch/local run helpers, retrieval/finalization/retry helpers, and validation command construction.
 - `patientjournals.app.settings_store`: app settings persistence.
+- `patientjournals.app.task_runner`: lightweight background task execution persisted to the job store.
+- `patientjournals.app.web`: the web UI and JSON API.
+- `patientjournals.app.workflows`: the backend workflow service used by the UI.
 
-Local API jobs are executed through `patientjournals.local.service.run_local_job`, so the app does not need to shell out for local runs. Cloud batch submission/retrieval has a typed service facade in `patientjournals.batch.service`; the app still launches cloud jobs as subprocesses while the remaining long-running batch internals are consolidated. The Dashboard page summarizes run measurements and validation decisions, and can launch the validation loop for a selected dataset and image folder.
+Local API jobs are executed through `patientjournals.local.service.run_local_job`, so the app does not need to shell out for local runs. Cloud batch submission and retrieval are routed through `patientjournals.app.workflows.WorkflowService`. The Jobs page can retrieve one or many selected jobs; grouped batch chunks are handled as one job, retrieval reuses cached results when possible, and selected-job retrieval is parallelized by the workflow service. The Dashboard page summarizes run measurements, validates completeness/failure distributions for a selected dataset, and can launch the validation loop for a selected dataset and image folder.
+
+The Cloud page stores project/bucket/prefix settings, can start browser-based Google auth with `gcloud auth application-default login`, and runs the same bucket/prefix/write access checks used by the previous setup flow.
 
 Google Cloud authentication supports either a service account JSON path or Application Default Credentials (`gcloud auth application-default login`) through the app setting `auth_mode`.
 
@@ -189,7 +199,7 @@ For Anthropic batch runs, inputs still come from GCS. Images are referenced thro
 Run the validation UI:
 
 ```bash
-uv run invoke validation.validate --user lucas --images data --results runs/20260127_103351/20260127_103351_dataset.jsonl --corrections
+uv run invoke validation.validate --user lucas --images data --results runs/20260127_103351/20260127_103351_dataset.jsonl --corrections --sampling-mode balanced_ucb
 ```
 
 Generate validation plots:
@@ -198,7 +208,7 @@ Generate validation plots:
 uv run invoke validation.report --input-path validations --out validation_reports --min-n 1
 ```
 
-The desktop app Dashboard reads `runs/**/image_processing_manifest.jsonl`, datasets, and `validations/**/*_validations.csv` to display status, source, attempts, timing, failure, and validation label distributions. The same page can launch `validation.validate` with corrections enabled.
+The web app Dashboard reads job-store datasets, `runs/**/image_processing_manifest.jsonl`, and `validations/**/*_validations.csv` to display status, source, attempts, timing, failure, field-completeness, and validation label distributions. The same page can launch `validation.validate` with corrections enabled. Validation sampling supports `random` and `balanced_ucb`; both sample only true schema fields and exclude processing metadata such as `thoughts`, `failure_reason`, `avg_logprobs`, and `crossed_out`.
 
 ## Tests
 

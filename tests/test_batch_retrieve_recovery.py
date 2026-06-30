@@ -35,6 +35,20 @@ def test_recovery_api_key_accepts_api_keys_gemini_alias(monkeypatch) -> None:
     assert retrieve._resolve_recovery_api_key() == "module-gemini-key"
 
 
+def test_failed_dataset_row_marks_image_failed() -> None:
+    row = retrieve._failed_dataset_row(
+        "gs://bucket/pages/folder/273057_001519.png",
+        "schema_validation_failed",
+    )
+
+    assert row == {
+        "image_name": "273057_001519.png",
+        "file_name": "gs://bucket/pages/folder/273057_001519.png",
+        "failed": True,
+        "failure_reason": "schema_validation_failed",
+    }
+
+
 def test_failed_page_retry_can_split_into_multiple_chunks(
     tmp_path,
     monkeypatch,

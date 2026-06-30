@@ -197,6 +197,7 @@ class JobSummary:
     succeeded: int | None = None
     failed: int | None = None
     recovered: int = 0
+    failed_included: int = 0
 
 
 @dataclass(frozen=True)
