@@ -328,19 +328,32 @@ def test_dataset_library_lists_local_and_cloud_datasets(tmp_path, monkeypatch) -
     run_dir.mkdir(parents=True)
     dataset = run_dir / "20260618_094819_dataset.jsonl"
     dataset.write_text('{"image_name": "a.png"}\n{"image_name": "b.png"}\n', encoding="utf-8")
+    legacy = tmp_path / "runs" / "retrieves" / "20260618_103349" / "20260618_103349_dataset.jsonl"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text('{"image_name": "legacy.png"}\n', encoding="utf-8")
     current = tmp_path / "runs" / "jobs" / "20260618_094819" / "datasets" / "current.jsonl"
     current.parent.mkdir(parents=True)
     current.write_text(
         '{"image_name": "a.png"}\n{"image_name": "b.png"}\n{"image_name": "c.png"}\n',
         encoding="utf-8",
     )
+    combined = tmp_path / "runs" / "datasets" / "combined" / "combined_dataset.jsonl"
+    combined.parent.mkdir(parents=True)
+    combined.write_text('{"image_name": "combined.png"}\n', encoding="utf-8")
 
     local_items = app_datasets.list_local_dataset_library(tmp_path / "runs")
 
-    assert len(local_items) == 1
-    assert local_items[0].local_path == str(current)
-    assert local_items[0].row_count == 3
-    assert local_items[0].run_id == "20260618_094819"
+    assert {item.local_path for item in local_items} == {str(current), str(combined)}
+    current_item = next(item for item in local_items if item.local_path == str(current))
+    assert current_item.row_count == 3
+    assert current_item.run_id == "20260618_094819"
+    assert str(legacy) not in {item.local_path for item in local_items}
+
+    legacy_items = app_datasets.list_local_dataset_library(
+        tmp_path / "runs",
+        include_legacy=True,
+    )
+    assert str(legacy) in {item.local_path for item in legacy_items}
 
     class Blob:
         name = "datasets/20260618_094819/20260618_094819_dataset.jsonl"

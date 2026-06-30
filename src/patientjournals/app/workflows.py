@@ -11,6 +11,7 @@ from patientjournals.app.access import run_access_checks
 from patientjournals.app.dashboard import analyze_dataset_file, summarize_dashboard
 from patientjournals.app.datasets import (
     combine_dataset_files,
+    download_cloud_dataset,
     list_cloud_dataset_choices,
     list_cloud_dataset_library,
     list_local_dataset_library,
@@ -42,6 +43,7 @@ from patientjournals.app.settings_store import (
     save_app_settings,
 )
 from patientjournals.config import config
+from patientjournals.validation.browser import BrowserValidationManager
 
 
 def serializable(value: Any) -> Any:
@@ -72,6 +74,7 @@ class WorkflowService:
         self.settings_path = settings_path
         self.settings = settings or load_app_settings(settings_path)
         self.store = JobStore(self.settings.local_runs_root)
+        self.validation_manager = BrowserValidationManager()
 
     def list_jobs(self) -> list[dict[str, Any]]:
         return serializable(list_submit_jobs(self.settings.local_runs_root))
@@ -92,6 +95,7 @@ class WorkflowService:
             "batch_outputs_gcs_prefix",
             "datasets_gcs_prefix",
             "validations_gcs_prefix",
+            "upload_validation_to_gcs",
         }
         updates = {key: payload[key] for key in allowed if key in payload}
         self.settings = replace(self.settings, **updates)
@@ -391,6 +395,87 @@ class WorkflowService:
 
     def analyze_dataset(self, dataset_path: str) -> dict[str, Any]:
         return serializable(analyze_dataset_file(dataset_path))
+
+    def _resolve_validation_dataset(self, results: str) -> tuple[Path, str]:
+        value = str(results or "").strip()
+        if not value:
+            raise ValueError("Select a dataset first.")
+        if value.startswith("gs://"):
+            previous = _apply_runtime_overrides(command_override_payload(self.settings))
+            try:
+                path = download_cloud_dataset(
+                    value,
+                    destination_root=(
+                        Path(self.settings.local_runs_root)
+                        / "validations"
+                        / "_dataset_cache"
+                    ),
+                )
+            finally:
+                _restore_runtime_overrides(previous)
+            return path, value
+        path = Path(value).expanduser()
+        if not path.is_file():
+            raise FileNotFoundError(f"Dataset not found: {results}")
+        return path, path.name
+
+    def start_browser_validation(
+        self,
+        *,
+        results: str,
+        image_source: str = "cloud",
+        images: str = "",
+        cloud_prefixes: list[str] | tuple[str, ...] = (),
+        username: str = "researcher",
+        corrections: bool = True,
+        sampling_mode: str = "balanced_ucb",
+    ) -> dict[str, Any]:
+        dataset_path, dataset_label = self._resolve_validation_dataset(results)
+        previous = _apply_runtime_overrides(command_override_payload(self.settings))
+        try:
+            return serializable(
+                self.validation_manager.start_session(
+                    dataset_path=dataset_path,
+                    dataset_label=dataset_label,
+                    username=username.strip() or "researcher",
+                    allow_corrections=corrections,
+                    sampling_mode=sampling_mode,
+                    image_source=image_source,
+                    image_root=images,
+                    cloud_prefixes=tuple(str(item) for item in cloud_prefixes if item),
+                    bucket_name=self.settings.gcs_bucket_name,
+                )
+            )
+        finally:
+            _restore_runtime_overrides(previous)
+
+    def browser_validation_current(self, session_id: str) -> dict[str, Any]:
+        return serializable(self.validation_manager.current(session_id))
+
+    def mark_browser_validation(
+        self,
+        *,
+        session_id: str,
+        label: str,
+        corrected_text: str = "",
+    ) -> dict[str, Any]:
+        return serializable(
+            self.validation_manager.mark(
+                session_id,
+                label=label,
+                corrected_text=corrected_text,
+            )
+        )
+
+    def finish_browser_validation(self, session_id: str) -> dict[str, Any]:
+        previous = _apply_runtime_overrides(command_override_payload(self.settings))
+        try:
+            return serializable(self.validation_manager.finish(session_id))
+        finally:
+            _restore_runtime_overrides(previous)
+
+    def browser_validation_image(self, session_id: str) -> tuple[bytes, str]:
+        return self.validation_manager.local_image_bytes(session_id)
 
     def start_validation(
         self,

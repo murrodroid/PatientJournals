@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from tkinter import Tk, Label, Button, StringVar, messagebox, Frame, Canvas, Scrollbar, Entry
-from typing import Literal, get_args, get_origin
+from typing import Any, Literal, get_args, get_origin
 
 import pandas as pd
 from PIL import Image, ImageTk
@@ -38,13 +38,13 @@ _BALANCED_UCB_GAMMA = 0.25
 @dataclass(frozen=True)
 class ValidationDatapoint:
     row: dict
-    image_path: Path
+    image_path: Any
     image_name: str
     field_name: str
     field_value: object
 
-def build_image_index(root_dir: Path) -> dict[str, Path]:
-    index: dict[str, Path] = {}
+def build_image_index(root_dir: Path) -> dict[str, Any]:
+    index: dict[str, Any] = {}
     for path in root_dir.rglob("*"):
         if not path.is_file():
             continue
@@ -97,7 +97,7 @@ def pick_flat_field(row: dict, rng: random.Random) -> tuple[str, object] | None:
 
 def build_validation_datapoints(
     rows: list[dict],
-    image_index: dict[str, Path],
+    image_index: dict[str, Any],
 ) -> list[ValidationDatapoint]:
     datapoints: list[ValidationDatapoint] = []
     for row in rows:
@@ -247,7 +247,7 @@ def _parse_corrected_value(field_name: str, text: str) -> object:
         raise ValueError(f"Value '{stripped}' is invalid for {field_name}.") from exc
 
 
-def resolve_image_path(row: dict, image_index: dict[str, Path]) -> Path | None:
+def resolve_image_path(row: dict, image_index: dict[str, Any]) -> Any | None:
     image_name = row_image_name(row)
     if not image_name:
         return None

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import random
 
 from patientjournals.validation.cli import (
@@ -8,6 +9,7 @@ from patientjournals.validation.cli import (
     choose_random_datapoint,
     eligible_flat_fields,
 )
+from patientjournals.validation import browser as browser_validation
 
 
 def test_validation_candidates_are_schema_fields_only(tmp_path) -> None:
@@ -68,3 +70,90 @@ def test_balanced_ucb_prioritizes_under_sampled_schema_field(tmp_path) -> None:
 
     assert selected is not None
     assert selected.field_name == "fk_info"
+
+
+def test_browser_validation_records_local_decision(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(browser_validation, "upload_validation_run", lambda **_kwargs: {})
+    images = tmp_path / "images"
+    images.mkdir()
+    (images / "a.png").write_bytes(b"image")
+    dataset = tmp_path / "dataset.jsonl"
+    dataset.write_text(
+        json.dumps({"image_name": "a.png", "fk_info": "FK"}) + "\n",
+        encoding="utf-8",
+    )
+
+    manager = browser_validation.BrowserValidationManager()
+    sample = manager.start_session(
+        dataset_path=dataset,
+        username="alice",
+        image_source="local",
+        image_root=str(images),
+        sampling_mode="random",
+    )
+    after_mark = manager.mark(sample["session_id"], label="accept")
+    session = manager.get(sample["session_id"])
+
+    assert sample["image_url"].startswith("/api/validation/session/image?")
+    assert after_mark["decisions"] == 1
+    assert session.csv_path.exists()
+    assert "accept" in session.csv_path.read_text(encoding="utf-8")
+
+
+def test_browser_validation_uses_signed_cloud_url_without_persisting_it(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(browser_validation, "upload_validation_run", lambda **_kwargs: {})
+    dataset = tmp_path / "dataset.jsonl"
+    dataset.write_text(
+        json.dumps({"image_name": "a.png", "fk_info": "FK"}) + "\n",
+        encoding="utf-8",
+    )
+    signed_calls = []
+
+    class Blob:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        def generate_signed_url(self, **kwargs) -> str:
+            signed_calls.append(kwargs)
+            return f"https://signed.example/{self.name}"
+
+    class Bucket:
+        name = "encrypted-bucket"
+
+        def blob(self, name: str) -> Blob:
+            return Blob(name)
+
+    monkeypatch.setattr(
+        browser_validation,
+        "build_storage_bucket",
+        lambda _name: Bucket(),
+    )
+    monkeypatch.setattr(
+        browser_validation,
+        "list_bucket_blobs",
+        lambda _bucket, prefix=None: [Blob("pages/run/a.png")],
+    )
+
+    manager = browser_validation.BrowserValidationManager()
+    sample = manager.start_session(
+        dataset_path=dataset,
+        username="alice",
+        image_source="cloud",
+        cloud_prefixes=("pages/run",),
+        bucket_name="encrypted-bucket",
+        sampling_mode="random",
+    )
+    manager.mark(sample["session_id"], label="unsure")
+    session = manager.get(sample["session_id"])
+    output = session.csv_path.read_text(encoding="utf-8")
+
+    assert sample["image_url"] == "https://signed.example/pages/run/a.png"
+    assert signed_calls[0]["version"] == "v4"
+    assert signed_calls[0]["method"] == "GET"
+    assert "https://signed.example" not in output
+    assert "gs://encrypted-bucket/pages/run/a.png" in output

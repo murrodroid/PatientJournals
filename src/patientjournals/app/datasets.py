@@ -487,20 +487,29 @@ def list_local_dataset_library(
     run_root: str | Path = "runs",
     *,
     limit: int = 200,
+    include_legacy: bool = False,
 ) -> list[DatasetLibraryItem]:
     root = Path(run_root).expanduser()
     if not root.exists() or not root.is_dir():
         return []
-    files_by_path = {
-        path.resolve(): path
-        for path in [
+
+    if include_legacy:
+        candidates = [
             *root.rglob("*_dataset.jsonl"),
             *root.rglob("*_dataset.csv"),
             *root.rglob("jobs/*/datasets/current.jsonl"),
             *root.rglob("jobs/*/datasets/current.csv"),
         ]
-        if path.is_file()
-    }
+    else:
+        candidates = [
+            *root.rglob("jobs/*/datasets/current.jsonl"),
+            *root.rglob("jobs/*/datasets/current.csv"),
+            *root.rglob("datasets/*/*_dataset.jsonl"),
+            *root.rglob("datasets/*/*_dataset.csv"),
+            *root.rglob("datasets/*/current.jsonl"),
+            *root.rglob("datasets/*/current.csv"),
+        ]
+    files_by_path = {path.resolve(): path for path in candidates if path.is_file()}
     def local_run_id(path: Path) -> str:
         if path.parent.name == "datasets" and path.parent.parent.name:
             return path.parent.parent.name
