@@ -7,7 +7,7 @@ from dataclasses import asdict, is_dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from patientjournals.app.access import run_access_checks
+from patientjournals.app.access import resolve_validator_identity, run_access_checks
 from patientjournals.app.dashboard import analyze_dataset_file, summarize_dashboard
 from patientjournals.app.datasets import (
     combine_dataset_files,
@@ -393,6 +393,9 @@ class WorkflowService:
             )
         )
 
+    def validation_identity(self) -> dict[str, str]:
+        return resolve_validator_identity(self.settings)
+
     def analyze_dataset(self, dataset_path: str) -> dict[str, Any]:
         return serializable(analyze_dataset_file(dataset_path))
 
@@ -426,24 +429,27 @@ class WorkflowService:
         image_source: str = "cloud",
         images: str = "",
         cloud_prefixes: list[str] | tuple[str, ...] = (),
-        username: str = "researcher",
         corrections: bool = True,
         sampling_mode: str = "balanced_ucb",
+        offline: bool = False,
     ) -> dict[str, Any]:
         dataset_path, dataset_label = self._resolve_validation_dataset(results)
+        identity = self.validation_identity()
         previous = _apply_runtime_overrides(command_override_payload(self.settings))
         try:
             return serializable(
                 self.validation_manager.start_session(
                     dataset_path=dataset_path,
                     dataset_label=dataset_label,
-                    username=username.strip() or "researcher",
+                    username=identity["username"],
+                    validator_account=identity.get("account", ""),
                     allow_corrections=corrections,
                     sampling_mode=sampling_mode,
                     image_source=image_source,
                     image_root=images,
                     cloud_prefixes=tuple(str(item) for item in cloud_prefixes if item),
                     bucket_name=self.settings.gcs_bucket_name,
+                    sync_to_cloud=not offline,
                 )
             )
         finally:

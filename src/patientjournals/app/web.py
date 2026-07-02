@@ -57,12 +57,32 @@ APP_HTML = """<!doctype html>
     summary { cursor:pointer; font-weight:800; }
     .inline-control { display:flex; gap:8px; align-items:center; }
     .inline-control select, .inline-control input { width:auto; }
+    .notice { border:1px solid var(--line); background:var(--soft); padding:12px; margin:12px 0; }
+    .pill { display:inline-flex; align-items:center; border:1px solid var(--line); background:var(--soft); padding:4px 8px; margin-right:6px; font-size:12px; font-weight:800; }
+    .race { display:grid; gap:12px; }
+    .race-row { display:grid; grid-template-columns: 132px minmax(0,1fr) 132px; gap:12px; align-items:center; }
+    .race-name { min-width:0; }
+    .race-name strong { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .race-name span, .race-score span { color:var(--muted); font-size:12px; }
+    .race-lane { position:relative; height:42px; border:1px solid var(--line); background:var(--soft); overflow:hidden; }
+    .race-fill { position:absolute; inset:0 auto 0 0; width:var(--pct); background:linear-gradient(90deg, rgba(0,178,202,.22), rgba(0,178,202,.72)); }
+    .race-line { position:absolute; inset:0 18px 0 auto; width:3px; background:repeating-linear-gradient(to bottom, var(--ink) 0 6px, transparent 6px 12px); opacity:.25; }
+    .race-car { position:absolute; left:calc(var(--pct) - 30px); top:8px; width:38px; height:20px; background:var(--ink); border:2px solid var(--accent); }
+    .race-car::before { content:""; position:absolute; left:7px; top:-7px; width:18px; height:7px; background:var(--accent); }
+    .race-wheel { position:absolute; bottom:-7px; width:9px; height:9px; border-radius:50%; background:var(--ink); border:2px solid var(--bg); }
+    .race-wheel.left { left:5px; }
+    .race-wheel.right { right:5px; }
+    .race-score { text-align:right; }
+    .race-row.demo { opacity:.72; }
+    .race-row.demo .race-fill { background:repeating-linear-gradient(45deg, rgba(0,178,202,.18) 0 8px, rgba(0,178,202,.42) 8px 16px); }
+    .race-row.demo .race-car { background:white; }
+    .small-note { font-size:12px; color:var(--muted); margin:6px 0 12px; }
     .status { color:var(--muted); margin:10px 0; min-height:22px; white-space:pre-wrap; }
     .bad { color:#9A3412; }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12px; }
     .validator { display:grid; grid-template-columns:minmax(0,1fr) 360px; gap:16px; min-height:calc(100vh - 96px); }
     .image-stage { border:1px solid var(--line); background:var(--soft); overflow:auto; display:flex; align-items:flex-start; justify-content:center; padding:12px; min-height:520px; }
-    .image-stage img { max-width:none; transform-origin:top center; background:white; box-shadow:0 1px 6px rgba(30,30,36,.12); }
+    .image-stage img { max-width:100%; height:auto; transform-origin:top center; background:white; box-shadow:0 1px 6px rgba(30,30,36,.12); }
     .decision-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
     .decision-grid .btn { width:100%; }
     .btn.accept { background:#16A34A; color:white; }
@@ -103,6 +123,7 @@ const state = {
   selectedCloudPrefixes: new Set(),
   selectedLocalPath: '',
   selectedValidationCloudPrefixes: new Set(),
+  validatorIdentity: null,
   validationSession: null,
   validationSample: null,
   validationZoom: 1
@@ -140,6 +161,54 @@ function rawTable(headers, rowsHtml) {
 function selectedJobs() {
   return state.jobs.filter(j => state.selectedJobIds.has(j.job_id) && j.run_dir);
 }
+function shortText(value, max=34) {
+  const text = displayValue(value);
+  if (text.length <= max) return text;
+  const head = Math.max(8, Math.floor((max - 3) * 0.55));
+  const tail = Math.max(6, max - 3 - head);
+  return `${text.slice(0, head)}...${text.slice(text.length - tail)}`;
+}
+function modelScore(value) {
+  return value == null ? '-' : Number(value).toFixed(1) + '%';
+}
+function validationLeaderboard(entries) {
+  const realRacers = (entries || []).map(item => ({...item, demo:false}));
+  const demoRacers = [
+    {rank:'Demo', validator_id:'demo_validator_100', validator_account:'Visual placeholder', decisions:100, runs:1, datasets:1, accuracy:null, demo:true},
+    {rank:'Demo', validator_id:'demo_validator_50', validator_account:'Visual placeholder', decisions:50, runs:1, datasets:1, accuracy:null, demo:true}
+  ];
+  const racers = realRacers.length < 3 ? [...realRacers, ...demoRacers] : realRacers;
+  if (!racers.length) return '<div class="muted">No synced validation columns yet.</div>';
+  const maxDecisions = Math.max(1, ...racers.map(item => Number(item.decisions || 0)));
+  racers.sort((a, b) => Number(b.decisions || 0) - Number(a.decisions || 0));
+  return `<div class="race">${racers.slice(0, 8).map(item => {
+    const decisions = Number(item.decisions || 0);
+    const pct = Math.max(8, Math.min(100, decisions / maxDecisions * 100));
+    const score = modelScore(item.accuracy);
+    const rank = item.demo ? 'Demo' : `#${displayValue(item.rank || '')}`;
+    const account = item.validator_account ? `<span>${esc(item.validator_account)}</span>` : `<span>${esc(item.runs || 0)} run(s), ${esc(item.datasets || 0)} dataset(s)</span>`;
+    const scoreText = item.demo ? 'placeholder' : `model score ${score}`;
+    return `<div class="race-row ${item.demo ? 'demo' : ''}">
+      <div class="race-name"><span>${esc(rank)}</span><strong>${esc(item.validator_id || 'unknown')}</strong>${account}</div>
+      <div class="race-lane" style="--pct:${pct}%"><div class="race-fill"></div><div class="race-line"></div><div class="race-car"><span class="race-wheel left"></span><span class="race-wheel right"></span></div></div>
+      <div class="race-score"><strong>${esc(decisions)}</strong><span>validated columns &middot; ${esc(scoreText)}</span></div>
+    </div>`;
+  }).join('')}</div>`;
+}
+function validationRunsList(runs) {
+  const rows = (runs || []).slice(0, 8).map(r => {
+    const runId = displayValue(r.run_id || '');
+    const dataset = displayValue(r.dataset_file || '');
+    return `<tr>
+      <td class="mono" title="${esc(runId)}">${esc(shortText(runId, 24))}</td>
+      <td>${esc(shortText(r.validator_id || 'unknown', 22))}</td>
+      <td title="${esc(dataset)}">${esc(shortText(dataset, 30))}</td>
+      <td>${esc(modelScore(r.accuracy))}</td>
+      <td>${esc(r.decisions || 0)}</td>
+    </tr>`;
+  }).join('');
+  return rawTable(['<th>Run</th>','<th>Validator</th>','<th>Dataset</th>','<th>Model score</th>','<th>Validated columns</th>'], rows);
+}
 
 async function dashboard() {
   $('#main').innerHTML = `<h1>Dashboard</h1><div class="sub">Research metrics, validation outcomes, and dataset inspection.</div><div id="status" class="status">Loading...</div><div id="dashboardBody"></div>`;
@@ -148,12 +217,11 @@ async function dashboard() {
     state.datasets = datasets.local || [];
     state.localInputs = localInputs || [];
     const options = state.datasets.map(d => `<option value="${esc(d.local_path || d.location)}">${esc(d.run_id || d.name)} - ${esc(d.name)} (${esc(d.row_count ?? '?')} rows)</option>`).join('');
-    const imageOptions = state.localInputs.map(d => `<option value="${esc(d.path)}">${esc(d.name)} (${esc(d.image_count)} images)</option>`).join('');
     $('#dashboardBody').innerHTML = `
       <div class="grid">
         ${metric('Datasets', summary.dataset_count)}
         ${metric('Dataset rows', summary.dataset_rows)}
-        ${metric('Validation decisions', summary.validation_count)}
+        ${metric('Synced validated columns', summary.shared_validation_count ?? 0)}
         ${metric('Processing records', summary.processing_record_count)}
       </div>
       <div class="split">
@@ -164,8 +232,11 @@ async function dashboard() {
           <div id="analysis">${state.datasets.length ? '' : '<div class="muted">No local datasets found.</div>'}</div>
         </section>
         <section class="panel">
+          <h2>Validation Leaderboard</h2>
+          <div class="small-note">Cloud-synced validation runs only. Demo rows are visual placeholders when there are too few synced validators.</div>
+          ${validationLeaderboard(summary.shared_validation_leaderboard || [])}
           <h2>Validation Runs</h2>
-          ${table(['Run','Validator','Dataset','Accuracy','Decisions'], (summary.validation_runs || []).slice(0,12).map(r => [r.run_id, r.validator_id, r.dataset_file, r.accuracy == null ? '-' : r.accuracy.toFixed(1)+'%', r.decisions]))}
+          ${validationRunsList(summary.shared_validation_runs || [])}
           <h2>Start Validation</h2>
           <div class="muted">Use the browser validator for local images or signed cloud image links.</div>
           <div class="toolbar"><button class="btn" onclick="openValidatorFromDashboard()">Open validator</button></div>
@@ -209,9 +280,14 @@ function openValidatorFromDashboard() {
 async function validate() {
   $('#main').innerHTML = `<h1>Validate</h1><div class="sub">Browser validation with signed cloud image links and autosaved decisions.</div><div id="status" class="status">Loading...</div><div id="validateBody"></div>`;
   try {
-    const [datasets, localInputs] = await Promise.all([api('/api/datasets'), api('/api/local-inputs').catch(() => [])]);
+    const [datasets, localInputs, identity] = await Promise.all([
+      api('/api/datasets'),
+      api('/api/local-inputs').catch(() => []),
+      api('/api/validation/identity').catch(() => ({username:'unknown', account:'', source:''}))
+    ]);
     state.datasets = datasets.local || [];
     state.localInputs = localInputs || [];
+    state.validatorIdentity = identity || {username:'unknown', account:'', source:''};
     if (!state.selectedDataset && state.datasets.length) state.selectedDataset = state.datasets[0].local_path || state.datasets[0].location;
     if (!state.selectedLocalPath && state.localInputs.length) state.selectedLocalPath = state.localInputs[0].path;
     renderValidationSetup();
@@ -226,15 +302,18 @@ function validationDatasetOptions() {
   }).join('');
 }
 function renderValidationSetup() {
+  const identity = state.validatorIdentity || {username:'unknown', account:'', source:''};
+  const account = identity.account || identity.username || 'unknown';
+  const source = identity.source ? `Detected from ${identity.source}.` : 'Detected automatically.';
   $('#validateBody').innerHTML = `<section class="panel">
     <h2>Start Browser Validation</h2>
     <label>Dataset</label><select id="browserValidationDataset" onchange="state.selectedDataset=this.value">${validationDatasetOptions()}</select>
     <div class="toolbar"><button class="btn secondary" onclick="loadValidationSharedDatasets()">Load shared datasets</button><button class="btn secondary" onclick="validate()">Refresh local</button></div>
-    <label>Validator</label><input id="browserValidatorName" value="researcher">
+    <div class="notice"><span class="pill">Validator</span><div><strong>${esc(identity.username || 'unknown')}</strong></div><div class="muted mono">${esc(account)}</div><div class="muted">${esc(source)}</div></div>
     <label>Sampling mode</label><select id="browserSamplingMode"><option value="balanced_ucb">Balanced UCB</option><option value="random">True random</option></select>
-    <label>Image source</label><select id="browserImageSource" onchange="renderValidationImageSource()"><option value="cloud">Cloud images, signed URLs</option><option value="local">Local folder</option></select>
+    <label>Image source</label><select id="browserImageSource" onchange="renderValidationImageSource()"><option value="cloud">Cloud bucket, match by image_name</option><option value="local">Local folder</option></select>
     <div id="validationImageSourceBody"></div>
-    <details><summary>Advanced</summary><label><input id="browserCorrections" type="checkbox" checked> Enable correction entry</label></details>
+    <details><summary>Advanced</summary><label><input id="browserCorrections" type="checkbox" checked> Enable correction entry</label><label><input id="browserOfflineMode" type="checkbox"> Offline mode, do not upload validation run</label><label>Custom local image folder</label><input id="browserCustomLocalImages" placeholder="Only used when local folder is selected"></details>
     <div class="toolbar"><button class="btn" onclick="startBrowserValidation()">Start validation</button></div>
   </section>`;
   renderValidationImageSource();
@@ -259,57 +338,17 @@ function renderValidationImageSource() {
         <td>${esc(item.name)}</td><td>${esc(item.image_count)}</td><td>${esc(item.updated_at)}</td><td class="mono">${esc(item.path)}</td>
       </tr>`;
     }).join('');
-    $('#validationImageSourceBody').innerHTML = `<label>Local image folder</label>${rawTable(['<th class="select-cell"></th>','<th>Name</th>','<th>Images</th>','<th>Updated</th>','<th>Path</th>'], rows)}
-      <details><summary>Advanced</summary><label>Custom local folder</label><input id="browserCustomLocalImages" placeholder="Only use if the folder is not listed"></details>`;
+    $('#validationImageSourceBody').innerHTML = `<label>Local image folder</label>${rawTable(['<th class="select-cell"></th>','<th>Name</th>','<th>Images</th>','<th>Updated</th>','<th>Path</th>'], rows)}`;
     return;
   }
-  renderValidationCloudInputs();
+  const body = $('#validationImageSourceBody');
+  if (!body) return;
+  body.innerHTML = `<label>Cloud images</label><div class="notice"><span class="pill">Automatic</span><div>Images are matched from the configured GCS bucket by each dataset row's <span class="mono">image_name</span>.</div><div class="muted">Only the active image, plus a small lookahead batch, is resolved while validating. Signed image links are not stored.</div></div>`;
 }
 function selectValidationLocalInput(index) {
   const item = state.localInputs[index];
   if (item) state.selectedLocalPath = item.path;
   renderValidationImageSource();
-}
-async function loadValidationCloudInputs() {
-  setStatus('Loading cloud image folders...');
-  try {
-    state.cloudInputs = await api('/api/cloud-inputs');
-    state.selectedValidationCloudPrefixes = new Set([...state.selectedValidationCloudPrefixes].filter(prefix => state.cloudInputs.some(c => c.prefix === prefix)));
-    renderValidationCloudInputs();
-    setStatus(`Loaded ${state.cloudInputs.length} cloud folder(s).`);
-  } catch (e) { setStatus(e.message, true); }
-}
-function renderValidationCloudInputs() {
-  const body = $('#validationImageSourceBody');
-  if (!body) return;
-  if (!state.cloudInputs.length) {
-    body.innerHTML = `<label>Cloud image folders</label><div class="toolbar"><button class="btn secondary" onclick="loadValidationCloudInputs()">Load cloud folders</button></div><div class="muted">Cloud images are displayed with short-lived signed URLs. Links are not stored in validation outputs.</div>
-      <details><summary>Advanced</summary><label>Custom cloud prefix</label><input id="browserCustomCloudPrefix" placeholder="Only use if the folder is not listed"></details>`;
-    return;
-  }
-  const allChecked = state.cloudInputs.length > 0 && state.cloudInputs.every(c => state.selectedValidationCloudPrefixes.has(c.prefix));
-  const rows = state.cloudInputs.map((item, i) => {
-    const checked = state.selectedValidationCloudPrefixes.has(item.prefix) ? 'checked' : '';
-    return `<tr class="clickable ${checked ? 'selected' : ''}" onclick="toggleValidationCloudInput(${i})">
-      <td class="select-cell"><input type="checkbox" ${checked} onclick="event.stopPropagation(); toggleValidationCloudInput(${i}, this.checked)"></td>
-      <td>${esc(item.prefix)}</td><td>${esc(item.image_count)}</td><td>${esc(item.updated_at)}</td>
-    </tr>`;
-  }).join('');
-  body.innerHTML = `<label>Cloud image folders</label>${rawTable([`<th class="select-cell"><input type="checkbox" ${allChecked ? 'checked' : ''} onchange="toggleAllValidationCloudInputs(this.checked)"></th>`, '<th>Prefix</th>', '<th>Images</th>', '<th>Updated</th>'], rows)}
-    <details><summary>Advanced</summary><label>Custom cloud prefix</label><input id="browserCustomCloudPrefix" placeholder="Only use if the folder is not listed"></details>`;
-}
-function toggleValidationCloudInput(index, checked=null) {
-  const item = state.cloudInputs[index];
-  if (!item) return;
-  const next = checked === null ? !state.selectedValidationCloudPrefixes.has(item.prefix) : checked;
-  if (next) state.selectedValidationCloudPrefixes.add(item.prefix); else state.selectedValidationCloudPrefixes.delete(item.prefix);
-  renderValidationCloudInputs();
-  setStatus(`${state.selectedValidationCloudPrefixes.size} cloud folder(s) selected.`);
-}
-function toggleAllValidationCloudInputs(checked) {
-  state.selectedValidationCloudPrefixes = checked ? new Set(state.cloudInputs.map(c => c.prefix)) : new Set();
-  renderValidationCloudInputs();
-  setStatus(`${state.selectedValidationCloudPrefixes.size} cloud folder(s) selected.`);
 }
 async function startBrowserValidation() {
   const results = $('#browserValidationDataset')?.value || state.selectedDataset;
@@ -321,10 +360,7 @@ async function startBrowserValidation() {
     images = ($('#browserCustomLocalImages')?.value || '').trim() || state.selectedLocalPath || '';
     if (!images) return setStatus('Select a local image folder.', true);
   } else {
-    cloudPrefixes = [...state.selectedValidationCloudPrefixes];
-    const custom = ($('#browserCustomCloudPrefix')?.value || '').trim();
-    if (!cloudPrefixes.length && custom) cloudPrefixes = [custom];
-    if (!cloudPrefixes.length) return setStatus('Load and select one or more cloud image folders.', true);
+    cloudPrefixes = [];
   }
   setStatus('Starting browser validation...');
   try {
@@ -335,8 +371,8 @@ async function startBrowserValidation() {
         image_source: imageSource,
         images,
         cloud_prefixes: cloudPrefixes,
-        username: $('#browserValidatorName')?.value || 'researcher',
         corrections: $('#browserCorrections')?.checked ?? true,
+        offline: $('#browserOfflineMode')?.checked || false,
         sampling_mode: $('#browserSamplingMode')?.value || 'balanced_ucb'
       }),
       headers:{'Content-Type':'application/json'}
@@ -349,11 +385,13 @@ function renderValidationSample(sample) {
   state.validationSample = sample;
   state.validationSession = sample.session_id || state.validationSession;
   state.validationZoom = 1;
+  const finishLabel = sample.offline_mode ? 'Save locally' : 'Save and sync';
   if (sample.status === 'complete') {
+    const saveAction = sample.saved ? `<button class="btn" disabled>Saved</button>` : `<button class="btn" onclick="finishBrowserValidation()">${finishLabel}</button>`;
     $('#main').innerHTML = `<h1>Validate</h1><div class="sub">Validation complete.</div><div id="status" class="status"></div>
       <section class="panel">
         <div class="grid">${metric('Decisions', sample.decisions)}${metric('Total pairs', sample.total_pairs)}${metric('Remaining', sample.remaining_pairs)}</div>
-        <div class="toolbar"><button class="btn" onclick="finishBrowserValidation()">Save and sync</button><button class="btn secondary" onclick="validate()">New validation</button></div>
+        <div class="toolbar">${saveAction}<button class="btn secondary" onclick="validate()">New validation</button></div>
         <div class="mono">${esc(sample.run_id || '')}</div>
         <div class="mono">${esc(sample.csv_path || '')}</div>
       </section>`;
@@ -373,14 +411,15 @@ function renderValidationSample(sample) {
       </section>
       <section class="panel">
         <h2>${esc(sample.image_name)}</h2>
+        <div class="notice"><span class="pill">Validator</span><strong>${esc(sample.validator_id || 'unknown')}</strong>${sample.offline_mode ? '<span class="pill">Offline</span>' : ''}<div class="muted mono">${esc(sample.validator_account || '')}</div></div>
         <div class="muted mono">${esc(sample.image_source)} - ${esc(sample.image_uri)}</div>
         <div class="grid" style="grid-template-columns:1fr 1fr; margin:12px 0;">
           ${metric('Decisions', sample.decisions)}
           ${metric('Remaining', sample.remaining_pairs)}
         </div>
         <label>Field</label><input value="${esc(sample.field_name)}" readonly>
-        <label>Extracted value</label><textarea readonly>${esc(sample.field_value)}</textarea>
-        <label>Correction</label><textarea id="validationCorrection" ${sample.allow_corrections ? '' : 'readonly'}>${esc(sample.correction_value)}</textarea>
+        <label>Model transcription</label><textarea readonly>${esc(sample.field_value)}</textarea>
+        <label>Corrected value</label><textarea id="validationCorrection" ${sample.allow_corrections ? '' : 'readonly'} placeholder="Edit this value before saving a correction">${esc(sample.correction_value)}</textarea>
         <div class="decision-grid">
           <button class="btn accept" onclick="markValidation('accept')">Accept</button>
           <button class="btn partial" onclick="markValidation('somewhat_accept')">Somewhat</button>
@@ -428,8 +467,11 @@ async function finishBrowserValidation() {
       body: JSON.stringify({ session_id: state.validationSession }),
       headers:{'Content-Type':'application/json'}
     });
+    renderValidationSample(result);
     const upload = result.uploaded?.validation_csv_uri ? ` Synced: ${result.uploaded.validation_csv_uri}` : '';
-    setStatus(`Saved ${result.decisions} validation decision(s).${upload}`);
+    const skipped = result.upload_skipped_reason === 'offline_mode' ? ' Offline mode: not uploaded.' : '';
+    const uploadError = result.upload_error ? ` Upload failed, but local files were saved: ${result.upload_error}` : '';
+    setStatus(`Saved ${result.decisions} validation decision(s).${upload}${skipped}${uploadError}`, Boolean(result.upload_error));
   } catch (e) { setStatus(e.message, true); }
 }
 
@@ -904,6 +946,8 @@ class AppHandler(BaseHTTPRequestHandler):
                 if not path:
                     raise ValueError("Missing dataset path.")
                 self._send_json(self.service.analyze_dataset(path))
+            elif parsed.path == "/api/validation/identity":
+                self._send_json(self.service.validation_identity())
             elif parsed.path == "/api/validation/session":
                 session_id = query.get("session_id", [""])[0]
                 if not session_id:
@@ -1013,9 +1057,9 @@ class AppHandler(BaseHTTPRequestHandler):
                         image_source=str(payload.get("image_source") or "cloud"),
                         images=str(payload.get("images") or ""),
                         cloud_prefixes=tuple(str(item) for item in raw_prefixes if item),
-                        username=str(payload.get("username") or "researcher"),
                         corrections=bool(payload.get("corrections", True)),
                         sampling_mode=str(payload.get("sampling_mode") or "balanced_ucb"),
+                        offline=bool(payload.get("offline")),
                     )
                 )
             elif parsed.path == "/api/validation/session/mark":

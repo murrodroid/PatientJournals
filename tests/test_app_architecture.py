@@ -4,7 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from patientjournals.app import datasets as app_datasets
-from patientjournals.app.access import run_access_checks
+from patientjournals.app.access import resolve_validator_identity, run_access_checks
 from patientjournals.app.catalog import (
     list_google_model_options,
     list_schema_options,
@@ -284,6 +284,56 @@ def test_dashboard_summary_reads_metrics_and_validations(tmp_path) -> None:
     assert summary.validation_label_counts == {"accept": 1, "reject": 1}
     assert summary.validation_runs[0].accuracy == 50.0
     assert [metric.metric for metric in summary.validation_metrics] == ["x", "y"]
+    assert summary.validation_leaderboard[0].validator_id == "unknown"
+    assert summary.validation_leaderboard[0].decisions == 2
+    assert summary.shared_validation_count == 0
+    assert summary.shared_validation_runs == ()
+    assert summary.shared_validation_leaderboard == ()
+
+
+def test_dashboard_validation_leaderboard_ranks_validators(tmp_path) -> None:
+    validations = tmp_path / "validations"
+    alice = validations / "alice_run"
+    bob = validations / "bob_run"
+    alice.mkdir(parents=True)
+    bob.mkdir(parents=True)
+    (alice / "alice_run_validations.csv").write_text(
+        "\n".join(
+            [
+                "label,column_name,image_name,dataset_file,validator_id,validator_account,decided_at",
+                "accept,name,a.png,dataset.jsonl,alice,alice@gmail.com,2026-07-01T10:00:00",
+                "reject,date,b.png,dataset.jsonl,alice,alice@gmail.com,2026-07-01T10:01:00",
+                "unsure,date,c.png,dataset.jsonl,alice,alice@gmail.com,2026-07-01T10:02:00",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (bob / "bob_run_validations.csv").write_text(
+        "\n".join(
+            [
+                "label,column_name,image_name,dataset_file,validator_id,validator_account,decided_at",
+                "accept,name,d.png,dataset.jsonl,bob,bob@gmail.com,2026-07-01T10:00:00",
+                "corrected,date,e.png,other.jsonl,bob,bob@gmail.com,2026-07-01T10:01:00",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    summary = summarize_dashboard(run_root=tmp_path / "runs", validations_root=validations)
+    leaders = summary.validation_leaderboard
+
+    assert [leader.validator_id for leader in leaders] == ["alice", "bob"]
+    assert leaders[0].rank == 1
+    assert leaders[0].decisions == 3
+    assert leaders[0].runs == 1
+    assert leaders[0].datasets == 1
+    assert leaders[0].scored == 2
+    assert leaders[0].accuracy == 50.0
+    assert leaders[0].validator_account == "alice@gmail.com"
+    assert leaders[1].decisions == 2
+    assert summary.shared_validation_leaderboard == ()
 
 
 def test_dashboard_summary_reads_shared_validation_rows(tmp_path, monkeypatch) -> None:
@@ -320,6 +370,10 @@ def test_dashboard_summary_reads_shared_validation_rows(tmp_path, monkeypatch) -
     assert summary.validation_count == 2
     assert summary.validation_runs[0].validator_id == "alice"
     assert summary.validation_runs[0].accuracy == 50.0
+    assert summary.shared_validation_count == 2
+    assert summary.shared_validation_runs[0].validator_id == "alice"
+    assert summary.shared_validation_leaderboard[0].validator_id == "alice"
+    assert summary.shared_validation_leaderboard[0].decisions == 2
     assert summary.validation_sync_error == ""
 
 
@@ -507,11 +561,16 @@ def test_validation_upload_writes_metadata_and_uploads_files(tmp_path, monkeypat
         csv_path=csv_path,
         dataset_path=dataset_path,
         validator_id="alice",
+        validator_account="alice@gmail.com",
         decision_count=1,
+        cloud_sync_enabled=False,
     )
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
 
     assert metadata["validator_id"] == "alice"
+    assert metadata["validator_username"] == "alice"
+    assert metadata["validator_account"] == "alice@gmail.com"
+    assert metadata["cloud_sync_enabled"] is False
     assert metadata["dataset_file"] == "dataset.jsonl"
     assert metadata["decision_count"] == 1
 
@@ -546,6 +605,23 @@ def test_validation_upload_writes_metadata_and_uploads_files(tmp_path, monkeypat
         ("validations/alice_20260618/alice_20260618_validations.csv", "text/csv"),
         ("validations/alice_20260618/validation_metadata.json", "application/json"),
     ]
+
+
+def test_validator_identity_uses_active_gcloud_account() -> None:
+    import subprocess
+
+    def runner(command):
+        if command[:3] == ("gcloud", "auth", "list"):
+            return subprocess.CompletedProcess(command, 0, stdout="lucas37c@gmail.com\n", stderr="")
+        return subprocess.CompletedProcess(command, 1, stdout="", stderr="unexpected")
+
+    identity = resolve_validator_identity(AppSettings(), runner=runner)
+
+    assert identity == {
+        "username": "lucas37c",
+        "account": "lucas37c@gmail.com",
+        "source": "gcloud",
+    }
 
 
 def test_settings_store_roundtrip(tmp_path) -> None:

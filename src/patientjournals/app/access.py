@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import getpass
+import json
 import re
 import subprocess
 from dataclasses import dataclass
@@ -89,6 +90,59 @@ def _warn(name: str, detail: str, fix: str = "") -> AccessCheckResult:
 def _sanitize_probe_part(value: str) -> str:
     clean = re.sub(r"[^a-zA-Z0-9._-]+", "-", value.strip())
     return clean.strip("-") or "user"
+
+
+def active_gcloud_account(*, runner: CommandRunner | None = None) -> str:
+    command_runner = runner or _default_runner
+    code, account, _stderr = _run_text(
+        command_runner,
+        ("gcloud", "auth", "list", "--filter=status:ACTIVE", "--format=value(account)"),
+    )
+    if code != 0 or not account:
+        return ""
+    return account.splitlines()[0].strip()
+
+
+def _service_account_email(settings: AppSettings) -> str:
+    if not settings.service_account_file:
+        return ""
+    path = Path(settings.service_account_file).expanduser()
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    return str(payload.get("client_email") or "").strip()
+
+
+def validator_username_from_account(account: str) -> str:
+    value = str(account or "").strip()
+    if "@" in value:
+        value = value.split("@", 1)[0]
+    return _sanitize_probe_part(value)
+
+
+def resolve_validator_identity(
+    settings: AppSettings,
+    *,
+    runner: CommandRunner | None = None,
+) -> dict[str, str]:
+    account = active_gcloud_account(runner=runner)
+    source = "gcloud" if account else ""
+    if not account:
+        account = _service_account_email(settings)
+        source = "service_account" if account else ""
+    if not account:
+        account = getpass.getuser()
+        source = "system_user"
+    return {
+        "username": validator_username_from_account(account),
+        "account": account,
+        "source": source,
+    }
 
 
 def _configured_prefixes(settings: AppSettings) -> tuple[tuple[str, str], ...]:

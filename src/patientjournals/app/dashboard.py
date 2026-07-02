@@ -50,6 +50,23 @@ class ValidationRunSummary:
 
 
 @dataclass(frozen=True)
+class ValidationLeaderboardEntry:
+    rank: int
+    validator_id: str
+    validator_account: str
+    decisions: int
+    runs: int
+    datasets: int
+    scored: int
+    accepted: int
+    somewhat_accepted: int
+    rejected: int
+    corrected: int
+    unsure: int
+    accuracy: float | None
+
+
+@dataclass(frozen=True)
 class DashboardSummary:
     dataset_count: int
     dataset_rows: int
@@ -66,6 +83,10 @@ class DashboardSummary:
     duplicate_actions: dict[str, int]
     validation_runs: tuple[ValidationRunSummary, ...]
     validation_metrics: tuple[ValidationMetricSummary, ...]
+    validation_leaderboard: tuple[ValidationLeaderboardEntry, ...]
+    shared_validation_count: int
+    shared_validation_runs: tuple[ValidationRunSummary, ...]
+    shared_validation_leaderboard: tuple[ValidationLeaderboardEntry, ...]
     validation_sync_error: str = ""
 
 
@@ -572,6 +593,83 @@ def _summarize_validation_metrics(
     )
 
 
+def _summarize_validation_leaderboard(
+    rows: list[dict[str, str]],
+) -> tuple[ValidationLeaderboardEntry, ...]:
+    grouped: dict[str, list[dict[str, str]]] = {}
+    for row in rows:
+        validator = str(
+            row.get("validator_id")
+            or row.get("validator_username")
+            or row.get("validator_account")
+            or "unknown"
+        ).strip() or "unknown"
+        grouped.setdefault(validator, []).append(row)
+
+    entries: list[ValidationLeaderboardEntry] = []
+    for validator, group in grouped.items():
+        counts = _validation_counts(group)
+        scored, accuracy = _validation_accuracy(group)
+        accounts = sorted(
+            {
+                str(row.get("validator_account") or "").strip()
+                for row in group
+                if str(row.get("validator_account") or "").strip()
+            }
+        )
+        runs = {
+            str(row.get("_validation_run") or "").strip()
+            for row in group
+            if str(row.get("_validation_run") or "").strip()
+        }
+        datasets = {
+            str(row.get("dataset_file") or "").strip()
+            for row in group
+            if str(row.get("dataset_file") or "").strip()
+        }
+        entries.append(
+            ValidationLeaderboardEntry(
+                rank=0,
+                validator_id=validator,
+                validator_account=accounts[0] if accounts else "",
+                decisions=len(group),
+                runs=len(runs),
+                datasets=len(datasets),
+                scored=scored,
+                accuracy=accuracy,
+                **counts,
+            )
+        )
+
+    sorted_entries = sorted(
+        entries,
+        key=lambda item: (
+            -item.decisions,
+            -item.scored,
+            -(item.accuracy if item.accuracy is not None else -1.0),
+            item.validator_id,
+        ),
+    )
+    return tuple(
+        ValidationLeaderboardEntry(
+            rank=index,
+            validator_id=item.validator_id,
+            validator_account=item.validator_account,
+            decisions=item.decisions,
+            runs=item.runs,
+            datasets=item.datasets,
+            scored=item.scored,
+            accepted=item.accepted,
+            somewhat_accepted=item.somewhat_accepted,
+            rejected=item.rejected,
+            corrected=item.corrected,
+            unsure=item.unsure,
+            accuracy=item.accuracy,
+        )
+        for index, item in enumerate(sorted_entries, start=1)
+    )
+
+
 def _load_processing_records(run_root: str | Path = "runs") -> list[dict[str, Any]]:
     root = Path(run_root).expanduser()
     if not root.exists() or not root.is_dir():
@@ -604,11 +702,17 @@ def summarize_dashboard(
     validation_rows = _dedupe_validation_rows(
         [*local_validation_rows, *cloud_validation_rows]
     )
+    shared_validation_rows = _dedupe_validation_rows(cloud_validation_rows)
     validation_label_counts = _counter(
         str(row.get("label") or "").lower() for row in validation_rows
     )
     validation_runs = _summarize_validation_runs(validation_rows)
     validation_metrics = _summarize_validation_metrics(validation_rows)
+    validation_leaderboard = _summarize_validation_leaderboard(validation_rows)
+    shared_validation_runs = _summarize_validation_runs(shared_validation_rows)
+    shared_validation_leaderboard = _summarize_validation_leaderboard(
+        shared_validation_rows
+    )
 
     processing_records = _load_processing_records(run_root)
     processing_summary = summarize_processing_records(processing_records)
@@ -640,6 +744,10 @@ def summarize_dashboard(
         },
         validation_runs=validation_runs,
         validation_metrics=validation_metrics,
+        validation_leaderboard=validation_leaderboard,
+        shared_validation_count=len(shared_validation_rows),
+        shared_validation_runs=shared_validation_runs,
+        shared_validation_leaderboard=shared_validation_leaderboard,
         validation_sync_error=validation_sync_error,
     )
 

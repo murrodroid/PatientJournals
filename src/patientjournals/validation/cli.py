@@ -42,6 +42,40 @@ class ValidationDatapoint:
     image_name: str
     field_name: str
     field_value: object
+    value_state: str
+
+    @property
+    def sampling_group(self) -> str:
+        return validation_sampling_group_key(self.field_name, self.value_state)
+
+
+def _is_missing_value(value: object) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        return normalized in {"", "nan", "none", "null", "na", "n/a", "<na>"}
+    try:
+        is_missing = pd.isna(value)
+    except (TypeError, ValueError):
+        return False
+    if isinstance(is_missing, bool):
+        return is_missing
+    if hasattr(is_missing, "item"):
+        try:
+            return bool(is_missing.item())
+        except (TypeError, ValueError):
+            return False
+    return False
+
+
+def validation_value_state(value: object) -> str:
+    return "missing" if _is_missing_value(value) else "present"
+
+
+def validation_sampling_group_key(field_name: str, value_state: str) -> str:
+    state = "missing" if value_state == "missing" else "present"
+    return f"{field_name}::{state}"
 
 def build_image_index(root_dir: Path) -> dict[str, Any]:
     index: dict[str, Any] = {}
@@ -82,8 +116,6 @@ def eligible_flat_fields(row: dict) -> list[tuple[str, object]]:
     for key, value in flat.items():
         if not _is_validation_schema_field(key):
             continue
-        if value is None or (isinstance(value, float) and pd.isna(value)):
-            continue
         if isinstance(value, (dict, list)):
             continue
         candidates.append((key, value))
@@ -115,6 +147,7 @@ def build_validation_datapoints(
                     image_name=image_name,
                     field_name=field_name,
                     field_value=field_value,
+                    value_state=validation_value_state(field_value),
                 )
             )
     return datapoints
@@ -122,6 +155,20 @@ def build_validation_datapoints(
 
 def _score_for_label(label: str) -> float | None:
     return _SCORE_BY_LABEL.get(label)
+
+
+def _count_for_sampling_group(
+    counts: dict[str, int],
+    item: ValidationDatapoint,
+) -> int:
+    return counts.get(item.sampling_group, counts.get(item.field_name, 0))
+
+
+def _sum_for_sampling_group(
+    sums: dict[str, float],
+    item: ValidationDatapoint,
+) -> float:
+    return sums.get(item.sampling_group, sums.get(item.field_name, 0.0))
 
 
 def choose_random_datapoint(
@@ -148,42 +195,46 @@ def choose_balanced_ucb_datapoint(
     target_lambda: float = _BALANCED_UCB_LAMBDA,
     gamma: float = _BALANCED_UCB_GAMMA,
 ) -> ValidationDatapoint | None:
-    remaining_by_field: dict[str, list[ValidationDatapoint]] = {}
-    total_by_field: dict[str, int] = {}
+    remaining_by_group: dict[str, list[ValidationDatapoint]] = {}
+    total_by_group: dict[str, int] = {}
+    representative_by_group: dict[str, ValidationDatapoint] = {}
     for item in datapoints:
-        total_by_field[item.field_name] = total_by_field.get(item.field_name, 0) + 1
+        group_key = item.sampling_group
+        total_by_group[group_key] = total_by_group.get(group_key, 0) + 1
+        representative_by_group.setdefault(group_key, item)
         if (item.image_name, item.field_name) not in validated_pairs:
-            remaining_by_field.setdefault(item.field_name, []).append(item)
-    if not remaining_by_field:
+            remaining_by_group.setdefault(group_key, []).append(item)
+    if not remaining_by_group:
         return None
 
     total_datapoints = max(1, len(datapoints))
-    group_count = max(1, len(total_by_field))
+    group_count = max(1, len(total_by_group))
     t = sum(selection_counts.values())
     denominator = max(t, 1)
     log_term = math.log(max(t, 2))
     scored_groups = []
-    for field_name in remaining_by_field:
-        n_g = selection_counts.get(field_name, 0)
-        m_g = scored_counts.get(field_name, 0)
+    for group_key in remaining_by_group:
+        representative = representative_by_group[group_key]
+        n_g = _count_for_sampling_group(selection_counts, representative)
+        m_g = _count_for_sampling_group(scored_counts, representative)
         # Smoothed field accuracy is kept for diagnostics and future reporting;
         # selection uses coverage deficit plus uncertainty, not reward maximization.
-        _p_hat_g = (score_sums.get(field_name, 0.0) + 1.0) / (m_g + 2.0)
+        _p_hat_g = (_sum_for_sampling_group(score_sums, representative) + 1.0) / (
+            m_g + 2.0
+        )
         q_g = (1.0 - target_lambda) * (1.0 / group_count) + target_lambda * (
-            total_by_field[field_name] / total_datapoints
+            total_by_group[group_key] / total_datapoints
         )
         deficit = q_g - (n_g / denominator)
         uncertainty = math.sqrt((2.0 * log_term) / (m_g + 1.0))
         score = deficit + gamma * uncertainty
-        scored_groups.append((score, rng.random(), field_name))
+        scored_groups.append((score, rng.random(), group_key))
 
-    _score, _tie_breaker, selected_field = max(scored_groups)
-    return rng.choice(remaining_by_field[selected_field])
+    _score, _tie_breaker, selected_group = max(scored_groups)
+    return rng.choice(remaining_by_group[selected_group])
 
 def _stringify_value(value: object) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, float) and pd.isna(value):
+    if _is_missing_value(value):
         return ""
     return str(value)
 
@@ -551,8 +602,9 @@ class ValidatorApp:
             self.current_row = datapoint.row
             self.current_image = datapoint.image_path
             self.current_field = (datapoint.field_name, datapoint.field_value)
-            self.selection_counts[datapoint.field_name] = (
-                self.selection_counts.get(datapoint.field_name, 0) + 1
+            group_key = datapoint.sampling_group
+            self.selection_counts[group_key] = (
+                self.selection_counts.get(group_key, 0) + 1
             )
             self.show_sample()
             return
@@ -651,14 +703,16 @@ class ValidatorApp:
                 "validator_id": self.username,
                 "decided_at": decided_at,
                 "corrected_field": corrected_field,
+                "value_state": self.current_datapoint.value_state,
                 "sampling_mode": self.sampling_mode,
             }
         )
         self.validated_pairs.add((file_name, field_name))
         score = _score_for_label(label)
         if score is not None:
-            self.scored_counts[field_name] = self.scored_counts.get(field_name, 0) + 1
-            self.score_sums[field_name] = self.score_sums.get(field_name, 0.0) + score
+            group_key = self.current_datapoint.sampling_group
+            self.scored_counts[group_key] = self.scored_counts.get(group_key, 0) + 1
+            self.score_sums[group_key] = self.score_sums.get(group_key, 0.0) + score
         self.log(f"Marked {file_name} {field_name} label={label}")
         self.next_sample()
 
@@ -699,6 +753,7 @@ class ValidatorApp:
                     "validator_id",
                     "decided_at",
                     "corrected_field",
+                    "value_state",
                     "sampling_mode",
                 ],
             )

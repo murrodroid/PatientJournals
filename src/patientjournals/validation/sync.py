@@ -18,8 +18,10 @@ def write_validation_metadata(
     csv_path: str | Path,
     dataset_path: str | Path,
     validator_id: str,
+    validator_account: str = "",
     decision_count: int,
     sampling_mode: str = "",
+    cloud_sync_enabled: bool = True,
 ) -> Path:
     run_path = Path(run_dir).expanduser()
     dataset = Path(dataset_path).expanduser()
@@ -27,7 +29,10 @@ def write_validation_metadata(
     metadata = {
         "run_id": run_path.name,
         "validator_id": validator_id,
+        "validator_username": validator_id,
+        "validator_account": validator_account,
         "sampling_mode": sampling_mode,
+        "cloud_sync_enabled": bool(cloud_sync_enabled),
         "dataset_file": dataset.name,
         "dataset_path": str(dataset),
         "validation_file": csv_file.name,

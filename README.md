@@ -208,7 +208,7 @@ Generate validation plots:
 uv run invoke validation.report --input-path validations --out validation_reports --min-n 1
 ```
 
-The web app Dashboard reads job-store datasets, `runs/**/image_processing_manifest.jsonl`, and `validations/**/*_validations.csv` to display status, source, attempts, timing, failure, field-completeness, and validation label distributions. The same page can launch `validation.validate` with corrections enabled. Validation sampling supports `random` and `balanced_ucb`; both sample only true schema fields and exclude processing metadata such as `thoughts`, `failure_reason`, `avg_logprobs`, and `crossed_out`.
+The web app Dashboard reads job-store datasets, `runs/**/image_processing_manifest.jsonl`, and `validations/**/*_validations.csv` to display status, source, attempts, timing, failure, field-completeness, and validation label distributions. The same page can launch browser validation with corrections enabled. Browser validation derives the validator username from the active Google account (for example `name@gmail.com` becomes `name`) and records the account in each validation run's CSV and metadata. For cloud images, validation matches dataset `image_name` values directly against the configured GCS pages prefix and resolves signed URLs lazily in small batches while you validate; there is no separate cloud image-folder selection step. Validation runs sync to the shared cloud bucket by default; Advanced includes an offline mode for debugging that saves locally without uploading. Validation sampling supports `random` and `balanced_ucb`; both sample only true schema fields and exclude processing metadata such as `thoughts`, `failure_reason`, `avg_logprobs`, and `crossed_out`.
 
 ## Tests
 
