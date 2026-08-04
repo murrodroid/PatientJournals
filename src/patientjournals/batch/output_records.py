@@ -169,3 +169,23 @@ def add_response_metadata_columns(
         row["thoughts"] = metadata.get("thoughts") or None
         if bool(getattr(config, "include_response_avg_logprobs", False)):
             row["avg_logprobs"] = metadata.get("avg_logprobs")
+
+
+def add_reproducibility_columns(
+    rows: list[dict],
+    *,
+    model: str = "",
+    provider: str = "",
+) -> None:
+    resolved_model = str(model or config.model or "")
+    resolved_provider = str(provider or "")
+    schema_name = str(getattr(config, "output_schema_name", "") or "")
+    schema_version_id = str(
+        getattr(config, "output_schema_version_id", "") or ""
+    )
+    for row in rows:
+        row["model"] = resolved_model
+        if resolved_provider:
+            row["provider"] = resolved_provider
+        row["schema_name"] = schema_name
+        row["schema_version_id"] = schema_version_id

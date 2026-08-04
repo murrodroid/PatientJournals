@@ -43,10 +43,27 @@ class ValidationDatapoint:
     field_name: str
     field_value: object
     value_state: str
+    model_name: str = ""
+    schema_name: str = ""
+    schema_version_id: str = ""
 
     @property
     def sampling_group(self) -> str:
-        return validation_sampling_group_key(self.field_name, self.value_state)
+        return validation_sampling_group_key(
+            self.field_name,
+            self.value_state,
+            self.model_name,
+            self.schema_version_id,
+        )
+
+    @property
+    def validation_key(self) -> tuple[str, str, str, str]:
+        return (
+            self.image_name,
+            self.field_name,
+            self.model_name,
+            self.schema_version_id,
+        )
 
 
 def _is_missing_value(value: object) -> bool:
@@ -73,9 +90,17 @@ def validation_value_state(value: object) -> str:
     return "missing" if _is_missing_value(value) else "present"
 
 
-def validation_sampling_group_key(field_name: str, value_state: str) -> str:
+def validation_sampling_group_key(
+    field_name: str,
+    value_state: str,
+    model_name: str = "",
+    schema_version_id: str = "",
+) -> str:
     state = "missing" if value_state == "missing" else "present"
-    return f"{field_name}::{state}"
+    model = str(model_name or "").strip()
+    schema_version = str(schema_version_id or "").strip()
+    qualifiers = [item for item in (model, schema_version) if item]
+    return "::".join([*qualifiers, field_name, state])
 
 def build_image_index(root_dir: Path) -> dict[str, Any]:
     index: dict[str, Any] = {}
@@ -110,11 +135,18 @@ def flatten_row(row: dict) -> dict:
     return flat[0] if flat else {}
 
 
-def eligible_flat_fields(row: dict) -> list[tuple[str, object]]:
+def eligible_flat_fields(
+    row: dict,
+    *,
+    allowed_fields: set[str] | None = None,
+) -> list[tuple[str, object]]:
     flat = flatten_row(row)
     candidates: list[tuple[str, object]] = []
     for key, value in flat.items():
-        if not _is_validation_schema_field(key):
+        if allowed_fields is not None:
+            if key not in allowed_fields or _is_metadata_field(key):
+                continue
+        elif not _is_validation_schema_field(key):
             continue
         if isinstance(value, (dict, list)):
             continue
@@ -130,6 +162,8 @@ def pick_flat_field(row: dict, rng: random.Random) -> tuple[str, object] | None:
 def build_validation_datapoints(
     rows: list[dict],
     image_index: dict[str, Any],
+    *,
+    schema_fields_by_version: dict[str, set[str]] | None = None,
 ) -> list[ValidationDatapoint]:
     datapoints: list[ValidationDatapoint] = []
     for row in rows:
@@ -139,7 +173,16 @@ def build_validation_datapoints(
         image_path = image_index.get(image_name)
         if image_path is None:
             continue
-        for field_name, field_value in eligible_flat_fields(row):
+        schema_version_id = str(row.get("schema_version_id") or "")
+        allowed_fields = (
+            schema_fields_by_version.get(schema_version_id)
+            if schema_fields_by_version and schema_version_id
+            else None
+        )
+        for field_name, field_value in eligible_flat_fields(
+            row,
+            allowed_fields=allowed_fields,
+        ):
             datapoints.append(
                 ValidationDatapoint(
                     row=row,
@@ -148,6 +191,9 @@ def build_validation_datapoints(
                     field_name=field_name,
                     field_value=field_value,
                     value_state=validation_value_state(field_value),
+                    model_name=str(row.get("model") or ""),
+                    schema_name=str(row.get("schema_name") or ""),
+                    schema_version_id=schema_version_id,
                 )
             )
     return datapoints
@@ -171,6 +217,16 @@ def _sum_for_sampling_group(
     return sums.get(item.sampling_group, sums.get(item.field_name, 0.0))
 
 
+def _is_validated(
+    item: ValidationDatapoint,
+    validated_pairs: set[tuple],
+) -> bool:
+    return item.validation_key in validated_pairs or (
+        item.image_name,
+        item.field_name,
+    ) in validated_pairs
+
+
 def choose_random_datapoint(
     datapoints: list[ValidationDatapoint],
     validated_pairs: set[tuple[str, str]],
@@ -179,7 +235,7 @@ def choose_random_datapoint(
     remaining = [
         item
         for item in datapoints
-        if (item.image_name, item.field_name) not in validated_pairs
+        if not _is_validated(item, validated_pairs)
     ]
     return rng.choice(remaining) if remaining else None
 
@@ -202,7 +258,7 @@ def choose_balanced_ucb_datapoint(
         group_key = item.sampling_group
         total_by_group[group_key] = total_by_group.get(group_key, 0) + 1
         representative_by_group.setdefault(group_key, item)
-        if (item.image_name, item.field_name) not in validated_pairs:
+        if not _is_validated(item, validated_pairs):
             remaining_by_group.setdefault(group_key, []).append(item)
     if not remaining_by_group:
         return None
@@ -260,7 +316,15 @@ def _is_metadata_field(path: str) -> bool:
 
 
 def _is_validation_schema_field(path: str) -> bool:
-    return not _is_metadata_field(path) and _get_field_type(path) is not None
+    field_type = _get_field_type(path)
+    return (
+        not _is_metadata_field(path)
+        and field_type is not None
+        and not (
+            isinstance(field_type, type)
+            and issubclass(field_type, BaseModel)
+        )
+    )
 
 
 def _get_field_type(path: str) -> object | None:
@@ -329,7 +393,7 @@ class ValidatorApp:
         self.image_index = build_image_index(image_root)
         self.datapoints = build_validation_datapoints(self.rows, self.image_index)
         self.results: list[dict] = []
-        self.validated_pairs: set[tuple[str, str]] = set()
+        self.validated_pairs: set[tuple] = set()
         self.selection_counts: dict[str, int] = {}
         self.scored_counts: dict[str, int] = {}
         self.score_sums: dict[str, float] = {}
@@ -703,11 +767,15 @@ class ValidatorApp:
                 "validator_id": self.username,
                 "decided_at": decided_at,
                 "corrected_field": corrected_field,
+                "extracted_value": self.original_field_value,
                 "value_state": self.current_datapoint.value_state,
                 "sampling_mode": self.sampling_mode,
+                "model": self.current_datapoint.model_name,
+                "schema_name": self.current_datapoint.schema_name,
+                "schema_version_id": self.current_datapoint.schema_version_id,
             }
         )
-        self.validated_pairs.add((file_name, field_name))
+        self.validated_pairs.add(self.current_datapoint.validation_key)
         score = _score_for_label(label)
         if score is not None:
             group_key = self.current_datapoint.sampling_group
@@ -753,8 +821,12 @@ class ValidatorApp:
                     "validator_id",
                     "decided_at",
                     "corrected_field",
+                    "extracted_value",
                     "value_state",
                     "sampling_mode",
+                    "model",
+                    "schema_name",
+                    "schema_version_id",
                 ],
             )
             writer.writeheader()

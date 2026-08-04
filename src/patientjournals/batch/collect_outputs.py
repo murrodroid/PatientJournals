@@ -13,6 +13,7 @@ from tqdm import tqdm
 
 from patientjournals.batch.output_records import (
     GeminiOutputParseResult,
+    add_reproducibility_columns,
     add_response_metadata_columns,
     iter_gemini_jsonl_results,
 )
@@ -260,6 +261,7 @@ def write_collected_dataset(
             ),
         )
         add_response_metadata_columns(rows, result.metadata)
+        add_reproducibility_columns(rows)
         rows_to_flush.extend(rows)
 
         if len(rows_to_flush) >= flush_every:

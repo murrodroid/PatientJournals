@@ -28,6 +28,8 @@ _METADATA_FIELDS = {
     "logprobs",
     "model",
     "provider",
+    "schema_name",
+    "schema_version_id",
     "raw_response",
     "recovered",
     "rows_written",

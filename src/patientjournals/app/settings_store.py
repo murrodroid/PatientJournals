@@ -48,6 +48,8 @@ def command_override_payload(
     *,
     model_name: str = "",
     schema_name: str = "",
+    schema_version_id: str = "",
+    schema_payload: dict[str, object] | None = None,
     output_format: str = "",
     local_path: str = "",
     cloud_prefix: str = "",
@@ -59,6 +61,13 @@ def command_override_payload(
         payload["model"] = model_name
     if schema_name:
         payload["schema_name"] = schema_name
+        payload["output_schema_name"] = schema_name
+    if schema_version_id:
+        payload["schema_version_id"] = schema_version_id
+        payload["output_schema_version_id"] = schema_version_id
+    if schema_payload:
+        payload["schema_payload"] = schema_payload
+        payload["output_schema_override"] = schema_payload
     if output_format:
         payload["output_format"] = output_format
     if local_path:

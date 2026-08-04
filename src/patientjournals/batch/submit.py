@@ -673,6 +673,10 @@ def _write_batch_job_meta(
         "input_source": first.get("input_source"),
         "output_destination": first.get("output_destination"),
         "model": config.model,
+        "schema_name": str(getattr(config, "output_schema_name", "") or ""),
+        "schema_version_id": str(
+            getattr(config, "output_schema_version_id", "") or ""
+        ),
         "provider": provider,
         "client_backend": client_backend,
         "vertex_location": vertex_location,

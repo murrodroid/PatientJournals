@@ -1,5 +1,5 @@
-from pydantic import BaseModel, Field, model_validator
-from typing import List, Optional, Literal
+from pydantic import BaseModel, ConfigDict, Field, create_model, model_validator
+from typing import Any, List, Optional, Literal
 from datetime import date
 
 _SCHEMA_VERSION = 2.0
@@ -277,3 +277,168 @@ def output_schema_name(schema: type[BaseModel]) -> str:
         if schema_type is schema:
             return name
     return schema.__name__
+
+
+def model_from_json_schema(
+    name: str,
+    schema: dict[str, Any],
+) -> type[BaseModel]:
+    """Build a Pydantic model for an immutable app-managed JSON Schema version.
+
+    The providers consume the original JSON Schema directly. This model is used
+    for local and retrieved response validation, so edited schemas retain the
+    same validation path as the built-in Python schemas.
+    """
+
+    definitions = schema.get("$defs")
+    if not isinstance(definitions, dict):
+        definitions = schema.get("definitions")
+    if not isinstance(definitions, dict):
+        definitions = {}
+    model_cache: dict[str, type[BaseModel]] = {}
+
+    def model_name(value: str) -> str:
+        clean = "".join(char if char.isalnum() else "_" for char in value)
+        return clean.strip("_") or "SchemaModel"
+
+    def unwrap(node: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+        nullable = False
+        variants = node.get("anyOf") or node.get("oneOf")
+        if isinstance(variants, list):
+            candidates = []
+            for variant in variants:
+                if not isinstance(variant, dict):
+                    continue
+                if variant.get("type") == "null":
+                    nullable = True
+                else:
+                    candidates.append(variant)
+            if len(candidates) == 1:
+                merged = dict(candidates[0])
+                for key in ("description", "title", "default"):
+                    if key in node and key not in merged:
+                        merged[key] = node[key]
+                return merged, nullable
+        all_of = node.get("allOf")
+        if isinstance(all_of, list) and len(all_of) == 1 and isinstance(all_of[0], dict):
+            merged = dict(all_of[0])
+            for key in ("description", "title", "default"):
+                if key in node and key not in merged:
+                    merged[key] = node[key]
+            return merged, nullable
+        raw_type = node.get("type")
+        if isinstance(raw_type, list):
+            nullable = "null" in raw_type
+            concrete = [item for item in raw_type if item != "null"]
+            if len(concrete) == 1:
+                updated = dict(node)
+                updated["type"] = concrete[0]
+                return updated, nullable
+        return node, nullable
+
+    def resolve_ref(node: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
+        ref = node.get("$ref")
+        if not isinstance(ref, str):
+            return None
+        marker = "#/$defs/"
+        legacy_marker = "#/definitions/"
+        if ref.startswith(marker):
+            key = ref[len(marker) :]
+        elif ref.startswith(legacy_marker):
+            key = ref[len(legacy_marker) :]
+        else:
+            return None
+        target = definitions.get(key)
+        return (key, target) if isinstance(target, dict) else None
+
+    def annotation_for(node: dict[str, Any], hint: str) -> tuple[Any, bool]:
+        node, nullable = unwrap(node)
+        resolved = resolve_ref(node)
+        if resolved is not None:
+            key, target = resolved
+            return build_object(key, target), nullable
+
+        enum_values = node.get("enum")
+        if isinstance(enum_values, list) and enum_values:
+            concrete_values = tuple(item for item in enum_values if item is not None)
+            nullable = nullable or len(concrete_values) != len(enum_values)
+            if concrete_values:
+                return Literal.__getitem__(concrete_values), nullable
+
+        node_type = node.get("type")
+        if node_type == "object" or isinstance(node.get("properties"), dict):
+            return build_object(hint, node), nullable
+        if node_type == "array":
+            item_schema = node.get("items")
+            item_type: Any = Any
+            if isinstance(item_schema, dict):
+                item_type, _item_nullable = annotation_for(item_schema, f"{hint}Item")
+            return list[item_type], nullable
+        if node_type == "integer":
+            return int, nullable
+        if node_type == "number":
+            return float, nullable
+        if node_type == "boolean":
+            return bool, nullable
+        if node_type == "string" and node.get("format") == "date":
+            return date, nullable
+        if node_type == "string":
+            return str, nullable
+        return Any, nullable
+
+    def field_info(node: dict[str, Any], default: object) -> Any:
+        kwargs: dict[str, Any] = {}
+        if isinstance(node.get("description"), str):
+            kwargs["description"] = node["description"]
+        constraint_names = {
+            "minimum": "ge",
+            "maximum": "le",
+            "exclusiveMinimum": "gt",
+            "exclusiveMaximum": "lt",
+            "minLength": "min_length",
+            "maxLength": "max_length",
+            "pattern": "pattern",
+        }
+        for source, target in constraint_names.items():
+            if source in node:
+                kwargs[target] = node[source]
+        return Field(default, **kwargs)
+
+    def build_object(key: str, node: dict[str, Any]) -> type[BaseModel]:
+        cache_key = key or name
+        if cache_key in model_cache:
+            return model_cache[cache_key]
+        properties = node.get("properties")
+        if not isinstance(properties, dict):
+            properties = {}
+        required = {
+            str(item) for item in (node.get("required") or []) if isinstance(item, str)
+        }
+        fields: dict[str, tuple[Any, Any]] = {}
+        for field_name, raw_field in properties.items():
+            if not isinstance(raw_field, dict):
+                continue
+            annotation, nullable = annotation_for(
+                raw_field,
+                f"{model_name(cache_key)}_{model_name(str(field_name))}",
+            )
+            is_required = str(field_name) in required
+            if not is_required or nullable:
+                annotation = Optional[annotation]
+            if is_required and "default" not in raw_field:
+                default: object = ...
+            else:
+                default = raw_field.get("default")
+            fields[str(field_name)] = (annotation, field_info(raw_field, default))
+
+        config_dict = ConfigDict(extra="forbid" if node.get("additionalProperties") is False else "ignore")
+        built = create_model(
+            model_name(cache_key),
+            __config__=config_dict,
+            __module__=__name__,
+            **fields,
+        )
+        model_cache[cache_key] = built
+        return built
+
+    return build_object(model_name(name), schema)

@@ -21,6 +21,7 @@ def test_validation_candidates_are_schema_fields_only(tmp_path) -> None:
         "image_name": "a.png",
         "fk_info": "FK",
         "patient": {"name": "A", "age": {"number": 12}},
+        "diagnoses": {"sektion": None},
         "thoughts": "model reasoning",
         "failure_reason": "none",
         "avg_logprobs": -0.2,
@@ -141,6 +142,8 @@ def test_browser_validation_records_local_decision(tmp_path, monkeypatch) -> Non
     assert session.csv_path.exists()
     output = session.csv_path.read_text(encoding="utf-8")
     assert "accept" in output
+    assert "extracted_value" in output
+    assert "FK" in output
     assert "value_state" in output
 
 

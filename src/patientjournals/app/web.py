@@ -6,7 +6,7 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from patientjournals.app.catalog import list_google_model_options, list_schema_options
+from patientjournals.app.catalog import list_google_model_options
 from patientjournals.app.models import SubmitJobDraft
 from patientjournals.app.settings_store import load_app_settings
 from patientjournals.app.task_runner import TaskRunner
@@ -89,7 +89,43 @@ APP_HTML = """<!doctype html>
     .btn.partial { background:#84CC16; color:var(--ink); }
     .btn.reject { background:#DC2626; color:white; }
     .btn.unsure { background:#F59E0B; color:var(--ink); }
-    @media (max-width: 900px) { .app { grid-template-columns:1fr; } aside { position:static; } .grid,.split,.validator { grid-template-columns:1fr; } }
+    .table-scroll { width:100%; overflow:auto; border:1px solid var(--line); }
+    .table-scroll table { border:0; min-width:760px; }
+    .schema-layout { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:16px; align-items:start; }
+    .schema-fields { display:grid; gap:8px; }
+    .schema-field { display:grid; grid-template-columns:72px minmax(150px,1fr) 150px 100px 44px; gap:8px; align-items:start; padding:10px; border:1px solid var(--line); border-left:4px solid transparent; }
+    .schema-field textarea { grid-column:2 / -1; min-height:64px; }
+    .schema-field.diff-added { background:#ECFDF3; border-color:#86D7A0; border-left-color:#1A7F37; }
+    .schema-field.diff-changed { background:#FFF8C5; border-color:#E7C75A; border-left-color:#9A6700; }
+    .schema-change-label { display:inline-flex; align-items:center; justify-content:center; min-height:30px; padding:5px 7px; border:1px solid var(--line); background:var(--soft); color:var(--muted); font-size:11px; font-weight:800; text-transform:uppercase; }
+    .schema-change-label.added { color:#116329; background:#DAFBE1; border-color:#86D7A0; }
+    .schema-change-label.changed { color:#6F4B00; background:#FAE17D; border-color:#D4A72C; }
+    .schema-change-label.removed { color:#A40E26; background:#FFEBE9; border-color:#FF8182; }
+    .schema-diff-summary { display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:10px 12px; margin:0 0 12px; border:1px solid var(--line); background:var(--soft); }
+    .schema-diff-summary .pill { margin:0; }
+    .schema-diff-summary .added { color:#116329; background:#DAFBE1; border-color:#86D7A0; }
+    .schema-diff-summary .changed { color:#6F4B00; background:#FAE17D; border-color:#D4A72C; }
+    .schema-diff-summary .removed { color:#A40E26; background:#FFEBE9; border-color:#FF8182; }
+    .schema-original-row.diff-added td, tr.diff-added td { background:#ECFDF3; }
+    .schema-original-row.diff-changed td, tr.diff-changed td { background:#FFF8C5; }
+    .schema-original-row.diff-removed td, tr.diff-removed td { background:#FFEBE9; }
+    .schema-original-row.diff-changed td:first-child { border-left:4px solid #9A6700; }
+    .schema-original-row.diff-removed td:first-child { border-left:4px solid #CF222E; }
+    .schema-original-row.diff-removed td:not(:last-child) { text-decoration:line-through; text-decoration-color:#CF222E; text-decoration-thickness:2px; }
+    .schema-row-action { min-height:34px; padding:6px 10px; border:1px solid currentColor; background:white; color:var(--ink); font-weight:800; cursor:pointer; }
+    .star-btn { width:44px; min-width:44px; padding:8px; font-size:22px; background:transparent; border:1px solid var(--line); cursor:pointer; }
+    .star-btn.active { color:#00B2CA; background:#1E1E24; }
+    .preview-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:10px; }
+    .preview-item { border:1px solid var(--line); background:var(--soft); padding:8px; }
+    .preview-item img { display:block; width:100%; height:190px; object-fit:contain; background:white; }
+    .preview-item strong { display:block; margin-top:7px; overflow-wrap:anywhere; }
+    .image-overlay { position:fixed; inset:0; z-index:20; background:rgba(30,30,36,.92); padding:24px; display:grid; grid-template-rows:auto minmax(0,1fr); }
+    .image-overlay .toolbar { justify-content:flex-end; margin:0 0 12px; }
+    .image-overlay img { width:100%; height:100%; object-fit:contain; }
+    .diff-added { background:#ECFDF3; }
+    .diff-removed { background:#FFEBE9; }
+    .diff-changed { background:#FFF8C5; }
+    @media (max-width: 900px) { .app { grid-template-columns:1fr; } aside { position:static; } .grid,.split,.validator,.schema-layout { grid-template-columns:1fr; } .schema-field { grid-template-columns:64px minmax(0,1fr) 44px; } .schema-field > .schema-change-label { grid-column:1; grid-row:1; } .schema-field > input { grid-column:2 / -1; grid-row:1; min-width:0; } .schema-field > select { grid-column:2; grid-row:2; min-width:0; } .schema-field > .inline-control { grid-column:2; grid-row:3; } .schema-field > .star-btn { grid-column:3; grid-row:2; } .schema-field textarea { grid-column:2 / -1; grid-row:4; } }
   </style>
 </head>
 <body>
@@ -101,6 +137,7 @@ APP_HTML = """<!doctype html>
       <button data-tab="validate">Validate</button>
       <button data-tab="jobs">Jobs</button>
       <button data-tab="datasets">Datasets</button>
+      <button data-tab="schemas">Schemas</button>
       <button data-tab="submit">Submit</button>
       <button data-tab="cloud">Cloud</button>
       <button data-tab="tasks">Tasks</button>
@@ -126,7 +163,14 @@ const state = {
   validatorIdentity: null,
   validationSession: null,
   validationSample: null,
-  validationZoom: 1
+  validationZoom: 1,
+  schemaVersions: [],
+  selectedSchemaIds: new Set(),
+  schemaEditorFields: [],
+  schemaEditorParent: '',
+  schemaEditorName: '',
+  schemaEditorMakeActive: false,
+  datasetInspect: null
 };
 const $ = (sel) => document.querySelector(sel);
 async function api(path, opts={}) {
@@ -147,9 +191,12 @@ function setStatus(text, bad=false) { const el = $('#status'); if (el) { el.text
 function activate(tab) {
   state.tab = tab;
   document.querySelectorAll('nav button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
-  ({dashboard, validate, jobs, datasets, submit, cloud, tasks}[tab])();
+  ({dashboard, validate, jobs, datasets, schemas, submit, cloud, tasks}[tab])();
 }
 document.querySelectorAll('nav button').forEach(b => b.onclick = () => activate(b.dataset.tab));
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape') closeDatasetImage();
+});
 function metric(label, value) { return `<div class="metric"><strong>${esc(value)}</strong><span>${esc(label)}</span></div>`; }
 function table(headers, rows) {
   const body = rows.length ? rows.map(r=>`<tr>${r.map(c=>`<td>${esc(c)}</td>`).join('')}</tr>`).join('') : `<tr><td colspan="${headers.length}" class="muted">No rows.</td></tr>`;
@@ -203,11 +250,12 @@ function validationRunsList(runs) {
       <td class="mono" title="${esc(runId)}">${esc(shortText(runId, 24))}</td>
       <td>${esc(shortText(r.validator_id || 'unknown', 22))}</td>
       <td title="${esc(dataset)}">${esc(shortText(dataset, 30))}</td>
+      <td>${esc(r.model || 'Unknown')}</td>
       <td>${esc(modelScore(r.accuracy))}</td>
       <td>${esc(r.decisions || 0)}</td>
     </tr>`;
   }).join('');
-  return rawTable(['<th>Run</th>','<th>Validator</th>','<th>Dataset</th>','<th>Model score</th>','<th>Validated columns</th>'], rows);
+  return rawTable(['<th>Run</th>','<th>Validator</th>','<th>Dataset</th>','<th>Model</th>','<th>Model score</th>','<th>Validated columns</th>'], rows);
 }
 
 async function dashboard() {
@@ -266,6 +314,8 @@ async function analyzeSelected() {
       ${table(['Field','Complete','Missing'], (a.metadata_field_completeness || []).slice(0,12).map(f => [f.column, f.completeness.toFixed(1)+'%', f.missing]))}
       <h2>Failure Reasons</h2>
       ${table(['Reason','Rows'], Object.entries(a.failure_reasons || {}).map(([k,v]) => [k, v]))}
+      <h2>Models and Schema Versions</h2>
+      ${table(['Kind','Value','Rows'], [...Object.entries(a.model_counts || {}).map(([k,v]) => ['Model', k, v]), ...Object.entries(a.schema_version_counts || {}).map(([k,v]) => ['Schema version', k, v])])}
       <h2>Sample Rows</h2>
       ${table((a.columns || []).slice(0,8), (a.sample_rows || []).slice(0,8).map(r => (a.columns || []).slice(0,8).map(c => r[c] ?? '')))}
     `;
@@ -275,6 +325,252 @@ function openValidatorFromDashboard() {
   const selected = $('#datasetSelect')?.value || state.selectedDataset;
   if (selected) state.selectedDataset = selected;
   activate('validate');
+}
+
+async function schemas() {
+  $('#main').innerHTML = `<h1>Schemas</h1><div class="sub">Versioned extraction columns shared through the configured cloud bucket.</div><div id="status" class="status">Syncing schemas...</div>
+    <div class="toolbar"><button class="btn" onclick="openNewSchema()">New schema</button><button id="viewSchemaButton" class="btn secondary" onclick="viewSelectedSchema()">View selected</button><button id="editSchemaButton" class="btn secondary" onclick="editSelectedSchema()">Edit selected</button><button id="compareSchemaButton" class="btn secondary" onclick="compareSelectedSchemas()">Compare two</button><button class="btn secondary" onclick="schemas()">Refresh</button></div>
+    <div id="schemasBody"></div><div id="schemaWorkspace"></div>`;
+  try {
+    const data = await api('/api/schemas');
+    state.schemaVersions = data.versions || [];
+    state.selectedSchemaIds = new Set([...state.selectedSchemaIds].filter(id => state.schemaVersions.some(item => item.version_id === id)));
+    renderSchemas();
+    const sync = data.cloud_sync || {};
+    setStatus(sync.error ? `Schemas loaded locally. Cloud sync failed: ${sync.error}` : `Loaded ${state.schemaVersions.length} version(s). Cloud: ${sync.status || 'not configured'}.`, Boolean(sync.error));
+  } catch (e) { setStatus(e.message, true); }
+}
+function schemaById(id) { return state.schemaVersions.find(item => item.version_id === id); }
+function renderSchemas() {
+  const rows = state.schemaVersions.map((item, index) => {
+    const checked = state.selectedSchemaIds.has(item.version_id) ? 'checked' : '';
+    const selected = checked ? 'selected' : '';
+    const activeTitle = item.is_active ? 'Active schema' : 'Mark this version active';
+    return `<tr class="clickable ${selected}" onclick="toggleSchemaSelection(${index})">
+      <td class="select-cell"><input type="checkbox" ${checked} onclick="event.stopPropagation(); toggleSchemaSelection(${index}, this.checked)"></td>
+      <td class="select-cell"><button class="star-btn ${item.is_active ? 'active' : ''}" title="${esc(activeTitle)}" onclick="event.stopPropagation(); setActiveSchema('${esc(item.version_id)}')">${item.is_active ? '&#9733;' : '&#9734;'}</button></td>
+      <td><strong>${esc(item.name)}</strong><div class="muted">Version ${esc(item.version_number)}</div></td>
+      <td class="mono">${esc(item.version_id)}</td><td>${esc(item.field_count)}</td><td>${esc(item.created_at)}</td><td>${esc(item.created_by)}</td>
+    </tr>`;
+  }).join('');
+  $('#schemasBody').innerHTML = `<div class="table-scroll">${rawTable(['<th class="select-cell"></th>','<th>Active</th>','<th>Schema</th>','<th>Version ID</th>','<th>Leaf columns</th>','<th>Created</th>','<th>Author</th>'], rows)}</div>`;
+  const view = $('#viewSchemaButton');
+  const edit = $('#editSchemaButton');
+  const compare = $('#compareSchemaButton');
+  if (view) view.disabled = state.selectedSchemaIds.size !== 1;
+  if (edit) edit.disabled = state.selectedSchemaIds.size !== 1;
+  if (compare) compare.disabled = state.selectedSchemaIds.size !== 2;
+}
+function toggleSchemaSelection(index, checked=null) {
+  const item = state.schemaVersions[index];
+  if (!item) return;
+  const next = checked === null ? !state.selectedSchemaIds.has(item.version_id) : checked;
+  if (next) {
+    if (state.selectedSchemaIds.size >= 2) state.selectedSchemaIds.delete([...state.selectedSchemaIds][0]);
+    state.selectedSchemaIds.add(item.version_id);
+  } else state.selectedSchemaIds.delete(item.version_id);
+  renderSchemas();
+  setStatus(`${state.selectedSchemaIds.size} schema version(s) selected.`);
+}
+async function setActiveSchema(versionId) {
+  try {
+    const result = await api('/api/schemas/active', {method:'POST', body:JSON.stringify({version_id:versionId}), headers:{'Content-Type':'application/json'}});
+    state.schemaVersions.forEach(item => item.is_active = item.version_id === versionId);
+    renderSchemas();
+    const sync = result.cloud_sync || {};
+    setStatus(sync.error ? `Active locally. Cloud sync failed: ${sync.error}` : 'Active schema updated and synced.', Boolean(sync.error));
+  } catch (e) { setStatus(e.message, true); }
+}
+function openNewSchema() {
+  state.schemaEditorParent = '';
+  state.schemaEditorName = 'NewSchema';
+  state.schemaEditorMakeActive = false;
+  state.schemaEditorFields = [{path:'new_column', type:'string', required:false, description:''}];
+  renderSchemaEditor(null);
+}
+function editSelectedSchema() {
+  const item = schemaById([...state.selectedSchemaIds][0]);
+  if (!item) return setStatus('Select one schema version to edit.', true);
+  state.schemaEditorParent = item.version_id;
+  state.schemaEditorName = item.name;
+  state.schemaEditorMakeActive = false;
+  state.schemaEditorFields = (item.fields || []).map((field, index) => ({
+    ...schemaFieldValue(field),
+    _original: schemaFieldValue(field),
+    _originalIndex: index
+  }));
+  renderSchemaEditor(item);
+}
+function viewSelectedSchema() {
+  const item = schemaById([...state.selectedSchemaIds][0]);
+  if (!item) return setStatus('Select one schema version to view.', true);
+  $('#schemaWorkspace').innerHTML = `<section class="panel" style="margin-top:16px;"><h2>${esc(item.name)} version ${esc(item.version_number)}</h2>
+    <div class="notice"><span class="pill">${item.is_active ? 'Active' : 'Version'}</span><span class="mono">${esc(item.version_id)}</span><div class="muted">Created ${esc(item.created_at)} by ${esc(item.created_by || 'unknown')}</div></div>
+    <div class="table-scroll">${readonlySchemaFields(item.fields || [])}</div></section>`;
+  $('#schemaWorkspace').scrollIntoView({behavior:'smooth', block:'start'});
+}
+function captureSchemaEditor() {
+  const name = $('#schemaEditorName');
+  const makeActive = $('#schemaMakeActive');
+  if (name) state.schemaEditorName = name.value;
+  if (makeActive) state.schemaEditorMakeActive = makeActive.checked;
+  state.schemaEditorFields = state.schemaEditorFields.map((_field, index) => ({
+    ..._field,
+    path: $(`#schemaPath${index}`)?.value || '',
+    type: $(`#schemaType${index}`)?.value || 'string',
+    required: $(`#schemaRequired${index}`)?.checked || false,
+    description: $(`#schemaDescription${index}`)?.value || ''
+  }));
+}
+function schemaFieldValue(field) {
+  return {
+    path: field?.path || '',
+    type: field?.type || 'string',
+    required: Boolean(field?.required),
+    description: field?.description || ''
+  };
+}
+function schemaFieldsMatch(left, right) {
+  const a = schemaFieldValue(left), b = schemaFieldValue(right);
+  return a.path === b.path && a.type === b.type && a.required === b.required && a.description === b.description;
+}
+function schemaFieldChangeKind(field) {
+  if (!field?._original) return 'added';
+  return schemaFieldsMatch(field, field._original) ? '' : 'changed';
+}
+function schemaChangeLabel(kind) {
+  return kind === 'added' ? '+ Added' : kind === 'changed' ? '~ Edited' : kind === 'removed' ? '- Deleted' : 'Same';
+}
+function schemaFieldEditor(field, index) {
+  const types = ['string','date','integer','number','boolean','list[string]','list[integer]','list[number]','list[boolean]'];
+  const kind = schemaFieldChangeKind(field);
+  return `<div id="schemaField${index}" class="schema-field ${kind ? `diff-${kind}` : ''}">
+    <span id="schemaFieldStatus${index}" class="schema-change-label ${kind}">${schemaChangeLabel(kind)}</span>
+    <input id="schemaPath${index}" value="${esc(field.path)}" aria-label="Column path" oninput="updateSchemaField(${index})">
+    <select id="schemaType${index}" aria-label="Column type" onchange="updateSchemaField(${index})">${types.map(type => `<option value="${type}" ${type === field.type ? 'selected' : ''}>${type}</option>`).join('')}</select>
+    <label class="inline-control"><input id="schemaRequired${index}" type="checkbox" ${field.required ? 'checked' : ''} onchange="updateSchemaField(${index})"> Required</label>
+    <button class="star-btn" title="Remove column" onclick="removeSchemaField(${index})">&times;</button>
+    <textarea id="schemaDescription${index}" placeholder="What should the model transcribe for this column?" oninput="updateSchemaField(${index})">${esc(field.description)}</textarea>
+  </div>`;
+}
+function originalSchemaFieldState(index) {
+  const current = state.schemaEditorFields.find(field => field._originalIndex === index);
+  return current ? schemaFieldChangeKind(current) : 'removed';
+}
+function readonlySchemaFields(fields, showEditorDiff=false) {
+  if (!showEditorDiff) return table(['Column','Type','Required','Description'], (fields || []).map(field => [field.path, field.type, field.required ? 'Yes' : 'No', field.description || '']));
+  const rows = (fields || []).map((field, index) => {
+    const kind = originalSchemaFieldState(index);
+    const action = kind === 'removed'
+      ? `<button class="schema-row-action" onclick="undoSchemaField(${index})">Undo</button>`
+      : kind === 'changed' ? `<button class="schema-row-action" onclick="resetSchemaField(${index})">Reset</button>` : '';
+    return `<tr class="schema-original-row ${kind ? `diff-${kind}` : ''}"><td><span class="schema-change-label ${kind}">${schemaChangeLabel(kind)}</span></td><td class="mono">${esc(field.path)}</td><td>${esc(field.type)}</td><td>${field.required ? 'Yes' : 'No'}</td><td>${esc(field.description || '')}</td><td>${action}</td></tr>`;
+  }).join('');
+  return rawTable(['<th>Change</th>','<th>Column</th>','<th>Type</th>','<th>Required</th>','<th>Description</th>','<th></th>'], rows);
+}
+function schemaDiffCounts() {
+  const added = state.schemaEditorFields.filter(field => schemaFieldChangeKind(field) === 'added').length;
+  const changed = state.schemaEditorFields.filter(field => schemaFieldChangeKind(field) === 'changed').length;
+  const parent = schemaById(state.schemaEditorParent);
+  const retained = new Set(state.schemaEditorFields.map(field => field._originalIndex).filter(index => Number.isInteger(index)));
+  const removed = (parent?.fields || []).filter((_field, index) => !retained.has(index)).length;
+  return {added, changed, removed};
+}
+function schemaDiffSummary() {
+  const counts = schemaDiffCounts();
+  if (!counts.added && !counts.changed && !counts.removed) return '<span class="muted">No changes yet.</span>';
+  return `<strong>Changes</strong><span class="pill added">+ ${counts.added} added</span><span class="pill changed">~ ${counts.changed} edited</span><span class="pill removed">- ${counts.removed} deleted</span>`;
+}
+function renderSchemaEditor(parent) {
+  const original = parent ? readonlySchemaFields(parent.fields || [], true) : '<div class="muted">This is a new schema.</div>';
+  const nameControl = parent ? `<input id="schemaEditorName" value="${esc(state.schemaEditorName)}" readonly>` : `<input id="schemaEditorName" value="${esc(state.schemaEditorName)}" placeholder="Schema name">`;
+  $('#schemaWorkspace').innerHTML = `<section class="panel" style="margin-top:16px;"><h2>${parent ? `Create version ${Number(parent.version_number || 0) + 1}` : 'Create schema'}</h2>
+    <div id="schemaDiffSummary" class="schema-diff-summary">${schemaDiffSummary()}</div>
+    <div class="schema-layout"><div><h2>Original reference</h2><div id="schemaOriginalFields" class="table-scroll">${original}</div></div><div><h2>New version</h2><label>Name</label>${nameControl}<div class="schema-fields">${state.schemaEditorFields.map(schemaFieldEditor).join('')}</div>
+      <div class="toolbar"><button class="btn secondary" onclick="addSchemaField()">Add column</button></div><label><input id="schemaMakeActive" type="checkbox" ${state.schemaEditorMakeActive ? 'checked' : ''}> Mark this version active</label></div></div>
+    <div class="toolbar"><button class="btn" onclick="saveSchemaVersion()">Save new version</button><button class="btn secondary" onclick="$('#schemaWorkspace').innerHTML=''">Cancel</button></div></section>`;
+  $('#schemaWorkspace').scrollIntoView({behavior:'smooth', block:'start'});
+}
+function updateSchemaField(_index) {
+  captureSchemaEditor();
+  state.schemaEditorFields.forEach((field, index) => {
+    const kind = schemaFieldChangeKind(field);
+    const row = $(`#schemaField${index}`);
+    const status = $(`#schemaFieldStatus${index}`);
+    if (row) row.className = `schema-field ${kind ? `diff-${kind}` : ''}`;
+    if (status) {
+      status.className = `schema-change-label ${kind}`;
+      status.textContent = schemaChangeLabel(kind);
+    }
+  });
+  const parent = schemaById(state.schemaEditorParent);
+  const original = $('#schemaOriginalFields');
+  if (original && parent) original.innerHTML = readonlySchemaFields(parent.fields || [], true);
+  const summary = $('#schemaDiffSummary');
+  if (summary) summary.innerHTML = schemaDiffSummary();
+}
+function addSchemaField() {
+  captureSchemaEditor();
+  state.schemaEditorFields.push({path:'', type:'string', required:false, description:''});
+  renderSchemaEditor(schemaById(state.schemaEditorParent));
+}
+function removeSchemaField(index) {
+  captureSchemaEditor();
+  state.schemaEditorFields.splice(index, 1);
+  renderSchemaEditor(schemaById(state.schemaEditorParent));
+}
+function resetSchemaField(originalIndex) {
+  captureSchemaEditor();
+  const parent = schemaById(state.schemaEditorParent);
+  const original = parent?.fields?.[originalIndex];
+  const currentIndex = state.schemaEditorFields.findIndex(field => field._originalIndex === originalIndex);
+  if (!original || currentIndex < 0) return;
+  state.schemaEditorFields[currentIndex] = {...schemaFieldValue(original), _original:schemaFieldValue(original), _originalIndex:originalIndex};
+  renderSchemaEditor(parent);
+}
+function undoSchemaField(originalIndex) {
+  captureSchemaEditor();
+  const parent = schemaById(state.schemaEditorParent);
+  const original = parent?.fields?.[originalIndex];
+  if (!original || state.schemaEditorFields.some(field => field._originalIndex === originalIndex)) return;
+  const restored = {...schemaFieldValue(original), _original:schemaFieldValue(original), _originalIndex:originalIndex};
+  const insertAt = state.schemaEditorFields.findIndex(field => !Number.isInteger(field._originalIndex) || field._originalIndex > originalIndex);
+  if (insertAt < 0) state.schemaEditorFields.push(restored);
+  else state.schemaEditorFields.splice(insertAt, 0, restored);
+  renderSchemaEditor(parent);
+}
+async function saveSchemaVersion() {
+  captureSchemaEditor();
+  setStatus('Saving and syncing schema version...');
+  try {
+    const result = await api('/api/schemas/version', {method:'POST', body:JSON.stringify({
+      name: state.schemaEditorName,
+      parent_version_id: state.schemaEditorParent,
+      fields: state.schemaEditorFields.map(schemaFieldValue),
+      make_active: state.schemaEditorMakeActive
+    }), headers:{'Content-Type':'application/json'}});
+    state.selectedSchemaIds = new Set([result.version.version_id]);
+    await schemas();
+    const sync = result.cloud_sync || {};
+    setStatus(sync.error ? `Version saved locally. Cloud sync failed: ${sync.error}` : `Saved ${result.version.name} version ${result.version.version_number} and synced it.`, Boolean(sync.error));
+  } catch (e) { setStatus(e.message, true); }
+}
+function compareSelectedSchemas() {
+  const items = [...state.selectedSchemaIds].map(schemaById).filter(Boolean);
+  if (items.length !== 2) return setStatus('Select exactly two schema versions.', true);
+  const [left, right] = items;
+  const leftMap = new Map((left.fields || []).map(field => [field.path, field]));
+  const rightMap = new Map((right.fields || []).map(field => [field.path, field]));
+  const paths = [...new Set([...leftMap.keys(), ...rightMap.keys()])].sort();
+  const rows = paths.map(path => {
+    const a = leftMap.get(path), b = rightMap.get(path);
+    const changed = a && b && (a.type !== b.type || a.required !== b.required || a.description !== b.description);
+    const cls = !a ? 'diff-added' : !b ? 'diff-removed' : changed ? 'diff-changed' : '';
+    const show = field => field ? `${field.type}${field.required ? ' (required)' : ''}${field.description ? ` - ${shortText(field.description, 70)}` : ''}` : '-';
+    return `<tr class="${cls}"><td class="mono">${esc(path)}</td><td>${esc(show(a))}</td><td>${esc(show(b))}</td></tr>`;
+  }).join('');
+  $('#schemaWorkspace').innerHTML = `<section class="panel" style="margin-top:16px;"><h2>Schema comparison</h2><div class="small-note">Green: added in the right version. Red: removed. Yellow: changed.</div><div class="table-scroll">${rawTable(['<th>Column</th>',`<th>${esc(left.name)} v${esc(left.version_number)}</th>`,`<th>${esc(right.name)} v${esc(right.version_number)}</th>`], rows)}</div></section>`;
+  $('#schemaWorkspace').scrollIntoView({behavior:'smooth', block:'start'});
 }
 
 async function validate() {
@@ -298,7 +594,8 @@ function validationDatasetOptions() {
   return (state.datasets || []).map(d => {
     const value = d.gcs_uri || d.local_path || d.location;
     const selected = value === state.selectedDataset ? 'selected' : '';
-    return `<option value="${esc(value)}" ${selected}>${esc(d.source)} - ${esc(d.run_id || d.name)} (${esc(d.row_count ?? '?')} rows)</option>`;
+    const provenance = [d.model || 'Unknown model', d.schema_name || '', d.schema_version_id ? shortText(d.schema_version_id, 18) : ''].filter(Boolean).join(' / ');
+    return `<option value="${esc(value)}" ${selected}>${esc(d.source)} - ${esc(d.run_id || d.name)} (${esc(d.row_count ?? '?')} rows) - ${esc(provenance)}</option>`;
   }).join('');
 }
 function renderValidationSetup() {
@@ -412,6 +709,7 @@ function renderValidationSample(sample) {
       <section class="panel">
         <h2>${esc(sample.image_name)}</h2>
         <div class="notice"><span class="pill">Validator</span><strong>${esc(sample.validator_id || 'unknown')}</strong>${sample.offline_mode ? '<span class="pill">Offline</span>' : ''}<div class="muted mono">${esc(sample.validator_account || '')}</div></div>
+        <div class="notice"><span class="pill">Model</span><strong>${esc(sample.model || 'Unknown')}</strong><div class="muted">${esc(sample.schema_name || '')} <span class="mono">${esc(sample.schema_version_id || '')}</span></div></div>
         <div class="muted mono">${esc(sample.image_source)} - ${esc(sample.image_uri)}</div>
         <div class="grid" style="grid-template-columns:1fr 1fr; margin:12px 0;">
           ${metric('Decisions', sample.decisions)}
@@ -499,12 +797,12 @@ function renderJobs() {
     const selected = checked ? 'selected' : '';
     return `<tr class="clickable ${selected}" onclick="toggleJob(${i})">
       <td class="select-cell"><input type="checkbox" ${checked} onclick="event.stopPropagation(); toggleJob(${i}, this.checked)"></td>
-      <td>${esc(j.created_at)}</td><td>${esc(j.model)}</td><td>${esc(j.input_location)}</td>
+      <td>${esc(j.created_at)}</td><td>${esc(j.model)}</td><td>${esc(j.schema_name || '')}<div class="muted mono" title="${esc(j.schema_version_id || '')}">${esc(shortText(j.schema_version_id || '', 24))}</div></td><td>${esc(j.input_location)}</td>
       <td>${esc(j.image_count)}</td><td>${esc(j.status)}</td><td>${esc(j.succeeded ?? '')}</td><td>${esc(j.failed ?? '')}</td>
     </tr>`;
   }).join('');
   $('#jobsBody').innerHTML = rawTable(
-    [`<th class="select-cell"><input type="checkbox" ${allChecked ? 'checked' : ''} onchange="toggleAllJobs(this.checked)"></th>`, '<th>Created</th>', '<th>Model</th>', '<th>Input</th>', '<th>Images</th>', '<th>Status</th>', '<th>Success</th>', '<th>Missing</th>'],
+    [`<th class="select-cell"><input type="checkbox" ${allChecked ? 'checked' : ''} onchange="toggleAllJobs(this.checked)"></th>`, '<th>Created</th>', '<th>Model</th>', '<th>Schema version</th>', '<th>Input</th>', '<th>Images</th>', '<th>Status</th>', '<th>Success</th>', '<th>Missing</th>'],
     rows
   );
 }
@@ -550,12 +848,12 @@ async function datasets() {
   state.datasetsIncludeCloud = false;
   $('#main').innerHTML = `<h1>Datasets</h1><div class="sub">Combine local and shared datasets into a named research dataset.</div><div id="status" class="status">Loading...</div>
   <section class="panel">
-    <div class="toolbar"><button class="btn" onclick="datasets()">Refresh Local</button><button class="btn secondary" onclick="loadCloudDatasets()">Load Shared</button></div>
+    <div class="toolbar"><button class="btn" onclick="inspectSelectedDataset()">Inspect selected</button><button class="btn secondary" onclick="datasets()">Refresh Local</button><button class="btn secondary" onclick="loadCloudDatasets()">Load Shared</button></div>
     <label>New dataset name</label><input id="combinedDatasetName" placeholder="for example: journals_0618_complete">
     <label>Duplicates</label><select id="datasetDuplicateStrategy"><option value="first_successful">One row per image, prefer first successful</option><option value="provide_all">Include all rows</option></select>
     <div class="toolbar"><button class="btn" onclick="combineSelectedDatasets()">Combine selected</button></div>
   </section>
-  <div id="datasetsBody"></div>`;
+  <div id="datasetsBody"></div><div id="datasetInspector"></div>`;
   try {
     const data = await api('/api/datasets');
     state.datasetItems = data.local || [];
@@ -586,16 +884,64 @@ function renderDatasets(items) {
   const rows = items.map((d, i) => {
     const key = datasetKey(d);
     const checked = state.selectedDatasetKeys.has(key) ? 'checked' : '';
-    return `<tr class="clickable ${checked ? 'selected' : ''}" onclick="toggleDataset(${i})">
+    return `<tr class="clickable ${checked ? 'selected' : ''}" onclick="toggleDataset(${i})" ondblclick="inspectDataset(${i})">
       <td class="select-cell"><input type="checkbox" ${checked} onclick="event.stopPropagation(); toggleDataset(${i}, this.checked)"></td>
-      <td>${esc(d.source)}</td><td>${esc(d.name)}</td><td>${esc(d.row_count ?? '')}</td><td>${esc(d.updated_at)}</td><td>${esc(d.run_id)}</td><td class="mono">${esc(d.location)}</td>
+      <td>${esc(d.source)}</td><td>${esc(d.name)}</td><td>${esc(d.row_count ?? '')}</td><td><strong>${esc(d.model || 'Unknown')}</strong></td><td>${esc(d.schema_name || '')}<div class="muted mono">${esc(shortText(d.schema_version_id || '', 24))}</div></td><td>${esc(d.updated_at)}</td><td>${esc(d.run_id)}</td><td class="mono" title="${esc(d.location)}">${esc(shortText(d.location, 42))}</td>
     </tr>`;
   }).join('');
   $('#datasetsBody').innerHTML = rawTable(
-    [`<th class="select-cell"><input type="checkbox" ${allChecked ? 'checked' : ''} onchange="toggleAllDatasets(this.checked)"></th>`, '<th>Source</th>', '<th>Name</th>', '<th>Rows</th>', '<th>Updated</th>', '<th>Run</th>', '<th>Location</th>'],
+    [`<th class="select-cell"><input type="checkbox" ${allChecked ? 'checked' : ''} onchange="toggleAllDatasets(this.checked)"></th>`, '<th>Source</th>', '<th>Name</th>', '<th>Rows</th>', '<th>Model</th>', '<th>Schema</th>', '<th>Updated</th>', '<th>Run</th>', '<th>Location</th>'],
     rows
   );
 }
+function inspectSelectedDataset() {
+  const items = selectedDatasetItems();
+  if (items.length !== 1) return setStatus('Select exactly one dataset to inspect.', true);
+  inspectDataset(state.datasetItems.indexOf(items[0]));
+}
+async function inspectDataset(index, offset=0) {
+  const item = state.datasetItems[index];
+  if (!item) return;
+  const location = datasetKey(item);
+  const target = $('#datasetInspector');
+  if (target) target.innerHTML = '<section class="panel" style="margin-top:16px;">Loading dataset rows...</section>';
+  try {
+    const page = await api(`/api/dataset/inspect?path=${encodeURIComponent(location)}&offset=${Number(offset || 0)}&limit=50`);
+    page.itemIndex = index;
+    state.datasetInspect = page;
+    renderDatasetInspector();
+    setStatus(`Inspecting rows ${page.offset + 1}-${page.offset + page.rows.length} of ${page.total_rows}. Double-click a row to open its page image.`);
+  } catch (e) { if (target) target.innerHTML = `<div class="bad">${esc(e.message)}</div>`; setStatus(e.message, true); }
+}
+function renderDatasetInspector() {
+  const page = state.datasetInspect;
+  const target = $('#datasetInspector');
+  if (!page || !target) return;
+  const columns = page.columns || [];
+  const rows = (page.rows || []).map((row, index) => `<tr class="clickable" ondblclick="openDatasetImageRow(${index})">${columns.map(column => `<td title="${esc(displayValue(row[column]))}">${esc(shortText(row[column], 70))}</td>`).join('')}</tr>`).join('');
+  target.innerHTML = `<section class="panel" style="margin-top:16px;"><h2>${esc(page.dataset_label || 'Dataset inspection')}</h2><div class="small-note">Model and schema metadata are shown first when available. Double-click any row to open the corresponding scanned page.</div>
+    <div class="table-scroll">${rawTable(columns.map(column => `<th>${esc(column)}</th>`), rows)}</div>
+    <div class="toolbar"><button class="btn secondary" ${page.has_previous ? '' : 'disabled'} onclick="inspectDataset(${page.itemIndex}, ${Math.max(0, page.offset - page.limit)})">Previous</button><span class="muted">${page.offset + 1}-${page.offset + page.rows.length} of ${page.total_rows}</span><button class="btn secondary" ${page.has_next ? '' : 'disabled'} onclick="inspectDataset(${page.itemIndex}, ${page.offset + page.limit})">Next</button></div></section>`;
+  target.scrollIntoView({behavior:'smooth', block:'start'});
+}
+async function openDatasetImageRow(index) {
+  const row = state.datasetInspect?.rows?.[index];
+  if (!row) return;
+  const imageName = row.image_name || row.file_name || '';
+  const hint = row.gcs_uri || row.source_path || row.key || row.file_name || '';
+  if (!imageName) return setStatus('This row has no image_name or file_name.', true);
+  setStatus(`Opening ${imageName}...`);
+  try {
+    const image = await api(`/api/dataset/image-link?name=${encodeURIComponent(imageName)}&hint=${encodeURIComponent(hint)}`);
+    const overlay = document.createElement('div');
+    overlay.id = 'datasetImageOverlay';
+    overlay.className = 'image-overlay';
+    overlay.innerHTML = `<div class="toolbar"><span style="color:white; margin-right:auto;"><strong>${esc(image.image_name)}</strong> <span class="mono">${esc(image.uri)}</span></span><button class="btn" onclick="closeDatasetImage()">Close</button></div><img src="${esc(image.url)}" alt="${esc(image.image_name)}">`;
+    document.body.appendChild(overlay);
+    setStatus(`Opened ${image.image_name}.`);
+  } catch (e) { setStatus(e.message, true); }
+}
+function closeDatasetImage() { $('#datasetImageOverlay')?.remove(); }
 function toggleDataset(index, checked=null) {
   const item = state.datasetItems[index];
   if (!item) return;
@@ -656,7 +1002,8 @@ async function submit() {
       <label>Source</label><select id="source" onchange="renderInputChoices()"><option value="local">Local</option><option value="cloud">Cloud</option></select>
       <label>Run mode</label><select id="mode"><option value="local_api">Local API</option><option value="cloud_batch">Cloud batch</option></select>
       <div id="inputChoices"></div>
-      <label>Schema</label><select id="schema">${(opts.schemas || []).map(s=>`<option>${esc(s.name)}</option>`).join('')}</select>
+      <div class="toolbar"><button class="btn secondary" onclick="previewSubmission()">Preview random pages</button></div><div id="submitPreview"></div>
+      <label>Schema version</label><select id="schema">${(opts.schemas || []).map(s=>`<option value="${esc(s.version_id)}" data-name="${esc(s.name)}" ${s.is_active ? 'selected' : ''}>${esc(s.name)} v${esc(s.version_number)}${s.is_active ? ' - Active' : ''}</option>`).join('')}</select>
       <label>Model</label><select id="model">${(opts.models || []).map(m=>`<option>${esc(m.name)}</option>`).join('')}</select>
       <details><summary>Advanced</summary><label>Batch chunks</label><input id="chunks" type="number" min="1" placeholder="optional"></details>
       <div class="toolbar"><button class="btn" onclick="submitRun()">Submit</button><button class="btn secondary" onclick="submit()">Refresh choices</button></div>
@@ -673,7 +1020,10 @@ function renderInputChoices() {
     if (localOption) localOption.disabled = source === 'cloud';
     if (source === 'cloud') mode.value = 'cloud_batch';
   }
-  if (source === 'cloud') return renderCloudInputs();
+  if (source === 'cloud') {
+    if (!state.cloudInputs.length) return loadCloudInputs();
+    return renderCloudInputs();
+  }
   return renderLocalInputs();
 }
 function renderLocalInputs() {
@@ -731,27 +1081,54 @@ function toggleAllCloudInputs(checked) {
   renderCloudInputs();
   setStatus(`${state.selectedCloudPrefixes.size} cloud folder(s) selected.`);
 }
-async function submitRun() {
-  const source = $('#source').value;
-  const mode = $('#mode').value;
+function selectedSubmissionInput() {
+  const source = $('#source')?.value || 'local';
   let localPath = '';
   let cloudPrefixes = [];
   if (source === 'local') {
     localPath = state.selectedLocalPath || ($('#customLocal')?.value || '').trim();
-    if (!localPath) return setStatus('Select a local folder.', true);
   } else {
     cloudPrefixes = [...state.selectedCloudPrefixes];
     const custom = ($('#customCloud')?.value || '').trim();
     if (!cloudPrefixes.length && custom) cloudPrefixes = [custom];
-    if (!cloudPrefixes.length) return setStatus('Select one or more cloud folders.', true);
   }
+  return {source, localPath, cloudPrefixes};
+}
+async function previewSubmission() {
+  const selection = selectedSubmissionInput();
+  if (selection.source === 'local' && !selection.localPath) return setStatus('Select a local folder.', true);
+  if (selection.source === 'cloud' && !selection.cloudPrefixes.length) return setStatus('Select one or more cloud folders.', true);
+  const preview = $('#submitPreview');
+  if (preview) preview.innerHTML = '<div class="muted">Drawing a random sample...</div>';
+  try {
+    const result = await api('/api/submit/preview', {method:'POST', body:JSON.stringify({
+      dataset_source: selection.source,
+      local_path: selection.localPath,
+      cloud_prefixes: selection.cloudPrefixes,
+      sample_size: 6
+    }), headers:{'Content-Type':'application/json'}});
+    if (preview) preview.innerHTML = `<div class="notice"><strong>${esc(result.selection_count)} selected image(s)</strong><div class="muted">Random sample from the exact folders currently selected.</div></div><div class="preview-grid">${(result.samples || []).map(item => `<div class="preview-item"><img src="${esc(item.url)}" alt="${esc(item.image_name)}"><strong>${esc(item.image_name)}</strong><div class="muted mono">${esc(shortText(item.location, 55))}</div></div>`).join('')}</div>`;
+    setStatus(`Previewed ${(result.samples || []).length} of ${result.selection_count} selected image(s).`);
+  } catch (e) { if (preview) preview.innerHTML = ''; setStatus(e.message, true); }
+}
+async function submitRun() {
+  const selection = selectedSubmissionInput();
+  const source = selection.source;
+  const mode = $('#mode').value;
+  const localPath = selection.localPath;
+  const cloudPrefixes = selection.cloudPrefixes;
+  if (source === 'local' && !localPath) return setStatus('Select a local folder.', true);
+  if (source === 'cloud' && !cloudPrefixes.length) return setStatus('Select one or more cloud folders.', true);
+  const schemaSelect = $('#schema');
+  const schemaOption = schemaSelect?.selectedOptions?.[0];
   const body = {
     dataset_source: source,
     run_mode: mode,
     local_path: localPath,
     cloud_prefix: cloudPrefixes[0] || '',
     cloud_prefixes: cloudPrefixes,
-    schema_name: $('#schema').value,
+    schema_name: schemaOption?.dataset?.name || '',
+    schema_version_id: schemaSelect?.value || '',
     model_name: $('#model').value,
     output_format: 'jsonl',
     num_batches: $('#chunks')?.value ? Number($('#chunks').value) : null
@@ -782,6 +1159,7 @@ async function cloud() {
           <label>Batch outputs prefix</label><input id="cloudOutputsPrefix" value="${esc(settings.batch_outputs_gcs_prefix || '')}">
           <label>Datasets prefix</label><input id="cloudDatasetsPrefix" value="${esc(settings.datasets_gcs_prefix || '')}">
           <label>Validations prefix</label><input id="cloudValidationsPrefix" value="${esc(settings.validations_gcs_prefix || '')}">
+          <label>Schemas prefix</label><input id="cloudSchemasPrefix" value="${esc(settings.schemas_gcs_prefix || '')}">
           <label><input id="cloudUploadValidations" type="checkbox" ${settings.upload_validation_to_gcs ? 'checked' : ''}> Upload validations to shared bucket</label>
         </details>
         <div class="toolbar">
@@ -813,6 +1191,7 @@ function cloudPayload() {
     batch_outputs_gcs_prefix: $('#cloudOutputsPrefix')?.value || '',
     datasets_gcs_prefix: $('#cloudDatasetsPrefix')?.value || '',
     validations_gcs_prefix: $('#cloudValidationsPrefix')?.value || '',
+    schemas_gcs_prefix: $('#cloudSchemasPrefix')?.value || '',
     upload_validation_to_gcs: $('#cloudUploadValidations')?.checked ?? true
   };
 }
@@ -917,12 +1296,24 @@ class AppHandler(BaseHTTPRequestHandler):
             if parsed.path == "/":
                 self._send_html()
             elif parsed.path == "/api/options":
+                schema_data = self.service.list_schemas()
                 self._send_json(
                     {
-                        "schemas": serializable(list_schema_options()),
+                        "schemas": [
+                            {
+                                "name": item.get("name", ""),
+                                "version_id": item.get("version_id", ""),
+                                "version_number": item.get("version_number", 1),
+                                "field_count": item.get("field_count", 0),
+                                "is_active": item.get("is_active", False),
+                            }
+                            for item in schema_data.get("versions", [])
+                        ],
                         "models": serializable(list_google_model_options()),
                     }
                 )
+            elif parsed.path == "/api/schemas":
+                self._send_json(self.service.list_schemas())
             elif parsed.path == "/api/jobs":
                 self._send_json(self.service.list_jobs())
             elif parsed.path == "/api/tasks":
@@ -946,6 +1337,29 @@ class AppHandler(BaseHTTPRequestHandler):
                 if not path:
                     raise ValueError("Missing dataset path.")
                 self._send_json(self.service.analyze_dataset(path))
+            elif parsed.path == "/api/dataset/inspect":
+                location = query.get("path", [""])[0]
+                if not location:
+                    raise ValueError("Missing dataset path.")
+                self._send_json(
+                    self.service.inspect_dataset(
+                        location,
+                        offset=int(query.get("offset", ["0"])[0] or 0),
+                        limit=int(query.get("limit", ["50"])[0] or 50),
+                    )
+                )
+            elif parsed.path == "/api/dataset/image-link":
+                self._send_json(
+                    self.service.dataset_image_link(
+                        image_name=query.get("name", [""])[0],
+                        object_hint=query.get("hint", [""])[0],
+                    )
+                )
+            elif parsed.path == "/api/images/local":
+                body, content_type = self.service.local_image_bytes(
+                    query.get("token", [""])[0]
+                )
+                self._send_bytes(body, content_type=content_type)
             elif parsed.path == "/api/validation/identity":
                 self._send_json(self.service.validation_identity())
             elif parsed.path == "/api/validation/session":
@@ -978,6 +1392,7 @@ class AppHandler(BaseHTTPRequestHandler):
                     run_mode=payload.get("run_mode", "local_api"),
                     schema_name=str(payload.get("schema_name") or ""),
                     model_name=str(payload.get("model_name") or ""),
+                    schema_version_id=str(payload.get("schema_version_id") or ""),
                     output_format=str(payload.get("output_format") or "jsonl"),
                     local_path=str(payload.get("local_path") or ""),
                     cloud_prefix=str(payload.get("cloud_prefix") or ""),
@@ -998,6 +1413,16 @@ class AppHandler(BaseHTTPRequestHandler):
                         payload=settings_payload if isinstance(settings_payload, dict) else {},
                     )
                 )
+            elif parsed.path == "/api/schemas/version":
+                self._send_json(self.service.create_schema_version(payload))
+            elif parsed.path == "/api/schemas/active":
+                self._send_json(
+                    self.service.set_active_schema(
+                        str(payload.get("version_id") or "")
+                    )
+                )
+            elif parsed.path == "/api/submit/preview":
+                self._send_json(self.service.preview_submission(payload))
             elif parsed.path == "/api/jobs/retrieve":
                 run_dir = str(payload.get("run_dir") or "")
                 self._task(

@@ -1078,6 +1078,9 @@ def test_finalize_dataset_with_failed_rows_completes_current_dataset(tmp_path) -
             "file_name": "pages/b.png",
             "failed": True,
             "failure_reason": "schema_validation_failed",
+            "model": "gemini-3.1-pro-preview",
+            "schema_name": "FrontPage",
+            "schema_version_id": "",
         },
     ]
     recorded = json.loads((run_dir / "batch_results.json").read_text(encoding="utf-8"))

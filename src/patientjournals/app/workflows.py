@@ -16,8 +16,10 @@ from patientjournals.app.datasets import (
     list_cloud_dataset_library,
     list_local_dataset_library,
     prepare_dataset_sources,
+    read_dataset_page,
 )
 from patientjournals.app.job_store import JobStore, utc_now_iso
+from patientjournals.app.image_access import ImageAccessService
 from patientjournals.app.jobs import (
     _apply_runtime_overrides,
     _restore_runtime_overrides,
@@ -37,6 +39,7 @@ from patientjournals.app.jobs import (
     start_command,
 )
 from patientjournals.app.models import AppSettings, SubmitJobDraft
+from patientjournals.app.schemas import SchemaService
 from patientjournals.app.settings_store import (
     command_override_payload,
     load_app_settings,
@@ -74,7 +77,13 @@ class WorkflowService:
         self.settings_path = settings_path
         self.settings = settings or load_app_settings(settings_path)
         self.store = JobStore(self.settings.local_runs_root)
+        self.schema_service = SchemaService(
+            self.store,
+            bucket_name=self.settings.gcs_bucket_name,
+            schemas_prefix=self.settings.schemas_gcs_prefix,
+        )
         self.validation_manager = BrowserValidationManager()
+        self.image_access = ImageAccessService(self.settings)
 
     def list_jobs(self) -> list[dict[str, Any]]:
         return serializable(list_submit_jobs(self.settings.local_runs_root))
@@ -95,13 +104,55 @@ class WorkflowService:
             "batch_outputs_gcs_prefix",
             "datasets_gcs_prefix",
             "validations_gcs_prefix",
+            "schemas_gcs_prefix",
             "upload_validation_to_gcs",
         }
         updates = {key: payload[key] for key in allowed if key in payload}
         self.settings = replace(self.settings, **updates)
         save_app_settings(self.settings, self.settings_path)
         self.store = JobStore(self.settings.local_runs_root)
+        self.schema_service = SchemaService(
+            self.store,
+            bucket_name=self.settings.gcs_bucket_name,
+            schemas_prefix=self.settings.schemas_gcs_prefix,
+        )
+        self.image_access.update_settings(self.settings)
         return self.cloud_settings()
+
+    def list_schemas(self, *, sync_cloud: bool = True) -> dict[str, Any]:
+        previous = _apply_runtime_overrides(command_override_payload(self.settings))
+        try:
+            return serializable(
+                self.schema_service.list_versions(sync_cloud=sync_cloud)
+            )
+        finally:
+            _restore_runtime_overrides(previous)
+
+    def create_schema_version(self, payload: dict[str, Any]) -> dict[str, Any]:
+        raw_fields = payload.get("fields") or []
+        if not isinstance(raw_fields, list):
+            raise ValueError("Schema fields must be a list.")
+        identity = self.validation_identity()
+        previous = _apply_runtime_overrides(command_override_payload(self.settings))
+        try:
+            return serializable(
+                self.schema_service.create_version(
+                    name=str(payload.get("name") or ""),
+                    fields=[item for item in raw_fields if isinstance(item, dict)],
+                    created_by=identity.get("account") or identity.get("username") or "unknown",
+                    parent_version_id=str(payload.get("parent_version_id") or ""),
+                    make_active=bool(payload.get("make_active")),
+                )
+            )
+        finally:
+            _restore_runtime_overrides(previous)
+
+    def set_active_schema(self, version_id: str) -> dict[str, Any]:
+        previous = _apply_runtime_overrides(command_override_payload(self.settings))
+        try:
+            return serializable(self.schema_service.set_active(version_id))
+        finally:
+            _restore_runtime_overrides(previous)
 
     def cloud_access_report(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         if payload:
@@ -139,6 +190,24 @@ class WorkflowService:
         }
 
     def submit_batch(self, draft: SubmitJobDraft) -> dict[str, Any]:
+        previous = _apply_runtime_overrides(command_override_payload(self.settings))
+        try:
+            self.schema_service.sync_from_cloud()
+        finally:
+            _restore_runtime_overrides(previous)
+        schema_version = self.schema_service.resolve_version(
+            draft.schema_version_id or draft.schema_name
+        )
+        if not schema_version:
+            raise ValueError(
+                f"Schema version not found: {draft.schema_version_id or draft.schema_name}"
+            )
+        draft = replace(
+            draft,
+            schema_name=str(schema_version["name"]),
+            schema_version_id=str(schema_version["version_id"]),
+            schema_payload=dict(schema_version["schema_json"]),
+        )
         if draft.run_mode == "local_api":
             result = asyncio.run(run_local_draft_direct(draft, self.settings))
             self._record_local_result(draft, result)
@@ -161,6 +230,10 @@ class WorkflowService:
                 "created_at": now,
                 "model": draft.model_name,
                 "provider": "",
+                "schema": {
+                    "name": draft.schema_name,
+                    "version_id": draft.schema_version_id,
+                },
                 "legacy": {"submit_run_dir": str(run_dir)},
                 "input": {
                     "location": draft.local_path or str(config.target_folder or ""),
@@ -397,7 +470,69 @@ class WorkflowService:
         return resolve_validator_identity(self.settings)
 
     def analyze_dataset(self, dataset_path: str) -> dict[str, Any]:
-        return serializable(analyze_dataset_file(dataset_path))
+        self.schema_service.sync_from_cloud()
+        records = self.store.list_schema_versions()
+        schema_names_by_version = {
+            str(record["version_id"]): str(record.get("name") or "")
+            for record in records
+        }
+        return serializable(
+            analyze_dataset_file(
+                dataset_path,
+                schema_fields_by_version=(
+                    self.schema_service.validation_field_paths_by_version()
+                ),
+                schema_names_by_version=schema_names_by_version,
+            )
+        )
+
+    def inspect_dataset(
+        self,
+        dataset_location: str,
+        *,
+        offset: int = 0,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        dataset_path, dataset_label = self._resolve_validation_dataset(dataset_location)
+        payload = read_dataset_page(dataset_path, offset=offset, limit=limit)
+        payload["dataset_location"] = dataset_location
+        payload["dataset_label"] = dataset_label
+        return serializable(payload)
+
+    def dataset_image_link(
+        self,
+        *,
+        image_name: str,
+        object_hint: str = "",
+    ) -> dict[str, str]:
+        previous = _apply_runtime_overrides(command_override_payload(self.settings))
+        try:
+            return self.image_access.dataset_image_link(
+                image_name=image_name,
+                object_hint=object_hint,
+            )
+        finally:
+            _restore_runtime_overrides(previous)
+
+    def local_image_bytes(self, token: str) -> tuple[bytes, str]:
+        return self.image_access.local_image_bytes(token)
+
+    def preview_submission(self, payload: dict[str, Any]) -> dict[str, Any]:
+        prefixes = payload.get("cloud_prefixes") or ()
+        if isinstance(prefixes, str):
+            prefixes = (prefixes,)
+        previous = _apply_runtime_overrides(command_override_payload(self.settings))
+        try:
+            return serializable(
+                self.image_access.submission_preview(
+                    source=str(payload.get("dataset_source") or "local"),
+                    local_path=str(payload.get("local_path") or ""),
+                    cloud_prefixes=tuple(str(item) for item in prefixes if item),
+                    sample_size=int(payload.get("sample_size") or 6),
+                )
+            )
+        finally:
+            _restore_runtime_overrides(previous)
 
     def _resolve_validation_dataset(self, results: str) -> tuple[Path, str]:
         value = str(results or "").strip()
@@ -413,6 +548,7 @@ class WorkflowService:
                         / "validations"
                         / "_dataset_cache"
                     ),
+                    use_cache=True,
                 )
             finally:
                 _restore_runtime_overrides(previous)
@@ -435,6 +571,10 @@ class WorkflowService:
     ) -> dict[str, Any]:
         dataset_path, dataset_label = self._resolve_validation_dataset(results)
         identity = self.validation_identity()
+        self.schema_service.sync_from_cloud()
+        schema_fields_by_version = (
+            self.schema_service.validation_field_paths_by_version()
+        )
         previous = _apply_runtime_overrides(command_override_payload(self.settings))
         try:
             return serializable(
@@ -450,6 +590,7 @@ class WorkflowService:
                     cloud_prefixes=tuple(str(item) for item in cloud_prefixes if item),
                     bucket_name=self.settings.gcs_bucket_name,
                     sync_to_cloud=not offline,
+                    schema_fields_by_version=schema_fields_by_version,
                 )
             )
         finally:

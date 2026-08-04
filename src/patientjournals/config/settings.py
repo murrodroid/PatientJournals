@@ -1,12 +1,13 @@
 import json
 import os
+from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, Optional
 
 from pydantic import BaseModel
 
-from patientjournals.config.schemas import FrontPage
+from patientjournals.config.schemas import FrontPage, model_from_json_schema, output_schema_name
 from patientjournals.shared.local_secrets import load_local_api_keys
 
 
@@ -64,6 +65,9 @@ class Config:
     model: str = "gemini-3.1-pro"
     input_prompt_name: str = "frontpage"  # change to correct prompt
     output_model: type[BaseModel] = FrontPage  # change to correct schema in schemas.py
+    output_schema_name: str = "FrontPage"
+    output_schema_version_id: str = ""
+    output_schema_override: dict[str, Any] | None = None
     target_folder: str = "/Volumes/Expansion/patientjournaler_1889-1897_jpg"
     fp_mode: Literal["all", "only_fp", "exclude_fp"] = "all"
     output_format: str = "jsonl"
@@ -147,6 +151,7 @@ class Config:
     upload_dataset_to_gcs: bool = True
     validations_gcs_prefix: str = "validations"
     upload_validation_to_gcs: bool = True
+    schemas_gcs_prefix: str = "schemas"
 
     # Upload/render settings for PDF to GCS image pages
     upload_source: Literal["pdf", "images", "auto"] = "images"
@@ -244,7 +249,15 @@ class Config:
         )
         if not (self.api_key or "").strip():
             self.api_key = self.provider_api_keys.get("gemini", "")
-        self.output_schema = self.output_model.model_json_schema()
+        if self.output_schema_override:
+            self.output_schema = deepcopy(self.output_schema_override)
+            self.output_model = model_from_json_schema(
+                self.output_schema_name or "ManagedSchema",
+                self.output_schema,
+            )
+        else:
+            self.output_schema_name = output_schema_name(self.output_model)
+            self.output_schema = self.output_model.model_json_schema()
         _ = self.input_prompt
 
     def api_key_for_provider(self, provider: str) -> str:
@@ -308,6 +321,7 @@ def _apply_external_json_config(cfg: Config) -> None:
         "upload_dataset_to_gcs",
         "validations_gcs_prefix",
         "upload_validation_to_gcs",
+        "schemas_gcs_prefix",
         "batch_input_prefix",
         "batch_input_prefixes",
         "target_folder",
@@ -315,6 +329,9 @@ def _apply_external_json_config(cfg: Config) -> None:
         "model",
         "output_format",
         "batch_duplicate_strategy",
+        "output_schema_name",
+        "output_schema_version_id",
+        "output_schema_override",
     }
     aliases = {
         "auth_mode": "gcp_auth_mode",
@@ -327,11 +344,27 @@ def _apply_external_json_config(cfg: Config) -> None:
         if source_key in payload and payload[source_key] is not None:
             setattr(cfg, target_key, payload[source_key])
 
+    schema_payload = payload.get("schema_payload") or payload.get("output_schema_override")
+    if isinstance(schema_payload, dict) and schema_payload:
+        cfg.output_schema_override = schema_payload
+        cfg.output_schema_name = str(
+            payload.get("schema_name") or payload.get("output_schema_name") or "ManagedSchema"
+        )
+        cfg.output_schema_version_id = str(
+            payload.get("schema_version_id")
+            or payload.get("output_schema_version_id")
+            or ""
+        )
     schema_name = payload.get("schema_name")
-    if isinstance(schema_name, str) and schema_name.strip():
+    if (
+        not cfg.output_schema_override
+        and isinstance(schema_name, str)
+        and schema_name.strip()
+    ):
         from patientjournals.config.schemas import resolve_output_schema
 
         cfg.output_model = resolve_output_schema(schema_name)
+        cfg.output_schema_name = schema_name.strip()
 
     api_key_env = payload.get("gemini_api_key_env")
     if isinstance(api_key_env, str) and api_key_env.strip():

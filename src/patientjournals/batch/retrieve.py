@@ -19,6 +19,7 @@ from tqdm import tqdm
 
 from patientjournals.batch.client import get_batch_client, resolve_service_account_path
 from patientjournals.batch.output_records import (
+    add_reproducibility_columns,
     add_response_metadata_columns,
     parse_gemini_output_record,
 )
@@ -335,12 +336,14 @@ def _mark_success_rows(rows: list[dict]) -> None:
     for row in rows:
         row.setdefault("failed", False)
         row.setdefault("failure_reason", "")
+    add_reproducibility_columns(rows)
 
 
 def _failed_dataset_row(key: str, reason: str) -> dict[str, object]:
     row: dict[str, object] = identity_columns(key)
     row["failed"] = True
     row["failure_reason"] = reason or "failed"
+    add_reproducibility_columns([row])
     return row
 
 
@@ -739,6 +742,7 @@ def _recover_missing_pages_via_api_key(
             field_confidence_by_pointer=metadata.get("field_confidence_by_pointer"),
         )
         add_response_metadata_columns(rows, metadata)
+        add_reproducibility_columns(rows, model=recovery_model, provider="gemini")
         rows_to_flush.extend(rows)
         if manifest_path is not None:
             append_processing_record(
@@ -1217,6 +1221,13 @@ def _upload_dataset_to_gcs(
         prefix = _normalize_prefix(config.datasets_gcs_prefix or "")
         object_name = f"{prefix}{run_dir_name}/{dataset_path.name}"
         blob = bucket.blob(object_name)
+        blob.metadata = {
+            "model": str(config.model or ""),
+            "schema_name": str(getattr(config, "output_schema_name", "") or ""),
+            "schema_version_id": str(
+                getattr(config, "output_schema_version_id", "") or ""
+            ),
+        }
         blob.upload_from_filename(
             str(dataset_path),
             content_type=_dataset_content_type(dataset_path),

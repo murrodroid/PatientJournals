@@ -154,6 +154,7 @@ class BrowserValidationSession:
         sampling_mode: SamplingMode,
         image_source: ImageSource,
         image_index: dict[str, ValidationImageRef],
+        schema_fields_by_version: dict[str, set[str]] | None = None,
         bucket: Any | None = None,
         cloud_prefixes: tuple[str, ...] = (),
         cloud_lookup_batch_size: int = 5,
@@ -192,9 +193,13 @@ class BrowserValidationSession:
         self.seed = secrets.randbits(64)
         self.rng = random.Random(self.seed)
         self.rows = load_dataset(self.dataset_path)
-        self.datapoints = build_validation_datapoints(self.rows, self.image_index)
+        self.datapoints = build_validation_datapoints(
+            self.rows,
+            self.image_index,
+            schema_fields_by_version=schema_fields_by_version,
+        )
         self.results: list[dict[str, Any]] = []
-        self.validated_pairs: set[tuple[str, str]] = set()
+        self.validated_pairs: set[tuple] = set()
         self.selection_counts: dict[str, int] = {}
         self.scored_counts: dict[str, int] = {}
         self.score_sums: dict[str, float] = {}
@@ -270,6 +275,9 @@ class BrowserValidationSession:
             "field_name": datapoint.field_name,
             "field_value": field_value,
             "value_state": datapoint.value_state,
+            "model": datapoint.model_name,
+            "schema_name": datapoint.schema_name,
+            "schema_version_id": datapoint.schema_version_id,
             "correction_value": field_value,
             "allow_corrections": self.allow_corrections,
             "sampling_mode": self.sampling_mode,
@@ -324,14 +332,18 @@ class BrowserValidationSession:
                 "validator_account": self.validator_account,
                 "decided_at": decided_at,
                 "corrected_field": corrected_field,
+                "extracted_value": _stringify_value(datapoint.field_value),
                 "value_state": datapoint.value_state,
                 "sampling_mode": self.sampling_mode,
                 "image_source": image_ref.source,
                 "image_uri": image_ref.uri,
                 "session_id": self.session_id,
+                "model": datapoint.model_name,
+                "schema_name": datapoint.schema_name,
+                "schema_version_id": datapoint.schema_version_id,
             }
         )
-        self.validated_pairs.add((datapoint.image_name, datapoint.field_name))
+        self.validated_pairs.add(datapoint.validation_key)
         score = _score_for_label(normalized_label)
         if score is not None:
             group_key = datapoint.sampling_group
@@ -524,7 +536,7 @@ class BrowserValidationSession:
             return ()
         current = self.current_datapoint
         future_validated = set(self.validated_pairs)
-        future_validated.add((current.image_name, current.field_name))
+        future_validated.add(current.validation_key)
         names: list[str] = []
 
         def add_name(value: str) -> None:
@@ -562,7 +574,7 @@ class BrowserValidationSession:
         for item in self.datapoints:
             if len(names) >= self.cloud_lookup_batch_size:
                 break
-            if (item.image_name, item.field_name) in future_validated:
+            if item.validation_key in future_validated:
                 continue
             add_name(item.image_name)
         return tuple(names[: self.cloud_lookup_batch_size])
@@ -625,11 +637,15 @@ class BrowserValidationSession:
             "validator_account",
             "decided_at",
             "corrected_field",
+            "extracted_value",
             "value_state",
             "sampling_mode",
             "image_source",
             "image_uri",
             "session_id",
+            "model",
+            "schema_name",
+            "schema_version_id",
         ]
         with open(self.csv_path, "w", newline="", encoding="utf-8") as handle:
             writer = csv.DictWriter(handle, fieldnames=fieldnames)
@@ -665,6 +681,7 @@ class BrowserValidationManager:
         cloud_prefixes: tuple[str, ...] = (),
         bucket_name: str = "",
         sync_to_cloud: bool = True,
+        schema_fields_by_version: dict[str, set[str]] | None = None,
     ) -> dict[str, Any]:
         source = "cloud" if image_source == "cloud" else "local"
         resolved_sampling = sampling_mode
@@ -704,6 +721,7 @@ class BrowserValidationManager:
             sampling_mode=resolved_sampling,  # type: ignore[arg-type]
             image_source=source,
             image_index=image_index,
+            schema_fields_by_version=schema_fields_by_version,
             bucket=bucket,
             cloud_prefixes=prefixes,
             sync_to_cloud=sync_to_cloud,

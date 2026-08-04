@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 import re
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable, Mapping
@@ -13,6 +14,7 @@ from patientjournals.app.models import (
     DatasetLibraryItem,
     DatasetSummary,
 )
+from patientjournals.app.job_store import JobStore
 from patientjournals.config import config
 from patientjournals.data.bucket import (
     build_storage_bucket,
@@ -169,6 +171,71 @@ def _iter_dataset_rows(path: Path) -> Iterable[dict[str, Any]]:
     raise ValueError(f"Unsupported dataset format: {path}")
 
 
+def _flatten_dataset_row(
+    value: Mapping[str, Any],
+    *,
+    prefix: str = "",
+) -> dict[str, Any]:
+    flattened: dict[str, Any] = {}
+    for key, item in value.items():
+        path = f"{prefix}.{key}" if prefix else str(key)
+        if isinstance(item, Mapping):
+            if item:
+                flattened.update(_flatten_dataset_row(item, prefix=path))
+            else:
+                flattened[path] = item
+        else:
+            flattened[path] = item
+    return flattened
+
+
+def read_dataset_page(
+    dataset_path: str | Path,
+    *,
+    offset: int = 0,
+    limit: int = 50,
+) -> dict[str, Any]:
+    path = Path(dataset_path).expanduser()
+    if not path.is_file():
+        raise FileNotFoundError(f"Dataset not found: {path}")
+    start = max(0, int(offset))
+    page_size = min(200, max(1, int(limit)))
+    total_rows = 0
+    page_rows: list[dict[str, Any]] = []
+    for row in _iter_dataset_rows(path):
+        if start <= total_rows < start + page_size:
+            page_rows.append(_flatten_dataset_row(row))
+        total_rows += 1
+    columns: list[str] = []
+    preferred = [
+        "image_name",
+        "file_name",
+        "model",
+        "schema_name",
+        "schema_version_id",
+        "failed",
+        "failure_reason",
+    ]
+    available = {key for row in page_rows for key in row}
+    for key in preferred:
+        if key in available:
+            columns.append(key)
+    for row in page_rows:
+        for key in row:
+            if key not in columns:
+                columns.append(key)
+    return {
+        "dataset_path": str(path),
+        "offset": start,
+        "limit": page_size,
+        "total_rows": total_rows,
+        "has_previous": start > 0,
+        "has_next": start + len(page_rows) < total_rows,
+        "columns": columns,
+        "rows": page_rows,
+    }
+
+
 def _row_failed(row: Mapping[str, Any]) -> bool:
     value = row.get("failed")
     if isinstance(value, bool):
@@ -292,6 +359,9 @@ def combine_dataset_files(
     source_stats: list[dict[str, Any]] = []
     duplicate_rows: list[dict[str, Any]] = []
     duplicate_names: set[str] = set()
+    model_counts: Counter[str] = Counter()
+    schema_name_counts: Counter[str] = Counter()
+    schema_version_counts: Counter[str] = Counter()
     rows_read = 0
     duplicates_skipped = 0
     duplicates_included = 0
@@ -309,6 +379,12 @@ def combine_dataset_files(
             rows_read += 1
             source_rows += 1
             row = dict(raw_row)
+            if str(row.get("model") or "").strip():
+                model_counts[str(row["model"]).strip()] += 1
+            if str(row.get("schema_name") or "").strip():
+                schema_name_counts[str(row["schema_name"]).strip()] += 1
+            if str(row.get("schema_version_id") or "").strip():
+                schema_version_counts[str(row["schema_version_id"]).strip()] += 1
             image_name = ensure_row_image_name(row) or row_image_name(row)
             if not image_name:
                 output_rows.append(row)
@@ -374,6 +450,22 @@ def combine_dataset_files(
         for row in output_rows:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
 
+    model_counts = Counter(
+        str(row.get("model") or "").strip()
+        for row in output_rows
+        if str(row.get("model") or "").strip()
+    )
+    schema_name_counts = Counter(
+        str(row.get("schema_name") or "").strip()
+        for row in output_rows
+        if str(row.get("schema_name") or "").strip()
+    )
+    schema_version_counts = Counter(
+        str(row.get("schema_version_id") or "").strip()
+        for row in output_rows
+        if str(row.get("schema_version_id") or "").strip()
+    )
+
     manifest: dict[str, Any] = {
         "schema_version": 1,
         "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
@@ -392,6 +484,9 @@ def combine_dataset_files(
         "duplicates_replaced": duplicates_replaced,
         "duplicate_image_names": sorted(duplicate_names),
         "duplicate_rows": duplicate_rows,
+        "model_counts": dict(model_counts),
+        "schema_name_counts": dict(schema_name_counts),
+        "schema_version_counts": dict(schema_version_counts),
         "cloud_uri": "",
         "manifest_cloud_uri": "",
         "cloud_sync_error": "",
@@ -417,6 +512,10 @@ def combine_dataset_files(
                     "duplicates_included": duplicates_included,
                     "duplicates_replaced": duplicates_replaced,
                     "combined": True,
+                    "model": next(iter(model_counts)) if len(model_counts) == 1 else "mixed" if model_counts else "",
+                    "model_counts": dict(model_counts),
+                    "schema_name": next(iter(schema_name_counts)) if len(schema_name_counts) == 1 else "mixed" if schema_name_counts else "",
+                    "schema_version_id": next(iter(schema_version_counts)) if len(schema_version_counts) == 1 else "mixed" if schema_version_counts else "",
                 },
             )
         except Exception as exc:  # noqa: BLE001
@@ -533,6 +632,23 @@ def list_local_dataset_library(
         key=lambda path: path.stat().st_mtime,
         reverse=True,
     )
+    records = JobStore(root).list_records()
+    metadata_by_path: dict[str, tuple[str, str, str]] = {}
+    metadata_by_run: dict[str, tuple[str, str, str]] = {}
+    for record in records:
+        dataset = record.get("dataset") if isinstance(record.get("dataset"), dict) else {}
+        schema = record.get("schema") if isinstance(record.get("schema"), dict) else {}
+        values = (
+            str(record.get("model") or ""),
+            str(schema.get("name") or ""),
+            str(schema.get("version_id") or ""),
+        )
+        current_path = str(dataset.get("current_path") or "")
+        if current_path:
+            metadata_by_path[str(Path(current_path).expanduser().resolve())] = values
+        if str(record.get("job_id") or ""):
+            metadata_by_run[str(record["job_id"])] = values
+
     items: list[DatasetLibraryItem] = []
     for path in files[: max(1, limit)]:
         try:
@@ -544,6 +660,26 @@ def list_local_dataset_library(
         except OSError:
             continue
         run_id = local_run_id(path)
+        model, schema_name, schema_version_id = metadata_by_path.get(
+            str(path.resolve()),
+            metadata_by_run.get(run_id, ("", "", "")),
+        )
+        manifest = path.parent / "dataset_manifest.json"
+        if manifest.is_file() and not model:
+            try:
+                manifest_payload = json.loads(manifest.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                manifest_payload = {}
+            if isinstance(manifest_payload, dict):
+                model_counts = manifest_payload.get("model_counts")
+                schema_counts = manifest_payload.get("schema_name_counts")
+                version_counts = manifest_payload.get("schema_version_counts")
+                if isinstance(model_counts, dict):
+                    model = next(iter(model_counts)) if len(model_counts) == 1 else "mixed" if model_counts else ""
+                if isinstance(schema_counts, dict):
+                    schema_name = next(iter(schema_counts)) if len(schema_counts) == 1 else "mixed" if schema_counts else ""
+                if isinstance(version_counts, dict):
+                    schema_version_id = next(iter(version_counts)) if len(version_counts) == 1 else "mixed" if version_counts else ""
         items.append(
             DatasetLibraryItem(
                 source="local",
@@ -554,6 +690,9 @@ def list_local_dataset_library(
                 updated_at=updated_at,
                 run_id=run_id,
                 local_path=str(path),
+                model=model,
+                schema_name=schema_name,
+                schema_version_id=schema_version_id,
             )
         )
     return items
@@ -593,6 +732,9 @@ def list_cloud_dataset_library(
                 updated_at=_format_blob_updated(blob),
                 run_id=Path(name).parent.name,
                 gcs_uri=uri,
+                model=str(metadata.get("model") or ""),
+                schema_name=str(metadata.get("schema_name") or ""),
+                schema_version_id=str(metadata.get("schema_version_id") or ""),
             )
         )
         if len(items) >= max(1, limit):
@@ -615,11 +757,19 @@ def download_cloud_dataset(
     gcs_uri: str,
     *,
     destination_root: str | Path = "datasets",
+    use_cache: bool = False,
 ) -> Path:
     bucket_name, object_name = _split_gcs_uri(gcs_uri)
     bucket = build_storage_bucket(bucket_name)
-    destination = Path(destination_root).expanduser() / Path(object_name).name
+    safe_parts = [
+        part
+        for part in object_name.replace("\\", "/").split("/")
+        if part not in {"", ".", ".."}
+    ]
+    destination = Path(destination_root).expanduser() / bucket_name / Path(*safe_parts)
     destination.parent.mkdir(parents=True, exist_ok=True)
+    if use_cache and destination.is_file():
+        return destination
     bucket.blob(object_name).download_to_filename(str(destination))
     return destination
 

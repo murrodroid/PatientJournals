@@ -14,6 +14,7 @@ from patientjournals.shared.api_retry import (
 )
 from patientjournals.shared.processing_metrics import base_image_record, utc_now_iso
 from patientjournals.shared.tools import data_to_rows
+from patientjournals.batch.output_records import add_reproducibility_columns
 
 
 @dataclass(frozen=True)
@@ -77,6 +78,11 @@ async def process_file(sem, model_client, file_name, log):
                 for row in rows:
                     row["generation_seconds"] = duration
                     row["thoughts"] = metadata.get("thoughts") or None
+                add_reproducibility_columns(
+                    rows,
+                    model=model_client.model_name,
+                    provider=model_client.provider,
+                )
                 completed_at = utc_now_iso()
                 metrics = base_image_record(
                     image_reference=file_name,

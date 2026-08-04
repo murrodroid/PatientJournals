@@ -5,6 +5,7 @@ from typing import Callable
 from pydantic import BaseModel
 
 from patientjournals.config.schemas import FrontPage, TextPage
+from patientjournals.config import config
 from patientjournals.shared.identity import identity_columns
 
 
@@ -103,6 +104,8 @@ def text_page_rows(
     rows: list[dict] = []
     for index, line in enumerate(data.page_lines):
         row = line.model_dump(mode="python")
+        if not row.get("page_line_number"):
+            row["page_line_number"] = index + 1
         row.update(page_level)
         if _has_field_confidence(field_confidence_by_pointer):
             line_confidence = _build_confidence_tree(
@@ -156,7 +159,14 @@ def data_to_rows(
     file_name: str,
     field_confidence_by_pointer: FieldConfidenceByPointer | None = None,
 ) -> list[dict]:
+    # The parsed model is the strongest signal. This also keeps direct callers
+    # correct when another workflow has temporarily selected a managed schema.
     for model_type, handler in _HANDLERS.items():
         if isinstance(data, model_type):
             return handler(data, file_name, field_confidence_by_pointer)
+    schema_name = str(getattr(config, "output_schema_name", "") or "").lower()
+    if schema_name == "textpage" and hasattr(data, "page_lines"):
+        return text_page_rows(data, file_name, field_confidence_by_pointer)
+    if schema_name == "frontpage":
+        return journal_rows(data, file_name, field_confidence_by_pointer)
     return default_rows(data, file_name, field_confidence_by_pointer)

@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Iterable
 
 
-JOB_STORE_SCHEMA_VERSION = 2
+JOB_STORE_SCHEMA_VERSION = 3
 JOBS_DIR_NAME = "jobs"
 JOB_FILE_NAME = "job.json"
 EVENTS_FILE_NAME = "events.jsonl"
@@ -183,6 +183,30 @@ class JobStore:
                 """
             )
             conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS schema_versions (
+                    version_id TEXT PRIMARY KEY,
+                    family_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    version_number INTEGER NOT NULL,
+                    parent_version_id TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    created_by TEXT NOT NULL DEFAULT '',
+                    prompt_name TEXT NOT NULL DEFAULT 'frontpage',
+                    source TEXT NOT NULL DEFAULT 'local',
+                    schema_json TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS schema_state (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL DEFAULT ''
+                )
+                """
+            )
+            conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_jobs_kind_updated ON jobs(kind, updated_at)"
             )
             conn.execute(
@@ -190,6 +214,10 @@ class JobStore:
             )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status, updated_at)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_schema_family_version "
+                "ON schema_versions(family_id, version_number DESC)"
             )
             conn.execute(f"PRAGMA user_version={JOB_STORE_SCHEMA_VERSION}")
 
@@ -375,6 +403,21 @@ class JobStore:
         record["status"] = canonical_status
         record["model"] = model or str(batch_meta.get("model") or record.get("model") or "")
         record["provider"] = str(batch_meta.get("provider") or record.get("provider") or "")
+        existing_schema = record.get("schema")
+        if not isinstance(existing_schema, dict):
+            existing_schema = {}
+        record["schema"] = {
+            "name": str(
+                batch_meta.get("schema_name")
+                or existing_schema.get("name")
+                or ""
+            ),
+            "version_id": str(
+                batch_meta.get("schema_version_id")
+                or existing_schema.get("version_id")
+                or ""
+            ),
+        }
         record["created_at"] = created_at or str(record.get("created_at") or "")
         record["legacy"] = {**(record.get("legacy") or {}), "submit_run_dir": str(run_path)}
         record["input"] = {
@@ -743,6 +786,86 @@ class JobStore:
             }
             for row in rows
         ]
+
+    def upsert_schema_version(self, record: dict) -> None:
+        schema_payload = record.get("schema_json")
+        if not isinstance(schema_payload, dict):
+            raise ValueError("Schema version is missing schema_json.")
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO schema_versions (
+                    version_id, family_id, name, version_number,
+                    parent_version_id, created_at, created_by, prompt_name,
+                    source, schema_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(version_id) DO NOTHING
+                """,
+                (
+                    str(record.get("version_id") or ""),
+                    str(record.get("family_id") or ""),
+                    str(record.get("name") or ""),
+                    int(record.get("version_number") or 1),
+                    str(record.get("parent_version_id") or ""),
+                    str(record.get("created_at") or utc_now_iso()),
+                    str(record.get("created_by") or ""),
+                    str(record.get("prompt_name") or "frontpage"),
+                    str(record.get("source") or "local"),
+                    _json_dumps(schema_payload),
+                ),
+            )
+
+    def schema_version(self, version_id: str) -> dict:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM schema_versions WHERE version_id = ?",
+                (str(version_id),),
+            ).fetchone()
+        return self._schema_row(row) if row is not None else {}
+
+    def list_schema_versions(self) -> list[dict]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM schema_versions
+                ORDER BY name COLLATE NOCASE, version_number DESC, created_at DESC
+                """
+            ).fetchall()
+        return [self._schema_row(row) for row in rows]
+
+    @staticmethod
+    def _schema_row(row: sqlite3.Row) -> dict:
+        return {
+            "version_id": str(row["version_id"]),
+            "family_id": str(row["family_id"]),
+            "name": str(row["name"]),
+            "version_number": int(row["version_number"]),
+            "parent_version_id": str(row["parent_version_id"]),
+            "created_at": str(row["created_at"]),
+            "created_by": str(row["created_by"]),
+            "prompt_name": str(row["prompt_name"]),
+            "source": str(row["source"]),
+            "schema_json": _json_loads(str(row["schema_json"])),
+        }
+
+    def set_schema_state(self, key: str, value: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO schema_state (key, value) VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                """,
+                (str(key), str(value)),
+            )
+
+    def schema_state(self, key: str) -> str:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT value FROM schema_state WHERE key = ?",
+                (str(key),),
+            ).fetchone()
+        return str(row["value"]) if row is not None else ""
 
 
 def records_by_run_dir(records: Iterable[dict]) -> dict[str, dict]:

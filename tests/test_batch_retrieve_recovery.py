@@ -46,6 +46,9 @@ def test_failed_dataset_row_marks_image_failed() -> None:
         "file_name": "gs://bucket/pages/folder/273057_001519.png",
         "failed": True,
         "failure_reason": "schema_validation_failed",
+        "model": config.model,
+        "schema_name": config.output_schema_name,
+        "schema_version_id": config.output_schema_version_id,
     }
 
 

@@ -29,6 +29,7 @@ class AppSettings:
     batch_outputs_gcs_prefix: str = ""
     datasets_gcs_prefix: str = "datasets"
     validations_gcs_prefix: str = "validations"
+    schemas_gcs_prefix: str = "schemas"
     upload_validation_to_gcs: bool = True
     local_runs_root: str = "runs"
     gemini_api_key_env: str = "GEMINI_API_KEY"
@@ -57,6 +58,7 @@ class AppSettings:
             batch_outputs_gcs_prefix=str(config.batch_outputs_gcs_prefix or ""),
             datasets_gcs_prefix=str(config.datasets_gcs_prefix or "datasets"),
             validations_gcs_prefix=str(config.validations_gcs_prefix or "validations"),
+            schemas_gcs_prefix=str(config.schemas_gcs_prefix or "schemas"),
             upload_validation_to_gcs=bool(config.upload_validation_to_gcs),
             local_runs_root=str(config.output_root or "runs"),
             validation_images_root=str(
@@ -77,6 +79,9 @@ class SchemaOption:
     module: str
     field_count: int
     is_top_level: bool
+    version_id: str = ""
+    version_number: int = 1
+    is_active: bool = False
 
     @property
     def label(self) -> str:
@@ -145,6 +150,9 @@ class DatasetLibraryItem:
     run_id: str = ""
     local_path: str = ""
     gcs_uri: str = ""
+    model: str = ""
+    schema_name: str = ""
+    schema_version_id: str = ""
 
     @property
     def is_cloud(self) -> bool:
@@ -157,6 +165,8 @@ class SubmitJobDraft:
     run_mode: RunMode
     schema_name: str
     model_name: str
+    schema_version_id: str = ""
+    schema_payload: dict[str, object] = field(default_factory=dict)
     output_format: OutputFormat = "jsonl"
     local_path: str = ""
     cloud_prefix: str = ""
@@ -187,6 +197,8 @@ class JobSummary:
     status: str
     created_at: str = ""
     model: str = ""
+    schema_name: str = ""
+    schema_version_id: str = ""
     run_dir: str = ""
     command: str = ""
     detail: str = ""

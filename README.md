@@ -75,18 +75,34 @@ The current app architecture is split into small service modules:
 - `patientjournals.app.catalog`: schema and Google model choices.
 - `patientjournals.app.dashboard`: dataset, validation, and processing metric summaries.
 - `patientjournals.app.datasets`: local/cloud dataset inspection and image-name matching.
+- `patientjournals.app.image_access`: short-lived signed GCS links and local image previews.
 - `patientjournals.app.job_store`: SQLite-backed jobs, events, dataset versions, and background task state.
 - `patientjournals.app.jobs`: batch/local run helpers, retrieval/finalization/retry helpers, and validation command construction.
+- `patientjournals.app.schemas`: immutable schema versions, active-schema state, and cloud synchronization.
 - `patientjournals.app.settings_store`: app settings persistence.
 - `patientjournals.app.task_runner`: lightweight background task execution persisted to the job store.
 - `patientjournals.app.web`: the web UI and JSON API.
 - `patientjournals.app.workflows`: the backend workflow service used by the UI.
 
-Local API jobs are executed through `patientjournals.local.service.run_local_job`, so the app does not need to shell out for local runs. Cloud batch submission and retrieval are routed through `patientjournals.app.workflows.WorkflowService`. The Jobs page can retrieve one or many selected jobs; grouped batch chunks are handled as one job, retrieval reuses cached results when possible, and selected-job retrieval is parallelized by the workflow service. The Dashboard page summarizes run measurements, validates completeness/failure distributions for a selected dataset, and can launch the validation loop for a selected dataset and image folder.
+The normal colleague workflow is:
+
+1. Open **Schemas** to review the shared versions and star the version that should be selected by default.
+2. Open **Submit**, select local or cloud folders, preview a random sample of the exact selected pages, then choose the schema version and model.
+3. Follow the grouped job in **Jobs** and retrieve its chunks as one entity.
+4. Open **Datasets** to inspect rows. Double-click a dataset to open the inspector, then double-click a row to open its scanned page.
+5. Use **Dashboard** for leaf-column completeness and model-specific validation results, or launch **Validate** directly.
+
+Local API jobs are executed through `patientjournals.local.service.run_local_job`, so the app does not need to shell out for local runs. Cloud batch submission and retrieval are routed through `patientjournals.app.workflows.WorkflowService`. The Jobs page can retrieve one or many selected jobs; grouped batch chunks are handled as one job, retrieval reuses cached results when possible, and selected-job retrieval is parallelized by the workflow service. The Dashboard page summarizes run measurements, validates completeness/failure distributions for a selected dataset, and can launch the validation loop.
 
 The Cloud page stores project/bucket/prefix settings, can start browser-based Google auth with `gcloud auth application-default login`, and runs the same bucket/prefix/write access checks used by the previous setup flow.
 
 Google Cloud authentication supports either a service account JSON path or Application Default Credentials (`gcloud auth application-default login`) through the app setting `auth_mode`.
+
+### Schema Versions
+
+Schemas are immutable versions with IDs such as `sv_...`. Editing never changes the original: the app presents the original and proposed version side by side, then saves a new version with its parent, author, timestamp, and complete JSON Schema snapshot. Two selected versions can also be compared without editing. The starred active version is the default on Submit, but any version can be selected explicitly.
+
+Schema versions and the shared active choice are synchronized through `<schemas_gcs_prefix>/index.json` and immutable objects under `<schemas_gcs_prefix>/versions/`. The default prefix is `schemas`. Cloud write/read checks include this prefix. Every app-submitted job records the selected version ID and full schema snapshot, so later retrieval still validates against the original version even if another schema becomes active.
 
 ## Project Pipeline
 
@@ -150,6 +166,8 @@ Summary JSON reports are written to `summaries/`. Validation JSON and CSV report
 
 Generated datasets use `image_name` as the primary image identity. Image names are expected to be unique across the complete dataset. The legacy `file_name` column is still written as provenance and may contain the original local path, GCS object name, or older source reference.
 
+Every newly processed row, including explicit failed placeholders, records `model`, `provider` when available, `schema_name`, and `schema_version_id`. Dataset objects uploaded to GCS carry the same provenance as object metadata. Combined datasets preserve row-level provenance and report single or mixed model/schema counts in their manifest.
+
 Continuation, collection, and coverage checks compare rows by `image_name`. Older datasets that only contain `file_name` are still accepted; copied rows are upgraded with `image_name` when possible.
 
 ## Batch Flow
@@ -208,7 +226,11 @@ Generate validation plots:
 uv run invoke validation.report --input-path validations --out validation_reports --min-n 1
 ```
 
-The web app Dashboard reads job-store datasets, `runs/**/image_processing_manifest.jsonl`, and `validations/**/*_validations.csv` to display status, source, attempts, timing, failure, field-completeness, and validation label distributions. The same page can launch browser validation with corrections enabled. Browser validation derives the validator username from the active Google account (for example `name@gmail.com` becomes `name`) and records the account in each validation run's CSV and metadata. For cloud images, validation matches dataset `image_name` values directly against the configured GCS pages prefix and resolves signed URLs lazily in small batches while you validate; there is no separate cloud image-folder selection step. Validation runs sync to the shared cloud bucket by default; Advanced includes an offline mode for debugging that saves locally without uploading. Validation sampling supports `random` and `balanced_ucb`; both sample only true schema fields and exclude processing metadata such as `thoughts`, `failure_reason`, `avg_logprobs`, and `crossed_out`.
+The web app Dashboard reads job-store datasets, `runs/**/image_processing_manifest.jsonl`, and `validations/**/*_validations.csv` to display status, source, attempts, timing, failure, leaf-field completeness, and validation label distributions. Parent objects such as `diagnoses.sektion` are not treated as empty columns; only their transcribed leaf fields are measured. The same page can launch browser validation with corrections enabled.
+
+Browser validation derives the validator username from the active Google account (for example `name@gmail.com` becomes `name`) and records the account in each validation run's CSV and metadata. Each decision also records the source model, schema version, original extracted value, and any correction. For cloud images, validation matches dataset `image_name` values directly against the configured GCS pages prefix and resolves signed URLs lazily in small batches while you validate; there is no separate cloud image-folder selection step. Validation runs sync to the shared cloud bucket by default; Advanced includes an offline mode for debugging that saves locally without uploading.
+
+Validation sampling supports `random` and `balanced_ucb`. Both sample only the true leaf columns from the schema version recorded on each row and exclude processing metadata such as `thoughts`, `failure_reason`, `avg_logprobs`, and `crossed_out`. Balanced UCB keeps separate strata for missing/present values, model, schema version, and leaf column, so results from different extraction models or schema definitions are not conflated.
 
 ## Tests
 

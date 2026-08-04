@@ -114,6 +114,8 @@ def build_submit_command(
         settings,
         model_name=draft.model_name,
         schema_name=draft.schema_name,
+        schema_version_id=draft.schema_version_id,
+        schema_payload=draft.schema_payload,
         output_format=draft.output_format,
         local_path=draft.local_path,
         cloud_prefix=draft.cloud_prefix,
@@ -168,6 +170,10 @@ def _apply_runtime_overrides(payload: dict[str, object]) -> dict[str, object]:
         "output_format",
         "output_root",
         "output_model",
+        "input_prompt_name",
+        "output_schema_name",
+        "output_schema_version_id",
+        "output_schema_override",
         "api_key",
         "provider_api_keys",
         "batch_duplicate_strategy",
@@ -179,14 +185,32 @@ def _apply_runtime_overrides(payload: dict[str, object]) -> dict[str, object]:
         "auth_mode": "gcp_auth_mode",
         "local_runs_root": "output_root",
     }
+    schema_name = str(payload.get("schema_name") or "").strip()
+    schema_payload = payload.get("schema_payload") or payload.get("output_schema_override")
     for key, value in payload.items():
         target_key = aliases.get(key, key)
         if target_key == "schema_name":
-            if isinstance(value, str) and value.strip():
-                config.output_model = resolve_output_schema(value)
             continue
         if hasattr(config, target_key) and value is not None:
             setattr(config, target_key, value)
+    if isinstance(schema_payload, dict) and schema_payload:
+        config.output_schema_override = schema_payload
+        config.output_schema_name = schema_name or str(
+            payload.get("output_schema_name") or "ManagedSchema"
+        )
+        config.output_schema_version_id = str(
+            payload.get("schema_version_id")
+            or payload.get("output_schema_version_id")
+            or ""
+        )
+    elif schema_name:
+        config.output_schema_override = None
+        config.output_schema_version_id = ""
+        config.output_model = resolve_output_schema(schema_name)
+        config.output_schema_name = schema_name
+    prompt_name = schema_name.lower()
+    if prompt_name in config.prompts:
+        config.input_prompt_name = prompt_name
     config.__post_init__()
     return previous
 
@@ -209,6 +233,8 @@ async def run_local_draft_direct(
         settings,
         model_name=draft.model_name,
         schema_name=draft.schema_name,
+        schema_version_id=draft.schema_version_id,
+        schema_payload=draft.schema_payload,
         output_format=draft.output_format,
         local_path=draft.local_path,
         cloud_prefix=draft.cloud_prefix,
@@ -317,6 +343,8 @@ def run_batch_draft_direct(
         settings,
         model_name=draft.model_name,
         schema_name=draft.schema_name,
+        schema_version_id=draft.schema_version_id,
+        schema_payload=draft.schema_payload,
         output_format=draft.output_format,
         local_path=draft.local_path,
         cloud_prefix=draft.cloud_prefix,
@@ -372,7 +400,7 @@ def run_batch_rerun_direct(
     """Resubmit the chunks of an existing run that did not complete successfully."""
     from patientjournals.batch.submit import submit_batch
 
-    overrides = command_override_payload(settings)
+    overrides = command_overrides_for_run(settings, run_dir)
     previous = _apply_runtime_overrides(overrides)
     try:
         result_dir = submit_batch(
@@ -507,7 +535,7 @@ def finalize_dataset_with_failed_rows(
             force=True,
         )
 
-    overrides = command_override_payload(settings)
+    overrides = command_overrides_for_run(settings, run_dir)
     previous = _apply_runtime_overrides(overrides)
     try:
         run_path = Path(run_dir).expanduser()
@@ -676,8 +704,9 @@ def run_retrieve_direct(
         if cached:
             return cached
 
-    overrides = command_override_payload(
+    overrides = command_overrides_for_run(
         settings,
+        run_dir,
         duplicate_strategy=str(effective_strategy),
     )
     overrides["api_recovery_enabled"] = bool(recover_missing_with_api)
@@ -844,7 +873,7 @@ def recover_dataset_gaps(
     if not dataset_path:
         return recover_failed_via_api(run_dir, settings)
 
-    overrides = command_override_payload(settings)
+    overrides = command_overrides_for_run(settings, run_dir)
     previous = _apply_runtime_overrides(overrides)
     try:
         run_path = Path(run_dir).expanduser()
@@ -1477,6 +1506,46 @@ def _read_json_file(path: Path) -> dict:
     except (OSError, json.JSONDecodeError):
         return {}
     return payload if isinstance(payload, dict) else {}
+
+
+def command_overrides_for_run(
+    settings: AppSettings,
+    run_dir: str | Path,
+    *,
+    duplicate_strategy: str = "",
+) -> dict[str, object]:
+    """Restore the model and immutable schema snapshot recorded at submission."""
+    run_path = Path(run_dir).expanduser()
+    batch_meta = _read_json_file(run_path / "batch_job.json")
+    metadata = _read_json_file(run_path / "metadata.json")
+    schema_payload = metadata.get("output_schema")
+    if not isinstance(schema_payload, dict):
+        schema_payload = {}
+    config_values = metadata.get("config_values")
+    if isinstance(config_values, dict):
+        config_values = config_values.get("config")
+    if not isinstance(config_values, dict):
+        config_values = {}
+    schema_name = str(
+        batch_meta.get("schema_name")
+        or metadata.get("schema_name")
+        or config_values.get("output_schema_name")
+        or ""
+    )
+    schema_version_id = str(
+        batch_meta.get("schema_version_id")
+        or metadata.get("schema_version_id")
+        or config_values.get("output_schema_version_id")
+        or ""
+    )
+    return command_override_payload(
+        settings,
+        model_name=str(batch_meta.get("model") or metadata.get("model") or ""),
+        schema_name=schema_name,
+        schema_version_id=schema_version_id,
+        schema_payload=schema_payload,
+        duplicate_strategy=duplicate_strategy,
+    )
 
 
 def _write_json_file(path: Path, payload: dict) -> None:
@@ -2191,6 +2260,7 @@ def _summary_from_store_record(record: dict) -> JobSummary:
     input_payload = record.get("input") if isinstance(record.get("input"), dict) else {}
     batches = record.get("batches") if isinstance(record.get("batches"), dict) else {}
     legacy = record.get("legacy") if isinstance(record.get("legacy"), dict) else {}
+    schema = record.get("schema") if isinstance(record.get("schema"), dict) else {}
     status = str(record.get("status") or "unknown")
     retrieved = status.startswith("retrieved") or bool(record.get("retrieval"))
     image_count = int(input_payload.get("image_count") or 0)
@@ -2218,6 +2288,8 @@ def _summary_from_store_record(record: dict) -> JobSummary:
         status=display_status,
         created_at=str(record.get("created_at") or ""),
         model=str(record.get("model") or ""),
+        schema_name=str(schema.get("name") or ""),
+        schema_version_id=str(schema.get("version_id") or ""),
         run_dir=str(legacy.get("submit_run_dir") or batches.get("source_run_dir") or ""),
         detail=detail,
         input_location=str(input_payload.get("location") or ""),

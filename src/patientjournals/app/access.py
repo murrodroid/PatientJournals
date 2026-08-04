@@ -152,6 +152,7 @@ def _configured_prefixes(settings: AppSettings) -> tuple[tuple[str, str], ...]:
         ("Batch outputs prefix", settings.batch_outputs_gcs_prefix),
         ("Datasets prefix", settings.datasets_gcs_prefix),
         ("Validations prefix", settings.validations_gcs_prefix),
+        ("Schemas prefix", settings.schemas_gcs_prefix),
     )
 
 

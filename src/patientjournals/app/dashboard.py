@@ -7,7 +7,7 @@ from collections import Counter
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from statistics import mean, median
-from typing import Any, Iterable, get_args, get_origin
+from typing import Any, Iterable, Mapping, get_args, get_origin
 
 from patientjournals.config import config
 from patientjournals.shared.field_classification import is_schema_data_field
@@ -31,6 +31,7 @@ class ValidationMetricSummary:
     corrected: int
     unsure: int
     accuracy: float | None
+    model: str = ""
 
 
 @dataclass(frozen=True)
@@ -47,6 +48,7 @@ class ValidationRunSummary:
     corrected: int
     unsure: int
     accuracy: float | None
+    model: str = ""
 
 
 @dataclass(frozen=True)
@@ -112,6 +114,8 @@ class DatasetAnalysis:
     attempts: dict[str, float | int | None]
     avg_logprobs: dict[str, float | int | None]
     sample_rows: tuple[dict[str, object], ...]
+    model_counts: dict[str, int]
+    schema_version_counts: dict[str, int]
 
 
 def _count_jsonl_rows(path: Path) -> int:
@@ -225,6 +229,9 @@ def analyze_dataset_file(
     dataset_path: str | Path,
     *,
     sample_limit: int = 25,
+    schema_leaf_fields: Iterable[str] | None = None,
+    schema_fields_by_version: Mapping[str, Iterable[str]] | None = None,
+    schema_names_by_version: Mapping[str, str] | None = None,
 ) -> DatasetAnalysis:
     path = Path(dataset_path).expanduser()
     rows = _dataset_rows(path)
@@ -238,9 +245,72 @@ def analyze_dataset_file(
     row_count = len(rows)
     failed_rows = sum(1 for row in rows if _truthy(row.get("failed")))
     failure_reasons = _counter(row.get("failure_reason") for row in rows)
+    known_schema_leafs: set[str] | None = None
+    if schema_leaf_fields is not None:
+        known_schema_leafs = {str(field) for field in schema_leaf_fields}
+    elif schema_fields_by_version:
+        version_fields = {
+            str(version_id): {str(field) for field in fields}
+            for version_id, fields in schema_fields_by_version.items()
+        }
+        row_version_ids = {
+            str(row.get("schema_version_id") or "").strip()
+            for row in rows
+            if str(row.get("schema_version_id") or "").strip()
+        }
+        exact_ids = row_version_ids.intersection(version_fields)
+        if exact_ids:
+            known_schema_leafs = {
+                field for version_id in exact_ids for field in version_fields[version_id]
+            }
+        else:
+            row_schema_names = {
+                str(row.get("schema_name") or "").strip().lower()
+                for row in rows
+                if str(row.get("schema_name") or "").strip()
+            }
+            observed = set(columns)
+            candidates = [
+                (version_id, fields)
+                for version_id, fields in version_fields.items()
+                if not row_schema_names
+                or str((schema_names_by_version or {}).get(version_id) or "").lower()
+                in row_schema_names
+            ]
+
+            def candidate_score(item: tuple[str, set[str]]) -> tuple[int, float, int]:
+                eligible = {
+                    field for field in item[1] if is_schema_data_field(field)
+                }
+                overlap = len(observed.intersection(eligible))
+                return (
+                    overlap,
+                    overlap / max(1, len(eligible)),
+                    -len(eligible),
+                )
+
+            if candidates:
+                _best_id, best_fields = max(candidates, key=candidate_score)
+                if row_schema_names or candidate_score(("", best_fields))[0] > 0:
+                    known_schema_leafs = set(best_fields)
+
+    if known_schema_leafs is not None:
+        for field in sorted(known_schema_leafs):
+            if is_schema_data_field(field) and field not in columns:
+                columns.append(field)
+    known_schema_parents: set[str] = set()
+    for leaf in known_schema_leafs or ():
+        parts = leaf.replace("[]", "").split(".")
+        known_schema_parents.update(
+            ".".join(parts[:index]) for index in range(1, len(parts))
+        )
     schema_completeness: list[DatasetColumnSummary] = []
     metadata_completeness: list[DatasetColumnSummary] = []
     for column in columns:
+        if column in known_schema_parents or (
+            known_schema_leafs is None and _is_schema_parent_column(column)
+        ):
+            continue
         populated = sum(1 for row in flat_rows if _is_populated(row.get(column)))
         missing = max(0, row_count - populated)
         summary = DatasetColumnSummary(
@@ -249,7 +319,12 @@ def analyze_dataset_file(
             missing=missing,
             completeness=(populated / row_count * 100.0) if row_count else 0.0,
         )
-        if _is_schema_column(column):
+        is_schema_leaf = (
+            column in known_schema_leafs and is_schema_data_field(column)
+            if known_schema_leafs is not None
+            else _is_schema_column(column)
+        )
+        if is_schema_leaf:
             schema_completeness.append(summary)
         else:
             metadata_completeness.append(summary)
@@ -274,6 +349,10 @@ def analyze_dataset_file(
         attempts=numeric_distribution(row.get("attempts") for row in rows),
         avg_logprobs=numeric_distribution(row.get("avg_logprobs") for row in rows),
         sample_rows=tuple(flat_rows[: max(1, sample_limit)]),
+        model_counts=_counter(row.get("model") for row in rows),
+        schema_version_counts=_counter(
+            row.get("schema_version_id") for row in rows
+        ),
     )
 
 
@@ -411,7 +490,24 @@ def _is_metadata_column(column: str) -> bool:
 def _is_schema_column(column: str) -> bool:
     if _is_metadata_column(column):
         return False
-    return any(_field_type_for_model(model, column) is not None for model in _schema_models())
+    for model in _schema_models():
+        field_type = _field_type_for_model(model, column)
+        if field_type is None:
+            continue
+        if isinstance(field_type, type) and hasattr(field_type, "model_fields"):
+            continue
+        return True
+    return False
+
+
+def _is_schema_parent_column(column: str) -> bool:
+    if _is_metadata_column(column):
+        return False
+    for model in _schema_models():
+        field_type = _field_type_for_model(model, column)
+        if isinstance(field_type, type) and hasattr(field_type, "model_fields"):
+            return True
+    return False
 
 
 def _is_populated(value: object) -> bool:
@@ -535,6 +631,11 @@ def _summarize_validation_runs(
         scored, accuracy = _validation_accuracy(group)
         dataset_file = str(group[0].get("dataset_file") or "unknown")
         validator_id = str(group[0].get("validator_id") or "unknown")
+        models = {
+            str(row.get("model") or "").strip()
+            for row in group
+            if str(row.get("model") or "").strip()
+        }
         summaries.append(
             ValidationRunSummary(
                 run_id=run_id,
@@ -544,6 +645,7 @@ def _summarize_validation_runs(
                 decisions=len(group),
                 scored=scored,
                 accuracy=accuracy,
+                model=next(iter(models)) if len(models) == 1 else "mixed" if models else "",
                 **counts,
             )
         )
@@ -563,13 +665,14 @@ def _summarize_validation_runs(
 def _summarize_validation_metrics(
     rows: list[dict[str, str]],
 ) -> tuple[ValidationMetricSummary, ...]:
-    grouped: dict[str, list[dict[str, str]]] = {}
+    grouped: dict[tuple[str, str], list[dict[str, str]]] = {}
     for row in rows:
         metric = str(row.get("column_name") or "").strip() or "(unknown)"
-        grouped.setdefault(metric, []).append(row)
+        model = str(row.get("model") or "").strip() or "(unknown model)"
+        grouped.setdefault((model, metric), []).append(row)
 
     summaries: list[ValidationMetricSummary] = []
-    for metric, group in grouped.items():
+    for (model, metric), group in grouped.items():
         counts = _validation_counts(group)
         scored, accuracy = _validation_accuracy(group)
         summaries.append(
@@ -578,6 +681,7 @@ def _summarize_validation_metrics(
                 decisions=len(group),
                 scored=scored,
                 accuracy=accuracy,
+                model=model,
                 **counts,
             )
         )

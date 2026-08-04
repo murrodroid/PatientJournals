@@ -133,6 +133,11 @@ def create_subfolder(
     payload = {
         "created_at": datetime.now().isoformat(timespec="seconds"),
         "kind": kind,
+        "model": str(config.model or ""),
+        "schema_name": str(getattr(config, "output_schema_name", "") or ""),
+        "schema_version_id": str(
+            getattr(config, "output_schema_version_id", "") or ""
+        ),
         "config_file": "config_snapshot.py",
         "config_values": serializable_config(config_module),
         "output_schema": config.output_schema,
