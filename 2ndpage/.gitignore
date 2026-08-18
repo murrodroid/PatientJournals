@@ -1,0 +1,20 @@
+# Miljø
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Billeder hentes udefra og hører ikke i repoet
+billeder/
+*.jpg
+*.jpeg
+*.png
+!stages/*/output/kontaktark/.gitkeep
+
+# Rå modelsvar kan fylde meget; kun sammendrag committes
+stages/05_metodeforsoeg/output/koersler/
+
+# Hemmeligheder
+api_keys.py
+.env
+*credentials*.json
