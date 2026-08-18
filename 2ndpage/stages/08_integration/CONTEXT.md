@@ -1,4 +1,4 @@
-# Stage 06 — Integration
+# Stage 08 — Integration
 
 ## Formål
 
@@ -10,7 +10,8 @@ så andensider kan køres derfra på samme måde som forsiderne.
 | Type | Sti |
 |---|---|
 | Testregler | `../../_config/tdd.md` |
-| Valgt metode | `../05_metodeforsoeg/output/sammenligning.md` |
+| Valgt metode | `../06_prompt_og_model/output/sammenligning.md` |
+| Uenighedslag | `../07_anden_stemme/output/traeffik.md` |
 | Kollegaens kontrakt | `../../references/app_interface_upstream.md` |
 | Masterliste-viden | `../../references/billeder_og_masterliste.md` |
 

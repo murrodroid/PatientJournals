@@ -95,13 +95,14 @@ def find_snitpunkt(
     side: Side,
     *,
     ryg_taerskel: float = 0.30,
+    buffer_andel: float = 0.01,
 ) -> SnitResultat:
     """Finder graensen mellem hovedsidens tekst og naboopslagets strimmel.
 
     To tidligere forsoeg fejlede: et globalt lyseste-punkt kunne lande
-    langt inde i naboens egen margen (forbi rillen), og en "foerste
+    langt inde i naboens egen margen (forbi ryggen), og en "foerste
     sammenhaengende blanke plet"-soegning fandt intet, fordi naboens
-    tekst ofte begynder for taet paa rillen til at give en blank periode.
+    tekst ofte begynder for taet paa ryggen til at give en blank periode.
 
     Den fysiske bogryg viser sig i praksis som en KRAFTIG TOP i
     blaekprofilen (0,5-1,0 -- langt over almindelig haandskrifts 0,05-0,15),
@@ -109,11 +110,17 @@ def find_snitpunkt(
     at soegningen blev afgraenset korrekt til kant-vinduet. Vi gaar fra
     vores egen, betroede side og ind mod naboopslaget, og snitter ved
     foerste kolonne hvor blaekmaengden krydser ryg_taerskel -- det er
-    rygningens naere kant, saa hele vores egen side bevares, og baade
-    ryggen og naboens strimmel skaeres fra.
+    ryggens naere kant.
+
+    Et lille buffer (standard 1% af billedbredden) flyttes derefter VAEK
+    fra vores egen tekst og ind mod ryggen/naboen. Uden buffer risikerer et
+    snit lige paa graensen at skaere brodstykker af hoeje eller dybe
+    bogstavtraek, der strækker sig en anelse laengere end den udglattede
+    profil viser. Lead paapegede behovet 2026-08-18.
     """
     profile = smooth(column_ink_profile(img))
     vindue = soegevindue(side, img.width)
+    buffer_px = max(1, int(img.width * buffer_andel))
 
     if vindue.retning == "fra_hoejre":
         # vores side er til venstre for vinduet; gaa fra vindue.start og udad
@@ -124,7 +131,11 @@ def find_snitpunkt(
 
     for x in raekkefoelge:
         if profile[x] >= ryg_taerskel:
-            return SnitResultat(x=x, styrke=profile[x], vindue=vindue)
+            if vindue.retning == "fra_hoejre":
+                x_med_buffer = min(x + buffer_px, vindue.slut - 1)
+            else:
+                x_med_buffer = max(x - buffer_px, vindue.start)
+            return SnitResultat(x=x_med_buffer, styrke=profile[x], vindue=vindue)
 
     # ingen ryg fundet i vinduet -- usikkert, marker med styrke 0.0 saa det
     # kan filtreres fra i stedet for at blive brugt uden videre

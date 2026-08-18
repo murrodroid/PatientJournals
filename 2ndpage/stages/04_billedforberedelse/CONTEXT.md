@@ -77,6 +77,6 @@ mærket og ikke skåret. Ingen model kaldes i denne stage.
 
 ## Handoff
 
-Næste stage er `05_metodeforsoeg`. Reviewed betyder, at du har set
+Næste stage er `05_foerste_transskription`. Reviewed betyder, at du har set
 kontaktarket igennem og godkendt snittene — først derefter må forberedelsen
 låses som fast forudsætning for forsøgene.

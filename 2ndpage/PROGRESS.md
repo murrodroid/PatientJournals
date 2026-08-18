@@ -13,7 +13,8 @@ Videre til næste stage kun efter menneskelig gennemgang.
       nul andenside-billeder lokalt
 - [x] Grill gennemført; 16 beslutninger låst i `CONTEXT.md`
 - [x] Billedanmodning skrevet: 307 billeder → `billedanmodning/`
-- [x] ICM-skelet oprettet: `AGENTS.md`, `_config/tdd.md`, syv stages, strukturtest
+- [x] ICM-skelet oprettet: `AGENTS.md`, `_config/tdd.md`, ni stages, strukturtest
+      (05 splittet i 05/06/07 senere samme dag — se stage 05-afsnittet)
 
 ## Stage 00 — Forundersøgelse
 
@@ -72,9 +73,9 @@ Videre til næste stage kun efter menneskelig gennemgang.
 - [x] **Snitpunkt-detektion LØST, v2** (2026-08-18): første version (dal =
       lyseste punkt i vinduet) blev erklæret "8/8 perfekt" af mig, men
       leads eget gennemsyn fandt 4 reelle fejl (snit gik gennem naboens
-      tekst). Rettet: rygningen viser sig som en KRAFTIG TOP i
+      tekst). Rettet: ryggen viser sig som en KRAFTIG TOP i
       blækprofilen, ikke en dal — algoritmen går nu fra vores egen side
-      og snitter ved rygningens nære kant. Alle 8 billeder gennemset igen
+      og snitter ved ryggens nære kant. Alle 8 billeder gennemset igen
       efter rettelsen, inklusive de 4 tidligere fejlende. Se CONTEXT.md.
       `src/andenside/bogryg.py` + `kontaktark.py`, låst med opdateret
       regressionstest (`tests/test_bogryg_real_billeder.py`).
@@ -89,16 +90,30 @@ Videre til næste stage kun efter menneskelig gennemgang.
       `output/kontaktark/`, bekræft eller korrigér, før forberedelsen
       låses som forudsætning for stage 05
 
-## Stage 05 — Metodeforsøg
+## Stage 05 — Første transskription
+
+*(splittet ud af tidligere "05 Metodeforsøg" 2026-08-18 — fin opdeling af
+selve læse-implementeringen, samme princip som resten af planen)*
 
 - [ ] Forsøg 1: kun billedforberedelsen varieres (`gemini-3.1-pro`, fast prompt)
 - [ ] Bogholderi: rå svar + fuld opsætning gemmes pr. kørsel
-- [ ] Senere akser, én ad gangen: model, prompt, opløsning, linjedetektion
-- [ ] Anden stemme (`claude-opus-4-6`) og uenighedsmarkering
 - [ ] **Ingen fuld kørsel uden leads go**
-- [ ] **Gennemgang ved lead** — vinderen udpeges
+- [ ] **Gennemgang ved lead** — er beskæringen god nok til at gå videre?
 
-## Stage 06 — Integration
+## Stage 06 — Prompt og model
+
+- [ ] Én akse ad gangen: model, prompt, opløsning, linjedetektion (baselines)
+- [ ] Test om prompt kan løse resterende beskæringsufuldkommenheder
+- [ ] Undersøg fjern-opslags-bleed (se CONTEXT.md, leads fund om side 51 i side 101)
+- [ ] **Gennemgang ved lead** — bedste kombination udpeges
+
+## Stage 07 — Anden stemme
+
+- [ ] `claude-opus-4-6` som anden stemme, uenighedsmarkering
+- [ ] Mål fejlfangst pr. gennemsynsbyrde (jf. Humphries maj 2026)
+- [ ] **Gennemgang ved lead**
+
+## Stage 08 — Integration
 
 - [ ] Leverance: prompt, skema, måletal
 - [ ] Forslag til sideudvælgelse via `patient_page_counter` frem for `_fp`

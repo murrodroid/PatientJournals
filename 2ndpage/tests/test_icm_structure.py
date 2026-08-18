@@ -12,8 +12,10 @@ STAGES = [
     "02_facit",
     "03_maaleapparat",
     "04_billedforberedelse",
-    "05_metodeforsoeg",
-    "06_integration",
+    "05_foerste_transskription",
+    "06_prompt_og_model",
+    "07_anden_stemme",
+    "08_integration",
 ]
 
 REQUIRED_SECTIONS = [

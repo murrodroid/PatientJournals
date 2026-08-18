@@ -1,7 +1,7 @@
 """Regressionstest af snitpunkt-detektion mod rigtige, øjenbekræftede billeder.
 
 Otte billeder er gennemset visuelt (2026-08-18) og alle otte snit landede
-præcist i den fysiske rygning -- se
+præcist i den fysiske ryg -- se
 stages/04_billedforberedelse/output/kontaktark/. Denne test låser den
 adfærd, så en fremtidig ændring i algoritmen bliver opdaget, hvis den
 flytter snittet væk fra det bekræftede bånd.
@@ -9,7 +9,7 @@ flytter snittet væk fra det bekræftede bånd.
 OBS: en tidligere version af denne test låste en dal-baseret algoritme,
 som lead fangede som forkert ved selv at se kontaktarkene igennem --
 den ramte langt inde i naboopslagets tekst i 4 ud af 8 tilfælde. Ny
-algoritme (2026-08-18, senere): find rygningens KANT som en top i
+algoritme (2026-08-18, senere): find ryggens KANT som en top i
 blækprofilen, ikke det lyseste punkt i vinduet. De fire tidligere
 fejlende billeder er gennemset igen og bekræftet korrekte.
 

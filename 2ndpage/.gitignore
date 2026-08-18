@@ -13,7 +13,8 @@ billeder/
 !stages/*/output/kontaktark/.gitkeep
 
 # Rå modelsvar kan fylde meget; kun sammendrag committes
-stages/05_metodeforsoeg/output/koersler/
+stages/05_foerste_transskription/output/koersler/
+stages/06_prompt_og_model/output/koersler/
 
 # Hemmeligheder
 api_keys.py

@@ -294,17 +294,17 @@ pilotmaterialet fejler — se `stages/04_billedforberedelse/output/usikre.md`.
 
 Lead gennemgik selv kontaktarkene og fandt, at 4 af de 8 (`273098_001496`,
 `273098_001497`, `273099_001360`, `273099_001361`) var reelt dårlige — den
-røde streg gik igennem starten af naboopslagets tekst, ikke i rygningen.
+røde streg gik igennem starten af naboopslagets tekst, ikke i ryggen.
 Min egen visuelle "8/8"-vurdering fra tidligere var altså for overfladisk.
 
 **Diagnose**: algoritmen ledte efter det ABSOLUT lyseste punkt i hele
 kant-vinduet ("dal"). Det kan sagtens lande langt inde i NABOENS egen
-blanke margen, forbi selve rygningen, hvis naboens tekst ikke fylder hele
+blanke margen, forbi selve ryggen, hvis naboens tekst ikke fylder hele
 vinduets bredde. Et mellemliggende forsøg (udelad top/bund 5% for at
 undgå affotograferingens baggrundsskygge) ændrede stort set intet i
 tallene — bekræftet numerisk, ikke kun antaget.
 
-**Løsning**: dumpede de rå blækprofil-tal i vinduet og så, at rygningen
+**Løsning**: dumpede de rå blækprofil-tal i vinduet og så, at ryggen
 rent faktisk viser sig som en **kraftig top** (0,5-1,0 — langt over
 håndskrifts normale 0,05-0,15), præcis som magresprots oprindelige
 research sagde fra start (se `references/icm_metodik.md`). Det første,
@@ -313,17 +313,53 @@ også efter en top, men fejlede, fordi det søgte i HELE billedets bredde
 uden at vide hvilken kant der var relevant — nu hvor kanten er kendt,
 virker top-søgning præcis. `find_snitpunkt` går fra vores egen, betroede
 side og ind mod naboopslaget, og snitter ved første kolonne der krydser
-en rygnings-tærskel (0,30) — det bevarer hele vores egen side og skærer
-både rygning og nabo-strimmel fra.
+en ryg-tærskel (0,30) — det bevarer hele vores egen side og skærer
+både ryg og nabo-strimmel fra.
 
 Alle 8 billeder gennemset igen efter rettelsen, inklusive de 4 tidligere
-fejlende — alle otte lander nu i selve rygningen. Regressionstesten er
+fejlende — alle otte lander nu i selve ryggen. Regressionstesten er
 opdateret til de nye, korrekte positioner.
 
 **Læring at tage med videre**: en visuel gennemgang, jeg selv laver, er
 ikke nok alene — leads gennemsyn fangede noget, mit eget ikke gjorde.
 Stol ikke på egen "set med øjne"-erklæring som endegyldig, når brugeren
 kan og vil se efter selv.
+
+**Buffer tilføjet**: snittet flyttes nu en anelse (1% af billedbredden) væk
+fra vores egen tekst og ind mod ryggen, efter leads anmodning — uden buffer
+risikerer et snit lige på grænsen at skære bittesmå udløbere af bogstaver,
+som den udglattede profil ikke fanger. Implementeret i
+`find_snitpunkt`s `buffer_andel`-parameter.
+
+**Terminologi rettet**: det hedder "ryg", ikke "rygning" — rettet
+gennemgående i kode, tests og denne fil.
+
+### Ny forureningskilde opdaget: bleed fra HELT ANDRE, fjerne opslag
+
+Lead: ud over strimlen fra det UMIDDELBARE naboopslag (som stage 04
+allerede håndterer) kan affotograferingen nogle gange vise stumper af en
+helt anden, langt tidligere side i samme bind. Eksempel: på en verso-side,
+fx side 101, kan man nogle gange se lidt af en helt anden verso-side, fx
+side 51, stikke ind i billedet. Formentlig fordi bogen ikke ligger helt
+fladt under fotograferingen, og en bagvedliggende side bliver delvist
+synlig. Det er en ANDEN og mere lumsk fejlkilde end nabo-strimlen, fordi
+den ikke sidder på en forudsigelig kant og ikke kan udledes af
+recto/verso-paritet — og den kan ende forkert i transskriptionen, hvis intet
+fanger den. Lagt ind som opgave i `stages/06_prompt_og_model/CONTEXT.md`:
+undersøg om det sker konsekvent, og om en prompt-instruktion om at ignorere
+løsrevne, ude-af-kontekst bogstaver kan løse det billigere end at forsøge at
+detektere det billedmæssigt.
+
+### Stage-plan udvidet fra syv til ni stages
+
+Lead påpegede, at kun én stage (den tidligere "05 metodeforsøg") dækkede
+selve læse-implementeringen, mens forarbejdet (00-04) havde fem — uforeneligt
+med den "fin opdeling"-begrundelse, der blev valgt under grillen (fang fejl
+tæt på deres oprindelse). Splittet i tre: `05_foerste_transskription`
+(lukker sløjfen på stage 04 med rigtige tal), `06_prompt_og_model` (selve
+læse-implementeringen: model, prompt, opløsning), `07_anden_stemme`
+(uenighedslag, egen fase siden det er kvalitetskontrol oven på læsningen,
+ikke selve læsningen). `08_integration` er den gamle `06`, rykket.
 
 ## 2026-08-18 (natten, fortsat) — Snitpræcision behøver ikke være perfekt
 
