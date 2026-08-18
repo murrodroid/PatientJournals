@@ -25,12 +25,13 @@ Videre til næste stage kun efter menneskelig gennemgang.
 - [x] `output/aabne_spoergsmaal.md` — seks punkter kun vi selv kan afklare
 - [ ] **Gennemgang ved lead**
 
-**Vigtigste fund**: opløsning er en målt, reel risiko (LLM-OCR forringes
-under ~150 ppi; vores sider ligger sandsynligvis dér eller under) — og
-Humphries' optimistiske CER-tal (5-7 %) kan IKKE antages at gælde vores
-danske, gotisk/kursive materiale; ét uafhængigt studie fandt 41-60 % CER
-på et andet historisk datasæt med samme modeller. Stage 05's første tal
-skal tages meget alvorligt, uanset hvad litteraturen ellers siger.
+**Vigtigste fund**: vores billeders skarphed er en målt, reel risiko —
+maskinlæsning bliver markant dårligere under en vis skarphedsgrænse, og
+vores sider ligger sandsynligvis dér eller under. Humphries' gode tal
+(5-7 % tegnfejl) kan IKKE antages at gælde vores danske materiale; ét
+uafhængigt studie fandt 41-60 % tegnfejl på et andet historisk materiale
+med de samme modeller. Stage 05's første tal skal tages meget alvorligt,
+uanset hvad litteraturen ellers siger.
 
 ## Stage 01 — Datagrundlag *(ikke længere blokeret — selvbetjent kanal fundet)*
 

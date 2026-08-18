@@ -369,24 +369,26 @@ opslag, og øvrige benchmarks + opløsning. Fuldt notat med kilder:
 `stages/00_forundersoegelse/output/forundersoegelse.md`; åbne punkter i
 `aabne_spoergsmaal.md`.
 
-**De to vigtigste, mest konsekvensfulde fund**:
+**De to vigtigste, mest konsekvensfulde fund** (kilder med årstal i
+`stages/00_forundersoegelse/output/forundersoegelse.md`):
 
-1. **Opløsning er en målt risiko, ikke kun en formodning.** Et 2025-studie
-   (arXiv 2503.23667) finder, at LLM-OCR forringes markant under ~150 ppi.
-   Vores sider (~900-1.600 px brede) ligger sandsynligvis i eller under den
-   zone. Skal måles konkret og testes som egen akse i stage 06 — ikke
-   antages uvæsentlig, fordi Humphries ikke nævnte det som problem på sit
-   eget (formentlig højere opløste) materiale.
-2. **Humphries' optimistiske tal (5-7 % CER) må ikke antages at gælde
-   dansk gotisk/kursiv skrift.** Et uafhængigt studie (arXiv 2503.15195)
-   fandt Claude 3.5 Sonnet på 41 % CER og GPT-4o på ~60 % CER på et andet
-   historisk datasæt (ICDAR2017) — samme modelfamilier som os, radikalt
-   andre tal. Et dansk hands-on-forsøg (ikke formelt benchmark) fandt
-   direkte ChatGPT-hallucination på et 1844-dokument og Gemini der fejlede
-   på egennavne, med Transkribus foran begge. **Konsekvens**: stage 05's
-   første rigtige tal skal tages meget alvorligt og ikke antages gode på
-   forhånd; Transkribus/specialiseret HTR bør forblive en reel
-   sammenligning i stage 06, ikke kun baggrundsviden.
+1. **Billedernes skarphed er en målt risiko, ikke kun en formodning.** Et
+   studie fra 2025 fandt, at maskinlæsning bliver markant dårligere under
+   en vis skarphedsgrænse. Vores sider (~900-1.600 billedpunkter brede)
+   ligger sandsynligvis i eller under den grænse. Skal måles konkret og
+   testes som egen akse i stage 06 — ikke antages uvæsentligt, bare fordi
+   Humphries ikke nævnte det som et problem på sit eget, formentlig
+   skarpere materiale.
+2. **Humphries' gode tal (5-7 % tegnfejl) må ikke antages at gælde dansk
+   håndskrift.** Et uafhængigt studie fandt Claude på 41 % tegnfejl og
+   GPT-4o på omkring 60 % tegnfejl på et andet historisk materiale — samme
+   modeller som os, radikalt andre tal. Et dansk forsøg (én person, ikke
+   et formelt studie) fandt, at ChatGPT direkte digtede indhold på et
+   dansk 1844-dokument, og at Gemini fejlede på navne, mens det
+   specialiserede program Transkribus slog begge. **Konsekvens**: stage
+   05's første rigtige tal skal tages meget alvorligt og ikke antages gode
+   på forhånd; Transkribus/specialiseret håndskriftsgenkendelse bør
+   forblive en reel sammenligning i stage 06, ikke kun baggrundsviden.
 
 Øvrige fund: overstregnings-litteraturen for LLM'er er reelt tom (vi
 bliver de første til at teste det empirisk); et klinisk
