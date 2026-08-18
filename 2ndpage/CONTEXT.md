@@ -290,6 +290,51 @@ Metoden er ikke afprøvet på bredere materiale, og der er ingen
 usikkerheds-flagning implementeret endnu, fordi intet eksempel i
 pilotmaterialet fejler — se `stages/04_billedforberedelse/output/usikre.md`.
 
+## 2026-08-18 (natten) — "8/8 perfekt" var forkert; rettet af leads gennemsyn
+
+Lead gennemgik selv kontaktarkene og fandt, at 4 af de 8 (`273098_001496`,
+`273098_001497`, `273099_001360`, `273099_001361`) var reelt dårlige — den
+røde streg gik igennem starten af naboopslagets tekst, ikke i rygningen.
+Min egen visuelle "8/8"-vurdering fra tidligere var altså for overfladisk.
+
+**Diagnose**: algoritmen ledte efter det ABSOLUT lyseste punkt i hele
+kant-vinduet ("dal"). Det kan sagtens lande langt inde i NABOENS egen
+blanke margen, forbi selve rygningen, hvis naboens tekst ikke fylder hele
+vinduets bredde. Et mellemliggende forsøg (udelad top/bund 5% for at
+undgå affotograferingens baggrundsskygge) ændrede stort set intet i
+tallene — bekræftet numerisk, ikke kun antaget.
+
+**Løsning**: dumpede de rå blækprofil-tal i vinduet og så, at rygningen
+rent faktisk viser sig som en **kraftig top** (0,5-1,0 — langt over
+håndskrifts normale 0,05-0,15), præcis som magresprots oprindelige
+research sagde fra start (se `references/icm_metodik.md`). Det første,
+allerførste forsøg denne aften (før recto/verso-reglen var kendt) ledte
+også efter en top, men fejlede, fordi det søgte i HELE billedets bredde
+uden at vide hvilken kant der var relevant — nu hvor kanten er kendt,
+virker top-søgning præcis. `find_snitpunkt` går fra vores egen, betroede
+side og ind mod naboopslaget, og snitter ved første kolonne der krydser
+en rygnings-tærskel (0,30) — det bevarer hele vores egen side og skærer
+både rygning og nabo-strimmel fra.
+
+Alle 8 billeder gennemset igen efter rettelsen, inklusive de 4 tidligere
+fejlende — alle otte lander nu i selve rygningen. Regressionstesten er
+opdateret til de nye, korrekte positioner.
+
+**Læring at tage med videre**: en visuel gennemgang, jeg selv laver, er
+ikke nok alene — leads gennemsyn fangede noget, mit eget ikke gjorde.
+Stol ikke på egen "set med øjne"-erklæring som endegyldig, når brugeren
+kan og vil se efter selv.
+
+## 2026-08-18 (natten, fortsat) — Snitpræcision behøver ikke være perfekt
+
+leads pointe: selv hvis billedforberedelsen ikke rammer 100% rent, kan
+resten løses ved at prompte sig ud af det i stage 05 — bede modellen om
+udtrykkeligt at ignorere en delvis synlig nabotekst i kanten af billedet.
+Det sænker kravet til stage 04's præcision uden at gøre arbejdet
+overflødigt: en renere beskæring er stadig billigere (færre tokens,
+mindre risiko for distraktion), men er ikke længere en hård forudsætning
+for at komme videre til stage 05.
+
 ### Første, mislykkede forsøg på automatisk rygdetektion (læring, ikke løsning)
 
 Et hurtigt prototype-script (`scripts/bogryg_profil.py`, midlertidigt) blev

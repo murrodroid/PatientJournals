@@ -69,11 +69,17 @@ Videre til næste stage kun efter menneskelig gennemgang.
       `patient_page_counter` afgør entydigt hvilken kant der bærer strimlen
       — andenside=verso=indhold venstre, tredjeside=recto=indhold højre.
 - [x] **Scope udvidet**: tredjeside (recto, 71.380 sider) er nu også med.
-- [x] **Snitpunkt-detektion LØST og verificeret 8/8** (2026-08-18): lyseste
-      kolonne inden for det kendte kant-bånd = rillen mellem siderne.
-      `src/andenside/bogryg.py` + `kontaktark.py`. Alle 8 billeder i
-      pilotmaterialet gennemset med øjne, alle ramte rillen præcist.
-      Låst med regressionstest (`tests/test_bogryg_real_billeder.py`).
+- [x] **Snitpunkt-detektion LØST, v2** (2026-08-18): første version (dal =
+      lyseste punkt i vinduet) blev erklæret "8/8 perfekt" af mig, men
+      leads eget gennemsyn fandt 4 reelle fejl (snit gik gennem naboens
+      tekst). Rettet: rygningen viser sig som en KRAFTIG TOP i
+      blækprofilen, ikke en dal — algoritmen går nu fra vores egen side
+      og snitter ved rygningens nære kant. Alle 8 billeder gennemset igen
+      efter rettelsen, inklusive de 4 tidligere fejlende. Se CONTEXT.md.
+      `src/andenside/bogryg.py` + `kontaktark.py`, låst med opdateret
+      regressionstest (`tests/test_bogryg_real_billeder.py`).
+- [x] **Beslutning**: snitpræcision behøver ikke være perfekt — stage 05
+      kan prompte modellen til at ignorere delvis nabotekst som backup.
 - [ ] **Kendt begrænsning**: kun afprøvet på 2 bind, samme måneder (maj-juni
       1896) — bredere test nødvendig, når flere billeder er hentet.
 - [ ] Ingen usikkerheds-flagning implementeret endnu (intet fejlende
