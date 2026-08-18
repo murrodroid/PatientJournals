@@ -217,28 +217,50 @@ se NOGET af" nabosider, ikke en hel side. Faktisk indhold pr. `page_counter`
 er fuldt ud til stede i sit eget billede (verificeret ord for ord tre gange
 mod facit: 1361, 1362, 1363 i bind 273099).
 
-**Delvist mønster, ikke fuldt bekræftet**: strimlens side (venstre/højre)
-ser ud til at skifte — i `273099_001361` sås fremmed tekst i venstre kant,
-i `273098_001496`/`_001508`/`273099_001362` i højre kant. En plausibel
-forklaring er, at det følger, om målsiden er en recto (højre fysisk side,
-"næste" side titter frem til venstre) eller verso (venstre fysisk side,
-"næste" side titter frem til højre) — men dette er en hypotese, IKKE
-verificeret systematisk, og skal bekræftes med rigtige øjne, ikke antages.
+**LØST 2026-08-18 (senere): recto/verso-reglen, forklaret af lead.**
+Alle patientjournaler var oprindeligt løse blade, senere indbundet — og når
+foldede blade indbindes, starter man altid på en enkelt recto. Derfor er
+**forsiden altid recto, andensiden altid verso, tredjesiden altid recto**,
+og så fremdeles (lige `patient_page_counter` = recto, ulige = verso, med
+forsiden som `0`). Det forklarer strimmel-siden fuldstændigt og passer på
+ALLE observerede billeder, ikke kun de fleste:
 
-**Forsideopslag er en anden, bredere billedtype**: `273098_001471`
-(Christiane Marie Andersens forside) viser derimod et bredere, mere
-symmetrisk udsnit med synlig bogryg og forrige patients blanke rest til
-venstre. Om det er en systematisk forskel (forsider fotograferes bredere)
-eller blot variation i fotograferingen, er uafklaret.
+| Side | Recto/verso | Primærindhold | Strimmel af nabo |
+|---|---|---|---|
+| Forside (0) | recto | højre | venstre (forrige patients tomme rest) |
+| Andenside (1) | verso | venstre | højre (tredjesidens begyndelse) |
+| Tredjeside (2) | recto | højre | venstre (andensidens hale) |
 
-**Konsekvens for stage 04 (revideret)**: opgaven er nok snarere at **skære
-en smal, forurenende strimmel væk fra én kant** end at "finde bogryggen og
-dele midt over". Det er en lettere opgave end oprindeligt antaget for
-almindelige sider, men kræver at kende strimlens side pr. billede (mulig
-signal: recto/verso-paritet af `page_counter`) — og forsideopslag kan kræve
-en anden regel. **Sæt dette som første punkt til `Gennemgang ved lead`** i
-stage 01 med de nævnte billeder som konkret materiale; gæt det ikke videre
-algoritmisk uden bekræftelse.
+Krydstjekket eksplicit mod alle fem billeder, der er set indtil nu:
+`273098_001471` (forside/recto → indhold højre ✓), `273098_001496`/`_001508`
+(andensider/verso → indhold venstre ✓), `273099_001361` (tredjeside/recto →
+indhold højre, fremmed hale-strimmel venstre ✓), `273099_001362`
+(andenside/verso → indhold venstre, forhåndsvisning af tredjeside højre ✓),
+`273099_001363` (tredjeside/recto → indhold højre, andensidens hale-strimmel
+venstre ✓). Alle fem stemmer.
+
+**Konsekvens for stage 04**: hvilken kant der skal beskæres væk, kan
+**udledes direkte af `patient_page_counter`s paritet** — ingen CV-gætteri
+nødvendigt for selve sidevalget. Opgaven bliver at finde SELVE snitpunktet
+(hvor strimlen holder op og hovedsiden begynder) inden for den kendte kant,
+ikke at afgøre hvilken kant. Forsideopslagets bredere, mere symmetriske
+format hænger sammen med, at forrige patients afsluttede sag ofte efterlader
+en næsten tom verso — ikke en systematisk anden fototype.
+
+**Scope udvidet**: Lead ønsker BÅDE andenside (verso) OG tredjeside (recto)
+med i projektet, ikke kun andensiden alene.
+
+## 2026-08-18 (endnu senere) — Projektomfang bekræftet; størrelsesoverslag afblæst
+
+- **Fuldt korpus, 1880-1910**, ikke kun de 1889-97-årgange forsiderne
+  dækker. De 50 "ekstra andensider" i billedanmodningen dækker kun 1889-97
+  — bør udvides ved en senere anmodning, hvis generalisering til de øvrige
+  årgange (1880-88, 1898-1910) skal testes for alvor.
+- **Størrelsesoverslag for TIFF/komprimeret er nedprioriteret på ubestemt
+  tid.** Begrundelse: transskriptionen kommer ikke til at køre lokalt — den
+  sker via kollegaens webapp/cloud-pipeline (GCS-bucket). Lokal
+  diskplads er derfor ikke en reel begrænsning for dette projekt. Tages op
+  igen, hvis/når det bliver relevant; ingen grund til at jage scriptet nu.
 
 ### Første, mislykkede forsøg på automatisk rygdetektion (læring, ikke løsning)
 

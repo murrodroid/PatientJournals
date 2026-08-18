@@ -64,14 +64,18 @@ Videre til næste stage kun efter menneskelig gennemgang.
 ## Stage 04 — Billedforberedelse
 
 - [x] **Model revideret** (2026-08-18): opgaven er at skære en smal
-      forurenende strimmel væk fra ÉN kant, ikke at dele midt over — se
-      CONTEXT.md. Tre naive kolonneprofil-forsøg (top/løb/dal) landede alle
-      forkert i selve teksten; scriptet `scripts/bogryg_profil.py` er
-      bevaret som udgangspunkt, ikke en løsning.
-- [ ] Afklar strimlens side pr. billede (recto/verso-hypotese, ubekræftet)
-- [ ] Design detektion ud fra den asymmetriske model med flere facit-labels
-- [ ] Frasortér naboblade der rager ind; find blanke halvsider
-- [ ] Afklar forsideopslags afvigende, bredere format
+      forurenende strimmel væk fra ÉN kant, ikke at dele midt over.
+- [x] **Kant-reglen LØST** (2026-08-18, lead): recto/verso-paritet af
+      `patient_page_counter` afgør entydigt hvilken kant der bærer strimlen
+      — andenside=verso=indhold venstre, tredjeside=recto=indhold højre.
+      Verificeret mod fem virkelige billeder. Ingen CV-gætteri nødvendigt
+      for sidevalget længere.
+- [x] **Scope udvidet**: tredjeside (recto, 71.380 sider) er nu også med,
+      ikke kun andenside.
+- [ ] Byg selve snitpunkt-findingen inden for den nu kendte kant (de tre
+      tidligere kolonneprofil-forsøg løste det forkerte problem — midte
+      i stedet for kant — men kan genbruges som udgangspunkt)
+- [ ] Frasortér naboblade der rager usædvanligt langt ind
 - [ ] Kontaktark med indtegnede snit
 - [ ] Usikre snit mærkes og skæres ikke
 - [ ] **Gennemgang ved lead** — forberedelsen låses herefter
