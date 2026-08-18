@@ -20,7 +20,9 @@ se `references/icm_metodik.md` for den fulde beskrivelse.
 - **Stage-output er menneskelæsbare filer** i stagens `output/`: CSV, JSONL,
   Markdown, PNG. Plain text først.
 - **Videre til næste stage kun efter menneskelig gennemgang** af forrige stages
-  output. Agenten må ikke selv erklære en stage færdig.
+  output. Agenten må ikke selv erklære en stage færdig. En godkendt stage er
+  ikke forseglet — dukker der senere et problem op (fx i et bredere
+  billedudsnit), genåbnes den stage, det hører hjemme i, uden tøven.
 - **Ingen fulde kørsler uden go.** Pilot på få sider → gennemgang → brugeren
   beslutter skalering. Det gælder både API-kald og billedbehandling.
 - **Alt med eksterne bivirkninger er dry-run som standard**; `--yes` udfører.
