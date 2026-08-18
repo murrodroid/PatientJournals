@@ -23,12 +23,22 @@ Videre til næste stage kun efter menneskelig gennemgang.
 - [ ] `output/aabne_spoergsmaal.md`
 - [ ] **Gennemgang ved lead**
 
-## Stage 01 — Datagrundlag *(blokeret: afventer billeder)*
+## Stage 01 — Datagrundlag *(ikke længere blokeret — selvbetjent kanal fundet)*
 
-- [ ] Aflever billedanmodningen til kollegaen
-- [ ] Modtag de 307 billeder
-- [ ] **Første tjek**: rummer et fortsættelsesopslag tekst på begge halvsider,
-      og dækker facits `[page]`-blok hele opslaget?
+- [x] **Selvbetjent billedadgang fundet**: kbharkiv.dk's kildeviser har et
+      åbent API (`api.kbharkiv.dk/pages?unit_id=`, `/file/<id>`).
+      Forskydning `page_number = counter - 1` verificeret to gange.
+      Script: `scripts/kbharkiv_hent.py` (midlertidigt, 20-billeders grænse).
+- [x] 16 rigtige andensider hentet til `output/proeve_opslag/`, tre af dem
+      krydstjekket ord for ord mod facit
+- [ ] Aflever stadig billedanmodningen til kollegaen (ren, langsigtet kanal)
+- [x] **Første tjek, model revideret**: billederne er IKKE symmetriske
+      dobbeltopslag (undtagen forsideopslag) — hvert billede er asymmetrisk
+      beskåret om ÉN målside med kun en smal strimmel af naboopslaget i én
+      kant. Facit findes altid fuldt i billedet. Strimlens side (v/h)
+      varierer, muligvis efter recto/verso-paritet — IKKE bekræftet.
+- [ ] **Kræver leads øjne**: bekræft modellen og strimmel-mønsteret på
+      `proeve_opslag/273098_001496/1508` + `273099_001361/62/63.webp`
 - [ ] `output/opslagsregister.csv` — billede, masterliste, facit, opløsning
 - [ ] `output/daekning.md` og `output/opslag_struktur.md`
 - [ ] **Gennemgang ved lead**
@@ -53,9 +63,15 @@ Videre til næste stage kun efter menneskelig gennemgang.
 
 ## Stage 04 — Billedforberedelse
 
-- [ ] Kolonnevis blækprofil; bogryg som top med fast vandret position
-- [ ] Deling i venstre og højre side; bekræft læserækkefølgen empirisk
+- [x] **Model revideret** (2026-08-18): opgaven er at skære en smal
+      forurenende strimmel væk fra ÉN kant, ikke at dele midt over — se
+      CONTEXT.md. Tre naive kolonneprofil-forsøg (top/løb/dal) landede alle
+      forkert i selve teksten; scriptet `scripts/bogryg_profil.py` er
+      bevaret som udgangspunkt, ikke en løsning.
+- [ ] Afklar strimlens side pr. billede (recto/verso-hypotese, ubekræftet)
+- [ ] Design detektion ud fra den asymmetriske model med flere facit-labels
 - [ ] Frasortér naboblade der rager ind; find blanke halvsider
+- [ ] Afklar forsideopslags afvigende, bredere format
 - [ ] Kontaktark med indtegnede snit
 - [ ] Usikre snit mærkes og skæres ikke
 - [ ] **Gennemgang ved lead** — forberedelsen låses herefter

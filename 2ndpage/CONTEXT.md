@@ -158,9 +158,97 @@ usikkerhedsmarkering et lag oven på teksten, ikke vævet ind i den.
 
 ### Fortsat åbne punkter
 
-- Rummer et fortsættelsesopslag tekst på begge halvsider, og dækker facits
-  `[page]`-blok hele opslaget eller kun den ene halvdel? Afgøres i stage 01.
-- Findes der skarpere originaler end ~900-1.000 pixels pr. tekstside?
+- Findes der skarpere originaler end ~1.650-2.000 px bredde pr. opslag?
 - Hvor står kollegaens dashboard-arbejde, og har han allerede afprøvet sin
   egen `textpage`-prompt på andensider?
 - leads fork har umerget `origin/patch-1` og lokal `Severity_prompt`.
+
+## 2026-08-18 (senere igen) — Selvbetjent billedadgang fundet mens vi ventede
+
+Mens billedanmodningen afventede kollegaen, blev der bygget et midlertidigt
+hente-script mod kbharkiv.dk's kildeviser, og en blokerende antagelse blev
+afklaret undervejs.
+
+### Fund: kbharkiv.dk kan hentes direkte, uden om kollegaen
+
+Kildeviseren (`kildeviser.kbharkiv.dk`) er en SvelteKit-app, der taler med et
+åbent, udokumenteret API:
+
+- `GET https://api.kbharkiv.dk/pages?unit_id=<bind-id>` → liste af
+  `{id, page_number, image_url, ...}` for hele bindet.
+- `GET https://api.kbharkiv.dk/file/<id>` → selve billedet (WebP), ingen
+  nøgle krævet.
+
+**Forskydning fundet og verificeret to gange uafhængigt**: kildeviserens
+`page_number` = masterlistens `<bind>_<counter>` minus 1 (kildeviseren
+tæller fra 0 ved et omslagsfoto). Verificeret ved at hente den beregnede
+side for to kendte facit-forsider og læse indholdet: `273098_001471`
+(Christiane Marie Andersen, Croup) og `273099_001359` (Esther Engstrøm,
+diphtheritis) — begge matchede facit ord for ord, inklusive en tredje
+kontrol af selve andensidens tekst mod RTF-facit. Antagelsen er stærk, men
+kun afprøvet på to bind — bør stikprøvekontrolleres ved brug på nye bind.
+
+Scriptet ligger i `scripts/kbharkiv_hent.py` (uden for ICM-stagestrukturen,
+markeret midlertidigt). Har en hård grænse på 20 billeder pr. kørsel som
+sikkerhedsnet mod utilsigtede fulde kørsler. 16 rigtige andensider er hentet
+til `stages/01_datagrundlag/output/proeve_opslag/` og brugt til at afklare
+opslagsstrukturen (se næste punkt).
+
+**Konsekvens for beslutning 5**: filoverførslen fra kollegaen står ved magt
+som den rene, langsigtede kanal (hans egne filnavne, ingen tvivl om
+kalibrering), men vi er ikke længere blokeret på den. Billedanmodningen bør
+stadig sendes.
+
+### Opslagsstrukturen — grundigt revideret efter at have set flere rigtige billeder
+
+Første antagelse (fra det allerførste, lokale forsidebillede) var, at hvert
+billede viser et **symmetrisk dobbeltopslag** med to omtrent lige brede
+sider og bogryggen i midten. Det holder IKKE for almindelige
+fortsættelsesopslag — kun for selve forsideopslaget, hvor formatet ser
+anderledes ud (se nedenfor).
+
+**Ny, evidensbaseret model** (set i tre uafhængige billeder:
+`273098_001496`, `273098_001508`, `273099_001362`, alle i
+`stages/01_datagrundlag/output/proeve_opslag/`): hvert billede er
+**asymmetrisk beskåret omkring ÉN målside**, som fylder ca. 75-85% af
+rammen, med kun en SMAL strimmel af naboopslaget synlig i den ene kant —
+præcis det lead selv skrev i det allerførste oplæg: man "kan risikere at
+se NOGET af" nabosider, ikke en hel side. Faktisk indhold pr. `page_counter`
+er fuldt ud til stede i sit eget billede (verificeret ord for ord tre gange
+mod facit: 1361, 1362, 1363 i bind 273099).
+
+**Delvist mønster, ikke fuldt bekræftet**: strimlens side (venstre/højre)
+ser ud til at skifte — i `273099_001361` sås fremmed tekst i venstre kant,
+i `273098_001496`/`_001508`/`273099_001362` i højre kant. En plausibel
+forklaring er, at det følger, om målsiden er en recto (højre fysisk side,
+"næste" side titter frem til venstre) eller verso (venstre fysisk side,
+"næste" side titter frem til højre) — men dette er en hypotese, IKKE
+verificeret systematisk, og skal bekræftes med rigtige øjne, ikke antages.
+
+**Forsideopslag er en anden, bredere billedtype**: `273098_001471`
+(Christiane Marie Andersens forside) viser derimod et bredere, mere
+symmetrisk udsnit med synlig bogryg og forrige patients blanke rest til
+venstre. Om det er en systematisk forskel (forsider fotograferes bredere)
+eller blot variation i fotograferingen, er uafklaret.
+
+**Konsekvens for stage 04 (revideret)**: opgaven er nok snarere at **skære
+en smal, forurenende strimmel væk fra én kant** end at "finde bogryggen og
+dele midt over". Det er en lettere opgave end oprindeligt antaget for
+almindelige sider, men kræver at kende strimlens side pr. billede (mulig
+signal: recto/verso-paritet af `page_counter`) — og forsideopslag kan kræve
+en anden regel. **Sæt dette som første punkt til `Gennemgang ved lead`** i
+stage 01 med de nævnte billeder som konkret materiale; gæt det ikke videre
+algoritmisk uden bekræftelse.
+
+### Første, mislykkede forsøg på automatisk rygdetektion (læring, ikke løsning)
+
+Et hurtigt prototype-script (`scripts/bogryg_profil.py`, midlertidigt) blev
+afprøvet med tre forskellige kolonneprofil-metoder på `273099_001362` —
+blækmængde-top, længste sammenhængende mørke løb, og blækmængde-dal.
+**Alle tre landede forkert**, midt i selve håndskriften, ikke ved en
+fysisk kant. Det bekræftede undervejs den reviderede model ovenfor (der er
+ingen tydelig bogryg midt i billedet at finde, fordi billedet ikke er
+symmetrisk). Scriptet er bevaret som udgangspunkt, men rygdetektion i
+stage 04 skal designes ud fra den asymmetriske model, ikke som en
+"midte-søgning", og skal have flere rigtige facit-labels at teste imod, før
+den regnes for pålidelig.

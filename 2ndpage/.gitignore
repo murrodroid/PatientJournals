@@ -9,6 +9,7 @@ billeder/
 *.jpg
 *.jpeg
 *.png
+*.webp
 !stages/*/output/kontaktark/.gitkeep
 
 # Rå modelsvar kan fylde meget; kun sammendrag committes
