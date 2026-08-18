@@ -18,11 +18,19 @@ Videre til næste stage kun efter menneskelig gennemgang.
 
 ## Stage 00 — Forundersøgelse
 
-- [ ] Afgræns spørgsmålene undersøgelsen skal besvare
-- [ ] Kør agenter pr. spørgsmål
-- [ ] `output/forundersoegelse.md` med handlingsanvisende anbefalinger
-- [ ] `output/aabne_spoergsmaal.md`
+- [x] Afgrænset fem spørgsmål: overstregninger, nordisk/dansk arbejde,
+      kvalitetsmål ud over CER/WER, fjernt bleed, benchmarks + opløsning
+- [x] Fem agenter kørt, hver med kilder+år, måling vs. formodning skilt ad
+- [x] `output/forundersoegelse.md` — seks handlingsanvisende anbefalinger
+- [x] `output/aabne_spoergsmaal.md` — seks punkter kun vi selv kan afklare
 - [ ] **Gennemgang ved lead**
+
+**Vigtigste fund**: opløsning er en målt, reel risiko (LLM-OCR forringes
+under ~150 ppi; vores sider ligger sandsynligvis dér eller under) — og
+Humphries' optimistiske CER-tal (5-7 %) kan IKKE antages at gælde vores
+danske, gotisk/kursive materiale; ét uafhængigt studie fandt 41-60 % CER
+på et andet historisk datasæt med samme modeller. Stage 05's første tal
+skal tages meget alvorligt, uanset hvad litteraturen ellers siger.
 
 ## Stage 01 — Datagrundlag *(ikke længere blokeret — selvbetjent kanal fundet)*
 

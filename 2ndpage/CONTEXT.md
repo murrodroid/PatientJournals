@@ -359,6 +359,44 @@ kun afprøvet på ét fotograferingssession, ingen bred test — står stadig
 åben og kan afdække nyt, når flere billeder hentes; godkendelsen dækker
 metoden på det materiale, den er set imod, ikke en garanti for hele korpuset.
 
+## 2026-08-18 (sent) — Stage 00 gennemført: fem forskningsspørgsmål
+
+Efter lead præciserede rækkefølgen (stage 00 skal laves før stage 05,
+ikke springes over), blev fem spørgsmål afgrænset og undersøgt af
+selvstændige agenter: overstregningshåndtering, nordisk/dansk
+LLM-HTR-arbejde, kvalitetsmål ud over CER/WER, "fjernt bleed" fra andre
+opslag, og øvrige benchmarks + opløsning. Fuldt notat med kilder:
+`stages/00_forundersoegelse/output/forundersoegelse.md`; åbne punkter i
+`aabne_spoergsmaal.md`.
+
+**De to vigtigste, mest konsekvensfulde fund**:
+
+1. **Opløsning er en målt risiko, ikke kun en formodning.** Et 2025-studie
+   (arXiv 2503.23667) finder, at LLM-OCR forringes markant under ~150 ppi.
+   Vores sider (~900-1.600 px brede) ligger sandsynligvis i eller under den
+   zone. Skal måles konkret og testes som egen akse i stage 06 — ikke
+   antages uvæsentlig, fordi Humphries ikke nævnte det som problem på sit
+   eget (formentlig højere opløste) materiale.
+2. **Humphries' optimistiske tal (5-7 % CER) må ikke antages at gælde
+   dansk gotisk/kursiv skrift.** Et uafhængigt studie (arXiv 2503.15195)
+   fandt Claude 3.5 Sonnet på 41 % CER og GPT-4o på ~60 % CER på et andet
+   historisk datasæt (ICDAR2017) — samme modelfamilier som os, radikalt
+   andre tal. Et dansk hands-on-forsøg (ikke formelt benchmark) fandt
+   direkte ChatGPT-hallucination på et 1844-dokument og Gemini der fejlede
+   på egennavne, med Transkribus foran begge. **Konsekvens**: stage 05's
+   første rigtige tal skal tages meget alvorligt og ikke antages gode på
+   forhånd; Transkribus/specialiseret HTR bør forblive en reel
+   sammenligning i stage 06, ikke kun baggrundsviden.
+
+Øvrige fund: overstregnings-litteraturen for LLM'er er reelt tom (vi
+bliver de første til at teste det empirisk); et klinisk
+nøgleords-overlevelsesmål er en billig, veldokumenteret måde at supplere
+CER/WER på uden at bygge fuld NLP-detektion; "fjernt bleed" fra sider
+langt fra hinanden er IKKE et dokumenteret fænomen under de kendte
+betegnelser (show-through/bleed-through dækker kun samme blads
+for-/bagside) — mest sandsynlige forklaring er fysisk forstyrrelse af
+bindet, værd at spørge arkivet om, hvis det viser sig systematisk.
+
 ### Stage-plan udvidet fra syv til ni stages
 
 Lead påpegede, at kun én stage (den tidligere "05 metodeforsøg") dækkede

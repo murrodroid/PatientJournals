@@ -20,3 +20,4 @@ stages/06_prompt_og_model/output/koersler/
 api_keys.py
 .env
 *credentials*.json
+.claude/

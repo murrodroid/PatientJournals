@@ -18,9 +18,17 @@ engangs-check af billedforberedelsen og fra stage 07's uenighedslag.
 ## Process
 
 1. Én akse ad gangen, kun hvis den foregående er afklaret: model,
-   promptformulering, opløsning, og forbehandling med linjedetektion
-   (baselines) enten som udklip eller som hjælp til at vide, hvilke linjer
-   der findes på siden.
+   promptformulering, **opløsning** (se stage 00's fund — dette er ikke en
+   mindre detalje, litteraturen finder markant forringelse under ~150 ppi,
+   og vores kildebilleder ligger sandsynligvis dér eller under), og
+   forbehandling med linjedetektion (baselines) enten som udklip eller som
+   hjælp til at vide, hvilke linjer der findes på siden.
+1a. **Hold Transkribus/specialiseret HTR som reel sammenligning, ikke kun
+    baggrundsviden** (stage 00-anbefaling): et dansk hands-on-forsøg fandt
+    Transkribus foran både ChatGPT og Gemini på dansk gotisk skrift, og et
+    uafhængigt studie fandt Claude/GPT4o på 41-60 % CER på et andet
+    historisk datasæt — langt fra Humphries' 5-7 %. Antag ikke Gemini
+    vinder, før stage 05's egne tal viser det.
 2. **Prompt som backup for ufuldkommen beskæring**: stage 04's snit behøver
    ikke være perfekt. Test eksplicit, om en instruktion om at ignorere
    delvis synlig nabotekst i kanten løser resten af problemet billigere end
