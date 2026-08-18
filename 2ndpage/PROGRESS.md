@@ -68,17 +68,20 @@ Videre til næste stage kun efter menneskelig gennemgang.
 - [x] **Kant-reglen LØST** (2026-08-18, lead): recto/verso-paritet af
       `patient_page_counter` afgør entydigt hvilken kant der bærer strimlen
       — andenside=verso=indhold venstre, tredjeside=recto=indhold højre.
-      Verificeret mod fem virkelige billeder. Ingen CV-gætteri nødvendigt
-      for sidevalget længere.
-- [x] **Scope udvidet**: tredjeside (recto, 71.380 sider) er nu også med,
-      ikke kun andenside.
-- [ ] Byg selve snitpunkt-findingen inden for den nu kendte kant (de tre
-      tidligere kolonneprofil-forsøg løste det forkerte problem — midte
-      i stedet for kant — men kan genbruges som udgangspunkt)
-- [ ] Frasortér naboblade der rager usædvanligt langt ind
-- [ ] Kontaktark med indtegnede snit
-- [ ] Usikre snit mærkes og skæres ikke
-- [ ] **Gennemgang ved lead** — forberedelsen låses herefter
+- [x] **Scope udvidet**: tredjeside (recto, 71.380 sider) er nu også med.
+- [x] **Snitpunkt-detektion LØST og verificeret 8/8** (2026-08-18): lyseste
+      kolonne inden for det kendte kant-bånd = rillen mellem siderne.
+      `src/andenside/bogryg.py` + `kontaktark.py`. Alle 8 billeder i
+      pilotmaterialet gennemset med øjne, alle ramte rillen præcist.
+      Låst med regressionstest (`tests/test_bogryg_real_billeder.py`).
+- [ ] **Kendt begrænsning**: kun afprøvet på 2 bind, samme måneder (maj-juni
+      1896) — bredere test nødvendig, når flere billeder er hentet.
+- [ ] Ingen usikkerheds-flagning implementeret endnu (intet fejlende
+      eksempel at kalibrere en tærskel mod) — se `output/usikre.md`.
+- [ ] Frasortér naboblade der rager usædvanligt langt ind (ikke testet)
+- [ ] **Gennemgang ved lead** — se kontaktarkene i
+      `output/kontaktark/`, bekræft eller korrigér, før forberedelsen
+      låses som forudsætning for stage 05
 
 ## Stage 05 — Metodeforsøg
 

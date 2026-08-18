@@ -262,6 +262,34 @@ med i projektet, ikke kun andensiden alene.
   diskplads er derfor ikke en reel begrænsning for dette projekt. Tages op
   igen, hvis/når det bliver relevant; ingen grund til at jage scriptet nu.
 
+## 2026-08-18 (aftentimer) — Snitpunkt-detektion løst og verificeret 8/8
+
+Efter recto/verso-reglen blev afklaret, blev søgningen efter snitpunktet
+gjort simpel: begræns den kolonnevise blækprofil til KUN den kant,
+paritetsreglen allerede har udpeget (30% af bredden), og find den lyseste
+(mindst blækfyldte) kolonne dér — det er den fysiske rille mellem sidens
+egen tekst og naboopslagets strimmel.
+
+**Implementeret** i `src/andenside/bogryg.py` (`soegevindue`,
+`find_snitpunkt`) og kørt via `src/andenside/kontaktark.py`, som producerer
+`stages/04_billedforberedelse/output/snit.csv` og annoterede kontaktark.
+
+**Verificeret med egne øjne på alle 8 billeder i pilotmaterialet** — ikke
+kun 1-2 stikprøver denne gang. Alle otte røde linjer lander præcist i den
+fysiske rille mellem hovedsiden og naboopslagets strimmel:
+`273098_001472/73/96/97/508/509`, `273099_001360/61`. Se
+`stages/04_billedforberedelse/output/kontaktark/`.
+
+Låst med en regressionstest (`tests/test_bogryg_real_billeder.py`) mod fire
+af de øjenbekræftede positioner, så en fremtidig ændring af algoritmen
+opdages, hvis den flytter snittet væk fra det bekræftede bånd.
+
+**Kendt begrænsning, IKKE skjult**: alle 8 billeder stammer fra samme to
+bind og måneder (maj-juni 1896), formentlig samme fotograferingssession.
+Metoden er ikke afprøvet på bredere materiale, og der er ingen
+usikkerheds-flagning implementeret endnu, fordi intet eksempel i
+pilotmaterialet fejler — se `stages/04_billedforberedelse/output/usikre.md`.
+
 ### Første, mislykkede forsøg på automatisk rygdetektion (læring, ikke løsning)
 
 Et hurtigt prototype-script (`scripts/bogryg_profil.py`, midlertidigt) blev
