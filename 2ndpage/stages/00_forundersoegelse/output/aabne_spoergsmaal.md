@@ -45,7 +45,23 @@ historiske lægejournaler. Skal designes og afprøves som et let,
 sekundært mål i stage 03 — vi ved ikke på forhånd, om det rent faktisk
 viser noget nyttigt, før vi har set det i brug.
 
-## 6. Bør Transkribus eller lignende specialiserede programmer være en reel konkurrent, ikke kun noget vi nævner?
+## 6a. Virker "lad modellen rette sin egen transskription" — eller ej?
+
+To kilder modsiger hinanden. Humphries fandt en gevinst ved at lade en
+model rette en første transskription igennem. Crosilla/Klic/Colavizza
+testede en lignende metode og fandt ingen pålidelig forbedring — for de
+mindre, gratis modeller blev det ligefrem værre. Kun vores egen test i
+stage 06 kan afgøre, hvem der har ret for vores materiale.
+
+## 6b. Hvordan klarer Gemini sig på svært, ikke-engelsk historisk materiale?
+
+Crosilla/Klic/Colavizza testede slet ikke Gemini — kun GPT-4o, GPT-4o-mini
+og Claude. Vi har altså mere ekstern dokumentation for Claudes evner på
+svært materiale end for Gemini, som er vores planlagte hovedmodel. Endnu
+en grund til ikke at antage, Gemini er det bedste valg, før vi selv har
+målt det.
+
+## 7. Bør Transkribus eller lignende specialiserede programmer være en reel konkurrent, ikke kun noget vi nævner?
 
 Sveriges Riksarkiv har opnået høj træfsikkerhed på nordisk håndskrift med
 deres eget, specialtrænede program — men det er trænet på deres eget

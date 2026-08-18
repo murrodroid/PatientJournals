@@ -131,10 +131,48 @@ tekstgenkendelse ved høj skarphed, men klart dårligere under en vis
 grænse. Ingen af kilderne har testet dansk eller andet skandinavisk med
 konkrete tal.
 
+### 5b. Uddybning af kilde [2], læst i sin helhed (2026-08-18)
+
+Denne artikel blev læst grundigt, ikke kun opsummeret, fordi lead fandt
+den særligt god. Fem punkter, der ikke stod i det første udtræk:
+
+- **Tysk er ikke en brugbar stedfortræder for dansk.** Håbet var, at tysk
+  (sprogligt tættere på dansk end fransk/italiensk) kunne give et
+  fingerpeg om dansk. Men resultaterne på gammelt tysk var meget dårlige
+  for alle modeller (Claude 71 % tegnfejl, GPT-4o 80 %), og forfatterne
+  tilskriver det selv svær håndskrift og et vanskeligt gammelt ordforråd —
+  ikke noget der kan skilles fra sproget i sig selv. Kan ikke bruges til
+  at forudsige dansk.
+- **Kun én prompt-formulering blev testet — ingen sammenligning.**
+  Forfatterne skriver selv, at deres prompt manglede kontekst, der kunne
+  have forbedret resultaterne, og peger på det som uudforsket. Bekræfter,
+  at vores eget arbejde med at afprøve forskellige formuleringer i stage
+  06 er nødvendigt, ikke overflødigt.
+- **Modsigelse af Humphries: at lade modellen rette sin egen
+  transskription virkede IKKE pålideligt her.** Humphries fandt gevinst
+  ved efterfølgende korrektion; denne artikel testede en tilsvarende
+  metode og fandt ingen pålidelig forbedring — for de mindre, gratis
+  modeller blev det ligefrem værre. De to kilder modsiger hinanden. Skal
+  afprøves forsigtigt og selvstændigt i stage 06, ikke antages at virke.
+- **Gemini blev slet ikke testet i denne artikel** — kun GPT-4o,
+  GPT-4o-mini, Claude og nogle mindre gratis modeller. Claude var den
+  bedste af de testede modeller, men det siger intet om Gemini, som er
+  vores planlagte hovedmodel. Reelt hul i vores viden.
+- Artiklen siger intet om billedskarphed og intet om at bede modellen
+  svare i et struktureret format som JSON (det sidste blev bevidst
+  undgået, fordi ikke alle otte modeller understøttede det ordentligt —
+  et metodisk fravalg, ikke et resultat vi kan bruge).
+
+Fuld kilde: Crosilla, G., Klic, L., & Colavizza, G. (2025). "Benchmarking
+large language models for handwritten text recognition." *Journal of
+Documentation*, 81(7), 334-354. Frit tilgængelig hos forlaget Emerald
+(ingen betalingsmur). Forfatternes tilknytning: Bologna Universitet,
+Harvard-centeret I Tatti i Firenze, og Københavns Universitet.
+
 ## Kilder
 
 1. "A study of handwritten text recognition with cross-out words", IJDAR/Springer, 2026
-2. Crosilla, Klic & Colavizza, "Benchmarking Large Language Models for Handwritten Text Recognition", arXiv 2503.15195, 2025
+2. Crosilla, Klic & Colavizza, "Benchmarking Large Language Models for Handwritten Text Recognition", *Journal of Documentation* 81(7), 334-354, 2025 (arXiv-udgave: 2503.15195)
 3. Per Hundevad Andersen, dansk hands-on-sammenligning af ChatGPT/Transkribus/Gemini, blog.slaegtsbibliotek.dk, februar 2026
 4. Samme studie som kilde 2 (Crosilla, Klic & Colavizza, medforfatter fra Københavns Universitet)
 5. "Context-Independent OCR with Multimodal LLMs: Effects of Image Resolution and Visual Complexity", arXiv 2503.23667, 2025
