@@ -81,14 +81,18 @@ Videre til næste stage kun efter menneskelig gennemgang.
       regressionstest (`tests/test_bogryg_real_billeder.py`).
 - [x] **Beslutning**: snitpræcision behøver ikke være perfekt — stage 05
       kan prompte modellen til at ignorere delvis nabotekst som backup.
-- [ ] **Kendt begrænsning**: kun afprøvet på 2 bind, samme måneder (maj-juni
-      1896) — bredere test nødvendig, når flere billeder er hentet.
+- [x] **Buffer + terminologi rettet** (2026-08-18): 1% buffer væk fra egen
+      tekst; "ryg" ikke "rygning" gennemgående.
+- [x] **Gennemgang ved lead — GODKENDT** (2026-08-18): "de er perfekte nu".
+      Alle 8 kontaktark bekræftet. **Stage 04 er hermed låst** som
+      forudsætning for stage 05 på det nuværende pilotmateriale.
+- [ ] **Kendt begrænsning, stadig åben**: kun afprøvet på 2 bind, samme
+      måneder (maj-juni 1896) — bredere test nødvendig, når flere billeder
+      er hentet. Kan afdække nye fejltyper (fx det fjerne bleed lead
+      nævnte) på trods af godkendelsen ovenfor.
 - [ ] Ingen usikkerheds-flagning implementeret endnu (intet fejlende
       eksempel at kalibrere en tærskel mod) — se `output/usikre.md`.
 - [ ] Frasortér naboblade der rager usædvanligt langt ind (ikke testet)
-- [ ] **Gennemgang ved lead** — se kontaktarkene i
-      `output/kontaktark/`, bekræft eller korrigér, før forberedelsen
-      låses som forudsætning for stage 05
 
 ## Stage 05 — Første transskription
 

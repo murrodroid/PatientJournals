@@ -350,6 +350,15 @@ undersøg om det sker konsekvent, og om en prompt-instruktion om at ignorere
 løsrevne, ude-af-kontekst bogstaver kan løse det billigere end at forsøge at
 detektere det billedmæssigt.
 
+### Stage 04 godkendt og låst
+
+Lead gennemgik de opdaterede kontaktark (med buffer) og bekræftede: "de er
+perfekte nu". Stage 04 er hermed låst som forudsætning for stage 05 på det
+nuværende pilotmateriale (8 billeder, 2 bind). Den kendte begrænsning —
+kun afprøvet på ét fotograferingssession, ingen bred test — står stadig
+åben og kan afdække nyt, når flere billeder hentes; godkendelsen dækker
+metoden på det materiale, den er set imod, ikke en garanti for hele korpuset.
+
 ### Stage-plan udvidet fra syv til ni stages
 
 Lead påpegede, at kun én stage (den tidligere "05 metodeforsøg") dækkede
