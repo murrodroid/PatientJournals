@@ -56,16 +56,14 @@ tidligere end indlaeggelsen goer.
 | 273112_001205 | 273112_001200_full_journal.rtf |
 | 273112_001206 | 273112_001200_full_journal.rtf |
 
-## Steder hvor opmaerkningen ikke kunne tolkes (6)
+## Steder hvor opmaerkningen ikke kunne tolkes (4)
 
 Blokken er stadig med i facit -- teksten er bevaret -- men stedet skal
 ses efter med oejnene, foer facit bruges til at maale paa.
 
 | Billed-id | Note |
 |---|---|
-| 273101_001163 | ukendt klammemaerke [gangrenerede] |
 | 273101_001165 | overskydende slutklamme ved 'læg-\nningerne er udbredte, mis' |
 | 273102_001065 | overskydende slutklamme ved 'm. Chloros [?]\nmixt. hydrargyr' |
-| 273104_001640 | ukendt klammemaerke [Øre…] |
 | 273104_001643 | uafsluttet klamme ved 'ophentes? sekret af caviteten er dette\nf' |
 | 273107_001884 | overskydende slutklamme ved '] med svage Indv.\n og Kvalthed' |

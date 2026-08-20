@@ -32,11 +32,11 @@ Usikker laesning. Klammen falder vaek, ordet bliver staaende.
 
 | Antal | Form | Eksempel i sammenhaeng |
 |---:|---|---|
-| 1 | `..rede?` | talet i Dag med Diphteri. Syg i 6 Dage, [..rede?] meget og havde stærk Hos |
 | 1 | `decoct?` | heskf. hv. 2 time\nEpist. [?] thoracis\n[decoct?] chinæ\n1 theskf. hv. 2 t |
 | 1 | `dygtig?` | lers” is underlined] Symptomer. Stemmen [dygtig?] hæs. Ps. 140. regels., k |
 | 1 | `extre?` | stille hen, blev efterhånden kølig paa [Extre?], faldt pludselig sam- me |
 | 1 | `flocke?` | Pt. fra [Flocke?] Dens Moder og Søster ogs |
+| 1 | `gangrenerede` | ule til- [this line is underlined] dels [gangrenerede] Belæg- ninger, som Helhe |
 | 1 | `hudsåret?` | lim Idag ses i operationsåret følg: Fra [hudsåret?] og såret i trachea opadt |
 | 1 | `ingen?` | s godt igjennem har opbragt en Del Slim [ingen?] Membraner. Stadig [?]- l |
 
@@ -86,22 +86,15 @@ Hvor paa siden teksten staar. Maerket falder vaek, teksten bliver.
 | 1 | `top page left` | 9/5 [top page left]39,5-38,2 [top page right |
 | 1 | `top page right` | 9/5 [top page left]39,5-38,2 [top page right]Kultur 8/5 fauces: DB\nla |
 
-## ukendt (2 forekomster, 2 former)
-
-Kunne ikke tolkes. Indholdet bliver staaende, og stedet er flaget.
-
-| Antal | Form | Eksempel i sammenhaeng |
-|---:|---|---|
-| 1 | `gangrenerede` | ule til- [this line is underlined] dels [gangrenerede] Belæg- ninger, som Helhe |
-| 1 | `øre…` | belagt. [?] i Fauces, Tg. naturlig, paa [Øre…] og i Ansigtet |
-
-## ulaeselig (496 forekomster, 1 former)
+## ulaeselig (498 forekomster, 3 former)
 
 Ulaeseligt sted. Bevares som `[?]` i facit.
 
 | Antal | Form | Eksempel i sammenhaeng |
 |---:|---|---|
 | 496 | `?` | af bageste Tracheal\nvæg, men denne var [?], og Canylen\n[?][?] i Tr |
+| 1 | `..rede?` | talet i Dag med Diphteri. Syg i 6 Dage, [..rede?] meget og havde stærk Hos |
+| 1 | `øre…` | belagt. [?] i Fauces, Tg. naturlig, paa [Øre…] og i Ansigtet |
 
 ## understregning (404 forekomster, 155 former)
 

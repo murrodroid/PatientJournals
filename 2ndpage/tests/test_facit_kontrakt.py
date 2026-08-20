@@ -108,3 +108,62 @@ def test_facit_bygges_ens_to_gange_i_traek():
     foerste = [byg_opslag(b) for b in blokke]
     anden = [byg_opslag(b) for b in blokke]
     assert foerste == anden
+
+
+@kraever_output
+def test_understregningernes_linjenumre_peger_paa_rigtige_linjer(facit):
+    """Understregningen gemmes med et linjenummer i `alt_linjer`. Peger det
+    uden for teksten, eller paa en tom linje, er sammenhaengen mellem de to
+    gaaet i stykker -- og saa er oplysningen vaerdiloes."""
+    fund = 0
+    for navn, o in facit.items():
+        for u in o["understreget"]:
+            nr = u["linje"]
+            assert 0 <= nr < len(o["alt_linjer"]), f"{navn}: linje {nr} findes ikke"
+            assert o["alt_linjer"][nr].strip(), f"{navn}: linje {nr} er tom"
+            fund += 1
+    assert fund > 400, f"kun {fund} understregninger -- forventede godt 400"
+
+
+@kraever_output
+def test_citatunderstregninger_staar_faktisk_paa_den_linje_de_peger_paa(facit):
+    """Et citat i noten er et stykke af linjens egen tekst. Kan vi ikke finde
+    det dér, har vi enten laest citatet eller linjenummeret forkert."""
+    ramt = forbi = 0
+    for o in facit.values():
+        for u in o["understreget"]:
+            if u["slags"] != "citat":
+                continue
+            linje = o["alt_linjer"][u["linje"]]
+            if u["tekst"].split()[0] in linje:
+                ramt += 1
+            else:
+                forbi += 1
+    # Citatet kan vaere delt hen over to linjer, saa vi kraever ikke 100 %.
+    assert ramt > 3 * forbi, f"kun {ramt} traf, {forbi} ramte forbi"
+
+
+@kraever_onedrive
+def test_facit_filerne_bliver_aldrig_skrevet_til(tmp_path):
+    """Kildefilerne paa OneDrive er leads eget haandarbejde og den eneste
+    kopi. Vi laeser dem og skriver noget nyt et andet sted -- vi retter dem
+    ikke. Det loefte skal haandhaeves, ikke bare staa i en README: her koeres
+    hele bygningen, og bagefter kraeves det, at hver eneste kildefil har
+    samme stoerrelse og samme aendringstidspunkt som foer."""
+    from andenside import facit_bygger
+
+    foer = {
+        f: (f.stat().st_mtime_ns, f.stat().st_size)
+        for f in sorted(FACIT_ROOT.rglob("*.rtf"))
+    }
+    assert len(foer) == 39, "forventede 39 facit-filer"
+
+    facit_bygger.byg(ud=tmp_path)
+
+    efter = {
+        f: (f.stat().st_mtime_ns, f.stat().st_size)
+        for f in sorted(FACIT_ROOT.rglob("*.rtf"))
+    }
+    aendrede = [f.name for f in foer if foer[f] != efter.get(f)]
+    assert not aendrede, f"kildefiler blev roert: {aendrede}"
+    assert set(foer) == set(efter), "en kildefil forsvandt eller kom til"

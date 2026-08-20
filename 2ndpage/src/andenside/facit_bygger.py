@@ -19,6 +19,7 @@ from andenside.facit import (
     Sideblok,
     del_i_sideblokke,
     klassificer_klamme,
+    laes_side,
     ren_laesetekst,
     rtf_til_tekst,
     saml_orddeling,
@@ -53,6 +54,7 @@ class Opslag:
     alt_fladet: str
     rettet_linjer: list[str]
     rettet_fladet: str
+    understreget: list[dict[str, object]]
     noter: list[str]
 
 
@@ -66,7 +68,7 @@ def laes_alle_blokke(rod: Path = FACIT_ROOT) -> list[Sideblok]:
 
 
 def byg_opslag(blok: Sideblok) -> Opslag:
-    alt, noter = ren_laesetekst(blok.raa, behold_overstreget=True)
+    alt, noter, understreget = laes_side(blok.raa, behold_overstreget=True)
     rettet, _ = ren_laesetekst(blok.raa)
     return Opslag(
         image_name=blok.image_name,
@@ -77,6 +79,7 @@ def byg_opslag(blok: Sideblok) -> Opslag:
         alt_fladet=saml_orddeling(alt),
         rettet_linjer=rettet.split("\n"),
         rettet_fladet=saml_orddeling(rettet),
+        understreget=understreget,
         noter=noter,
     )
 
@@ -147,6 +150,7 @@ def _skriv_facit(opslag: list[Opslag], sti: Path) -> None:
                         "alt_fladet": o.alt_fladet,
                         "rettet_linjer": o.rettet_linjer,
                         "rettet_fladet": o.rettet_fladet,
+                        "understreget": o.understreget,
                         "noter": o.noter,
                     },
                     ensure_ascii=False,

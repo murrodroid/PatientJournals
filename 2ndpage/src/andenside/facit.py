@@ -229,7 +229,12 @@ _FORTSAET = re.compile(r"^contin\w*\s+(?:on|under)\s*line$", re.I)
 # Positionsmaerker er fritekst, men naevner altid side, hjoerne eller page.
 _POSITION = re.compile(r"\b(?:side|corner)\b|page", re.I)
 _INDSKUD = re.compile(r"^(?:note\s+)?add(?:ed|et)\b", re.I)
-_GAET = re.compile(r"^(.+)\?$", re.S)
+_GAET = re.compile(r"^(.+?)\??$", re.S)
+# Prikker eller ellipse i et gaet er en pladsholder for bogstaver, ingen kunne
+# laese: `[..rede?]` betyder "et ord der ender paa -rede", ikke laesningen
+# "..rede". Stedet kan ikke maales paa -- en tegnfejlsmaaling ville regne paa
+# punktummerne. (lead 2026-08-20.)
+_PLADSHOLDER = re.compile(r"\.{2,}|…")
 
 
 def klassificer_klamme(indre: str) -> tuple[str, str]:
@@ -238,6 +243,9 @@ def klassificer_klamme(indre: str) -> tuple[str, str]:
     Raekkefoelgen er ikke ligegyldig: `[note added right side page]` er en
     margennote, ikke et indskud over linjen, saa position skal proeves foer
     indskud.
+
+    Alt, der ikke er et kendt maerke, er et forslag til laesning -- med eller
+    uden spoergsmaalstegn (lead 2026-08-20: "8 er at se som 7 bare uden ?").
     """
     kerne = " ".join(indre.split())
     if _ULAESELIG.match(kerne):
@@ -254,8 +262,15 @@ def klassificer_klamme(indre: str) -> tuple[str, str]:
         return "position", ""
     if _INDSKUD.match(kerne):
         return "indskud", ""
+    if _PLADSHOLDER.search(kerne):
+        return "ulaeselig", "[?]"
     gaet = _GAET.match(kerne)
-    if gaet:
+    if gaet and gaet.group(1):
+        # Et maerke bestaar af flere ord; et laeseforslag er ét. Er der
+        # mellemrum i det, vi ikke kunne genkende, er det snarere et maerke,
+        # vi ikke kender endnu -- teksten beholdes, men stedet flages.
+        if " " in gaet.group(1):
+            return "ukendt", gaet.group(1)
         return "gaet", gaet.group(1)
     return "ukendt", kerne
 
@@ -293,13 +308,23 @@ def _tokens(tekst: str) -> tuple[list[tuple[str, str]], list[str]]:
                 start = i + 1
     rest = tekst[start:]
     if dybde > 0:
+        # Slutklammen er glemt. Vi reparerer mindst muligt: klammen lukkes ved
+        # foerste mellemrum, og indholdet behandles som ethvert andet maerke.
+        # En rigtig klamme kan godt spaende over et linjeskift (der findes ét
+        # tilfaelde), saa det er kun de klammer, der ALDRIG lukkes, vi roerer.
         noter.append("uafsluttet klamme ved " + repr(rest[:40]))
+        brud = re.search(r"\s", rest)
+        skaering = brud.start() if brud else len(rest)
+        ud.append(("tekst", "".join(buffer)))
+        buffer = []
+        ud.append(("klamme", rest[:skaering]))
+        rest = rest[skaering:]
     buffer.append(rest)
     ud.append(("tekst", "".join(buffer)))
     return ud, noter
 
 
-def ren_laesetekst(raa: str, behold_overstreget: bool = False) -> tuple[str, list[str]]:
+def laes_side(raa: str, behold_overstreget: bool = False) -> tuple[str, list[str], list[dict[str, object]]]:
     """Udleder den tekst, vi regner som korrekt laesning af siden.
 
     Indskud og margentekst bliver staaende (ordene ER skrevet paa siden),
@@ -318,8 +343,10 @@ def ren_laesetekst(raa: str, behold_overstreget: bool = False) -> tuple[str, lis
       overstregning). Maalte vi mod den rettede laesning, ville modellen
       blive straffet 33 steder for at laese rigtigt.
 
-    Returnerer (tekst, noter), hvor noter er de steder, opmaerkningen ikke
-    kunne tolkes -- de skal ses efter med oejnene, ikke gaettes paa plads.
+    Returnerer (tekst, noter, understregninger). `noter` er de steder,
+    opmaerkningen ikke kunne tolkes -- de skal ses efter med oejnene, ikke
+    gaettes paa plads. `understregninger` er hvad der var understreget paa
+    siden; det hoerer ikke i laeseteksten, men skal ikke smides vaek.
     """
     # Transskribenten skriver et bogstaveligt backslash-n for et haandskrevet
     # linjeskift, saerlig i receptblokke i margenen.
@@ -330,6 +357,13 @@ def ren_laesetekst(raa: str, behold_overstreget: bool = False) -> tuple[str, lis
 
     def slutter_linje() -> bool:
         return not ud or "".join(ud).endswith("\n")
+
+    understreget: list[dict[str, object]] = []
+
+    # Linjenummeret skal gaelde den FAERDIGE tekst, men den bliver ryddet op
+    # bagefter (tomme linjer slaas sammen). Vi saetter derfor et usynligt
+    # maerke ind paa stedet og finder linjen igen, naar teksten staar faerdig.
+    MAERKE = "\x00"
 
     overstreget = False
     for slags, vaerdi in tokens:
@@ -364,7 +398,20 @@ def ren_laesetekst(raa: str, behold_overstreget: bool = False) -> tuple[str, lis
         elif typ == "ukendt":
             noter.append("ukendt klammemaerke [" + vaerdi + "]")
             ud.append(nytte)
-        # understregning, erstatning, fortsaet og indskud giver ingen tekst
+        elif typ == "understregning":
+            # Noten er ikke tekst, men HVAD der er understreget er en
+            # oplysning, vi ikke maa smide vaek.
+            citater = [c.strip() for c in _CITAT.findall(vaerdi) if c.strip()]
+            for citat in citater or [""]:
+                understreget.append(
+                    {
+                        "linje": -1,
+                        "slags": "citat" if citat else "hel_linje",
+                        "tekst": citat,
+                    }
+                )
+                ud.append(MAERKE)
+        # erstatning, fortsaet og indskud giver ingen tekst
 
     samlet = "".join(ud).replace("\r", "")
     # Fjernede maerker efterlader mellemrum i hver ende af linjen. Indrykning
@@ -373,8 +420,57 @@ def ren_laesetekst(raa: str, behold_overstreget: bool = False) -> tuple[str, lis
     # Flere blanke linjer i traek er ogsaa et affald af fjernede maerker;
     # ÉN blank linje adskiller de daglige notater og skal blive staaende.
     renset = re.sub(r"\n{3,}", "\n\n", renset)
-    return renset.strip("\n"), noter
+    # Find maerkerne igen i den faerdige tekst og giv hver understregning
+    # sit rigtige linjenummer. Maerkerne fjernes samtidig.
+    linjer = renset.strip("\n").split("\n")
+    naeste = iter(understreget)
+    for nr, linje in enumerate(linjer):
+        for _ in range(linje.count(MAERKE)):
+            next(naeste)["linje"] = nr
+        linjer[nr] = linje.replace(MAERKE, "").rstrip()
 
+    # Noten blev nogle gange sat foerst EFTER den naeste linje. Citatet er
+    # sidens egen tekst, saa vi kan finde den rigtige linje ved at lede
+    # efter det. Findes det ikke, bliver noten staaende -- vi gaetter ikke.
+    for fund in understreget:
+        if fund["slags"] != "citat":
+            continue
+        foerste_ord = str(fund["tekst"]).split()[0].lower()
+        nr = int(fund["linje"])
+        if foerste_ord in linjer[nr].lower():
+            continue
+        for kandidat in range(nr - 1, max(-1, nr - 4), -1):
+            if foerste_ord in linjer[kandidat].lower():
+                fund["linje"] = kandidat
+                break
+    return "\n".join(linjer), noter, understreget
+
+
+# Understregningsnoten er ikke tekst og hoerer ikke i laeseteksten -- men
+# HVAD der er understreget er en oplysning, vi ikke maa smide vaek. Lead
+# 2026-08-20: "understregning er ret godt til at benchmarke i senere
+# forsoeg". Den gemmes derfor for sig, saa den er der, naar vi faar brug for
+# den, uden at forurene den tekst, der maales paa.
+_CITAT = re.compile(r"[»“„\"]([^»«“”„\"]+)[«”\"]")
+
+
+def ren_laesetekst(raa: str, behold_overstreget: bool = False) -> tuple[str, list[str]]:
+    """Laeseteksten og de steder, opmaerkningen ikke kunne tolkes."""
+    tekst, noter, _ = laes_side(raa, behold_overstreget)
+    return tekst, noter
+
+
+def understregninger(raa: str) -> list[dict[str, object]]:
+    """Hvad der er understreget paa siden, og paa hvilken linje.
+
+    To slags noter i materialet: "hele denne linje" (242 gange) og et citat
+    af et stykke af linjen (162 gange). Begge peger paa tekst, der ogsaa
+    staar i laeseteksten -- det er derfor, noten selv falder ud af den.
+
+    `linje` er indeks i den linjeopdelte laesetekst, saa de to kan stilles
+    side om side. Lead 2026-08-20: understregning er god at benchmarke paa
+    i senere forsoeg, saa den maa ikke gaa tabt her."""
+    return laes_side(raa, behold_overstreget=True)[2]
 
 def saml_orddeling(tekst: str) -> str:
     """Flader teksten ud: orddeling samles, linjeskift bliver mellemrum.

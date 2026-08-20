@@ -87,6 +87,19 @@ uanset hvad litteraturen ellers siger.
       lodtrækning
 - [x] **Tallene**: 39 filer → 208 sidemærker → 40 uden tekst → **168 sider med
       facit**, fordelt på 39 patienter. Seks steder flaget til gennemsyn.
+- [x] **leads rettelser til læsereglerne indarbejdet** (2026-08-20,
+      beslutning 31-34): klammer med prikker/ellipse bliver `[?]` fordi de
+      ikke kan måles på; klammer uden `?` er også læseforslag; uafsluttede
+      klammer repareres ved første mellemrum; lægens egne `?` uden for
+      klammer røres ikke (7 stk., fx `(Scarlatina?)`).
+- [x] **Understregningen gemmes nu for sig** i stedet for at gå tabt: 409
+      poster (253 hele linjer, 156 citater) med linjenummer i `alt_linjer`.
+      Alle 156 citater rammer den linje, de faktisk står på.
+- [x] **Stavefejlene efterprøvet**: test over alle 31 stavemåder,
+      optællingen fandt — hver skal havne i den rigtige kategori. Set fejle.
+- [x] **Kildefilerne kan ikke røres**: test tager tidsstempel og størrelse
+      på alle 39 RTF'er, kører bygningen, kræver at intet har flyttet sig.
+
 - [ ] **Gennemgang ved lead** (historikerens bekræftelse af læseteksten) —
       læs `output/klammekonventioner.md`'s tolkningsregler og stikprøv
       `output/facit.jsonl` mod et par sider, du kender
