@@ -299,13 +299,24 @@ def _tokens(tekst: str) -> tuple[list[tuple[str, str]], list[str]]:
     return ud, noter
 
 
-def ren_laesetekst(raa: str) -> tuple[str, list[str]]:
+def ren_laesetekst(raa: str, behold_overstreget: bool = False) -> tuple[str, list[str]]:
     """Udleder den tekst, vi regner som korrekt laesning af siden.
 
-    Overstreget tekst falder ud, erstatningen bliver staaende, indskud og
-    margentekst bliver staaende (ordene ER skrevet paa siden), mens noter om
-    understregning og placering falder ud (de omtaler tekst, der allerede er
-    der). Ulaeselighedsmaerket bevares.
+    Indskud og margentekst bliver staaende (ordene ER skrevet paa siden),
+    mens noter om understregning og placering falder ud (de omtaler tekst,
+    der allerede er der). Ulaeselighedsmaerket bevares.
+
+    `behold_overstreget` styrer den ene forskel mellem projektets to
+    facit-udgaver:
+
+    - `False`: den rettede laesning. Overstreget tekst falder ud, kun
+      erstatningen staar tilbage -- det laegen endte med at mene.
+    - `True`: alt hvad der staar paa siden, ogsaa det overstregede. Det er
+      den, der maales paa, fordi vi beder modellen om at laese hele siden
+      og udtrykkeligt IKKE beder den afgoere, hvad der er streget ud (lead
+      2026-08-20: daarlige erfaringer med at faa en sprogmodel til at se en
+      overstregning). Maalte vi mod den rettede laesning, ville modellen
+      blive straffet 33 steder for at laese rigtigt.
 
     Returnerer (tekst, noter), hvor noter er de steder, opmaerkningen ikke
     kunne tolkes -- de skal ses efter med oejnene, ikke gaettes paa plads.
@@ -343,7 +354,7 @@ def ren_laesetekst(raa: str) -> tuple[str, list[str]]:
                 overstreget = False
             continue
         if typ == "overstreget":
-            overstreget = True
+            overstreget = not behold_overstreget
         elif typ in ("ulaeselig", "gaet"):
             ud.append(nytte)
         elif typ == "position":

@@ -500,3 +500,42 @@ def test_indledende_mellemrum_efter_fjernet_maerke_falder_vaek():
 
     assert tekst == "noget\nRp. Damp"
 
+
+
+# --- alt-hvad-der-staar-udgaven --------------------------------------------
+
+
+def test_overstreget_bliver_staaende_naar_vi_beder_om_alt_der_staar():
+    """Modellen promptes til at laese hele siden, ogsaa det overstregede.
+    Maaler vi mod en tekst uden det, straffer vi den for at laese rigtigt."""
+    tekst, _ = ren_laesetekst(
+        "hostet en Del. [crossed out]En Del [written instead]Lidt at Drikke",
+        behold_overstreget=True,
+    )
+    assert tekst == "hostet en Del. En Del Lidt at Drikke"
+
+
+def test_overstreget_uden_erstatning_bliver_ogsaa_staaende():
+    tekst, _ = ren_laesetekst(
+        "Puls c. 140, lille. [crossed out]Resp c.\nI fauces", behold_overstreget=True
+    )
+    assert tekst == "Puls c. 140, lille. Resp c.\nI fauces"
+
+
+def test_overstreget_ulaeseligt_bliver_til_et_ulaeselighedsmaerke():
+    """`[crossed out][?]` er et sted, transskribenten hverken kunne laese
+    eller ville beholde. Laeser modellen hele siden, ER der noget dér."""
+    tekst, _ = ren_laesetekst(
+        "Ret stærkt [crossed out][?] [continued on line]Tp. 38.3", behold_overstreget=True
+    )
+    assert tekst == "Ret stærkt [?] Tp. 38.3"
+
+
+def test_alt_udgaven_roerer_ikke_de_oevrige_maerker():
+    """Kun overstregningen behandles anderledes; understregningsnoter og
+    positionsmaerker falder stadig vaek."""
+    tekst, _ = ren_laesetekst(
+        "Rask indtil [this line is underlined]\n[right side of page]Rp. Damp",
+        behold_overstreget=True,
+    )
+    assert tekst == "Rask indtil\nRp. Damp"

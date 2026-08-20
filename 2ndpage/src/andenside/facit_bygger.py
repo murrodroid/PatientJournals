@@ -36,14 +36,23 @@ PROEVE_HVER = 3
 
 @dataclass(frozen=True)
 class Opslag:
-    """Én journalside med facit, klar til at maale imod."""
+    """Én journalside med facit i to udgaver.
+
+    `alt_*` er alt hvad der staar paa siden, ogsaa det overstregede. Det er
+    den, maalingen bruger, fordi modellen bliver bedt om at laese hele siden.
+    `rettet_*` er den rettede laesning, hvor det overstregede er fjernet og
+    kun erstatningen staar tilbage -- det laegen endte med at mene. Den er
+    den historisk rigtige tekst og den, et faerdigt datasaet skal rumme.
+    """
 
     image_name: str
     forside: str
     kildefil: str
     raa: str
-    linjer: list[str]
-    fladet: str
+    alt_linjer: list[str]
+    alt_fladet: str
+    rettet_linjer: list[str]
+    rettet_fladet: str
     noter: list[str]
 
 
@@ -57,15 +66,17 @@ def laes_alle_blokke(rod: Path = FACIT_ROOT) -> list[Sideblok]:
 
 
 def byg_opslag(blok: Sideblok) -> Opslag:
-    ren, noter = ren_laesetekst(blok.raa)
-    linjer = [linje for linje in ren.split("\n")]
+    alt, noter = ren_laesetekst(blok.raa, behold_overstreget=True)
+    rettet, _ = ren_laesetekst(blok.raa)
     return Opslag(
         image_name=blok.image_name,
         forside=blok.forside or "",
         kildefil=blok.kildefil,
         raa=blok.raa,
-        linjer=linjer,
-        fladet=saml_orddeling(ren),
+        alt_linjer=alt.split("\n"),
+        alt_fladet=saml_orddeling(alt),
+        rettet_linjer=rettet.split("\n"),
+        rettet_fladet=saml_orddeling(rettet),
         noter=noter,
     )
 
@@ -132,8 +143,10 @@ def _skriv_facit(opslag: list[Opslag], sti: Path) -> None:
                         "forside": o.forside,
                         "kildefil": o.kildefil,
                         "raa": o.raa,
-                        "linjer": o.linjer,
-                        "fladet": o.fladet,
+                        "alt_linjer": o.alt_linjer,
+                        "alt_fladet": o.alt_fladet,
+                        "rettet_linjer": o.rettet_linjer,
+                        "rettet_fladet": o.rettet_fladet,
                         "noter": o.noter,
                     },
                     ensure_ascii=False,

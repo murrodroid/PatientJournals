@@ -42,8 +42,25 @@ def test_hver_side_vi_har_billede_af_har_ogsaa_facit(facit):
 def test_ingen_opslag_i_facit_er_uden_tekst(facit):
     """Tomme blokke hoerer i `udeladte.md`, ikke i facit -- ellers ville en
     model, der laeser en side med tekst paa, se ud til at digte det hele."""
-    tomme = [navn for navn, o in facit.items() if not o["fladet"].strip()]
+    tomme = [navn for navn, o in facit.items() if not o["alt_fladet"].strip()]
     assert not tomme, tomme
+
+
+@kraever_output
+def test_de_to_facit_udgaver_er_ens_paa_sider_uden_overstregning(facit):
+    """De 33 overstregninger ligger paa faa sider. Alle andre sider skal have
+    to identiske udgaver -- er de forskellige, roerer overstregningsreglen
+    noget, den ikke skal."""
+    med_overstregning = [
+        navn for navn, o in facit.items() if "crossed" in o["raa"].lower()
+    ]
+    assert med_overstregning, "ingen overstregninger fundet -- testen tester intet"
+    afvigende = [
+        navn
+        for navn, o in facit.items()
+        if navn not in med_overstregning and o["alt_fladet"] != o["rettet_fladet"]
+    ]
+    assert not afvigende, afvigende
 
 
 @kraever_output

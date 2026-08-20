@@ -520,3 +520,53 @@ Mønstret bag de 40 er værd at holde fast i: de ligger i kun 7 af de 39
 patienter, altid som en sammenhængende hale sidst i forløbet — én patient
 har 14 utransskriberede sider i træk. Transskriptionen stopper altså
 tidligere end indlæggelsen gør, snarere end at springe enkeltsider over.
+
+## 2026-08-20 (aften) — leads svar på otte spørgsmål om måling og facit
+
+Otte spørgsmål blev lagt frem, hver med situation, valgmuligheder, afvejning
+og en anbefaling. Svarene er låst her.
+
+| # | Spørgsmål | leads svar |
+|---|---|---|
+| 23 | **Ulæselige steder (`[?]`, 496 stk.)** | Skæres ud af begge tekster, før der måles. Stedet tæller hverken for eller imod. |
+| 24 | **Overstreget tekst** | **Modellen skal bare læse hvad der står** — også det overstregede, og også det der står efter. Den promptes IKKE til at afgøre, hvad der skulle stå i stedet. Lead har dårlige erfaringer med at få en sprogmodel til at genkende noget som specifikt overstreget. Forsøg med dette senere, ikke nu. |
+| 25 | **Margentekstens placering** | Lades ligge indtil videre (mulighed c). Måles ikke for sig nu; tages op senere. |
+| 26 | **Hvilket af de fem tegnfejlstal** | (b) uden store/små og uden tegnsætning som arbejdstal, men (a) rå og (c) mest lempelige rapporteres ved siden af — som StadsCER selv gør det. |
+| 27 | **Hvornår er det godt nok** | Ingen grænse sættes nu; det første rigtige tal ses først. Derefter sættes grænser pr. brug. |
+| 28 | **Måling ud over tegnfejl** | Tegnfejl + ordfejl. Ingen målrettet opmærkning af datoer, temperaturer og medicin — det kræver et større apparat, og **det er ikke dét, lead skal bruge**. Se nedenfor. |
+| 29 | **Egen billedhentning** | Hent hele øvemængden (118 sider). |
+| 30 | **Billedanmodningen** | Er sendt til kollegaen. |
+
+### Beslutning 24 omgør beslutning 7 delvist — facit har nu to udgaver
+
+Beslutning 7 (18. august) sagde, at facit beholder erstatningen og ikke det
+overstregede. Det holder stadig som den *historisk rigtige* tekst, men det
+kan ikke være det, vi måler på: når modellen bliver bedt om at læse alt hvad
+der står, vil den skrive de overstregede ord, og så ville facit kalde det en
+fejl 33 steder — modellen ville blive straffet for at gøre præcis det, vi bad
+om.
+
+`facit.jsonl` rummer derfor nu begge udgaver pr. side:
+
+- **`alt_linjer` / `alt_fladet`** — alt hvad der står på siden, også det
+  overstregede. **Det er den, målingen bruger.**
+- **`rettet_linjer` / `rettet_fladet`** — den rettede læsning, hvor det
+  overstregede er fjernet og kun erstatningen står tilbage. Det er den
+  historisk rigtige tekst og den, et færdigt datasæt skal rumme.
+
+De to er identiske på alle sider uden overstregning, og en kontrakttest
+vogter det.
+
+### Vigtigste steer fra svar 28: hvad teksten skal BRUGES til
+
+leads egne ord: det er "ofte raw tekst jeg skal bruge, altså natural text
+som beskriver sådan 'har haft mæslinger', 'underernæret' eller andet.
+Temperaturer og medicin er ikke ligeså vigtigt, det er de mere miljøbundne
+variable jeg henter i p 2 og 3."
+
+Det er en retningsangivelse, der rækker længere end måleapparatet. Værdien i
+anden- og tredjesiderne ligger i **den fortællende optagelsestekst om
+patientens forhistorie og levevilkår** — sygdomme, ernæringstilstand,
+boligforhold, smittekilde — ikke i de daglige kliniske målinger. Det bør
+farve, hvad vi prioriterer at få læst rigtigt, hvilke sider vi ser på først,
+og på sigt hvordan margenrecepterne vægtes (spørgsmål 25, udskudt).

@@ -46,7 +46,11 @@ uanset hvad litteraturen ellers siger.
       Script: `scripts/kbharkiv_hent.py` (midlertidigt, 20-billeders grænse).
 - [x] 16 rigtige andensider hentet til `output/proeve_opslag/`, tre af dem
       krydstjekket ord for ord mod facit
-- [ ] Aflever stadig billedanmodningen til kollegaen (ren, langsigtet kanal)
+- [x] **Billedanmodningen er sendt til kollegaen** (bekræftet af lead
+      2026-08-20). Afventer hans levering.
+- [x] **Hele øvemængden hentet selv** (2026-08-20, leads go): 118 sider fra
+      15 bind via kbharkiv → `output/oeve_billeder/`. Prøvemængdens 50 sider
+      hentes IKKE — de skal først røres ved den endelige bedømmelse.
 - [x] **Første tjek, model revideret**: billederne er IKKE symmetriske
       dobbeltopslag (undtagen forsideopslag) — hvert billede er asymmetrisk
       beskåret om ÉN målside med kun en smal strimmel af naboopslaget i én
@@ -91,6 +95,11 @@ uanset hvad litteraturen ellers siger.
 - [x] **leads svar på margentekst** (2026-08-20): margentekst og indskud
       TÆLLER MED i facit som tekst, modellen skal ramme. Ingen ændring.
 - [x] **leads svar på prøvemængden**: mit valg — en tredjedel beholdes.
+- [x] **Facit har nu TO udgaver pr. side** (2026-08-20, beslutning 24):
+      `alt_*` = alt hvad der står, også det overstregede → **den der måles
+      på**; `rettet_*` = overstreget fjernet, kun erstatningen → den
+      historisk rigtige tekst til et færdigt datasæt. Modellen promptes
+      IKKE til at genkende overstregninger.
 
 ## Stage 03 — Måleapparat
 
