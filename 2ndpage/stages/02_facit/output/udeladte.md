@@ -2,9 +2,16 @@
 
 ## Sidemaerker uden tekst
 
-Kilden er tvetydig her: siden kan have vaeret blank, eller den kan bare
-vaere uskrevet i transskriptionen. De maa ikke bruges som facit -- en
-model, der laeser en side med tekst paa, ville se ud til at digte.
+Siderne ER beskrevet i journalen -- de er bare ikke transskriberet.
+Kontrolleret 2026-08-20 paa ti af dem, spredt over alle syv patienter:
+alle ti har blaek i samme maengde som sider, vi ved har tekst, og to
+blev set efter med oejnene (den ene ender med 'doede Kl. 8 3/4').
+De maa derfor ikke bruges som facit -- en model, der laeser siden
+rigtigt, ville se ud til at digte det hele.
+
+Bemaerk moenstret: de fyrre ligger i kun syv patienter, altid som en
+sammenhaengende hale sidst i forloebet. Transskriptionen stopper
+tidligere end indlaeggelsen goer.
 
 | Billed-id | Kildefil |
 |---|---|

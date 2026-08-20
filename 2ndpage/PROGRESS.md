@@ -79,9 +79,18 @@ uanset hvad litteraturen ellers siger.
 - [ ] **Åben**: transskribenten deler nogle gange ord over to linjer uden
       bindestreg ("Inspira" / "tion"). Kan ikke skilles fra to virkelige ord
       med en regel; står som to ord i den fladede udgave.
-- [ ] **Rettelse til tidligere tal**: der er facit for 168 sider, ikke 257.
+- [x] **Rettelse til tidligere tal**: der er facit for 168 sider, ikke 257.
       De 257 er antallet af SIDER hos de 38 patienter, ikke antallet af
       transskriberede sider. Billedanmodningen er stadig rigtig.
+- [x] **De 40 tomme sidemærker er AFKLARET** (2026-08-20, lead + stikprøve):
+      siderne er beskrevet i journalen, de er bare ikke transskriberet af
+      kollegaen. Ti af dem hentet og målt — alle har blæk som sider, vi ved
+      har tekst; to set efter med øjnene. De holdes ude af facit. Mønstret:
+      de fyrre ligger i kun 7 patienter, altid som en sammenhængende hale
+      sidst i forløbet.
+- [x] **leads svar på margentekst** (2026-08-20): margentekst og indskud
+      TÆLLER MED i facit som tekst, modellen skal ramme. Ingen ændring.
+- [x] **leads svar på prøvemængden**: mit valg — en tredjedel beholdes.
 
 ## Stage 03 — Måleapparat
 

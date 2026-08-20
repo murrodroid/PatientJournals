@@ -188,8 +188,11 @@ class Sideblok:
     def tom(self) -> bool:
         """Sandt naar sidemaerket staar uden tekst efter sig.
 
-        Det er tvetydigt i kilden: siden kan vaere blank, eller den kan bare
-        vaere uskrevet i transskriptionen. Vi bruger den ikke som facit.
+        Siden ER beskrevet i journalen -- den er bare ikke transskriberet.
+        Kontrolleret 2026-08-20 paa ti af de fyrre: alle ti har blaek i samme
+        maengde som sider, vi ved har tekst. De maa derfor ikke bruges som
+        facit: en model, der laeser siden rigtigt, ville se ud til at digte
+        det hele.
         """
         return not self.raa.strip()
 

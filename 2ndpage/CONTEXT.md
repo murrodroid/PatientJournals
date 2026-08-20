@@ -493,3 +493,30 @@ er stedet, hvor den slags skal fanges.
 `kontaktark.py` og `opslagsregister.py` alle importerer `PIL`. Stage 04's
 tests kunne derfor ikke køre i et frisk miljø. `pillow>=11.0` er nu erklæret,
 og hele testsamlingen (101 tests) kører grønt.
+
+### Samme dag, senere — de tre spørgsmål til lead besvaret
+
+Jeg havde bygget tre antagelser ind i facit uden at spørge. De blev lagt
+frem, og her er svarene:
+
+1. **Margentekst og indskud tæller MED i facit** som tekst, modellen skal
+   ramme. Beslutning 20 ovenfor står altså uændret. Begrundelsen holder:
+   ordene er faktisk skrevet på siden, så en model, der læser hele siden,
+   ser dem — udelader vi dem fra facit, straffes modellen for at gøre det
+   rigtige, hver gang den læser en recept i margenen.
+2. **De 40 tomme sidemærker er afklaret, ikke længere tvetydige.** lead:
+   "hvis der er tekst i billedet, så er det bare fordi det ikke er
+   transskriberet af kollega". Kontrolleret: ti af de fyrre blev hentet fra
+   kbharkiv, spredt over alle syv berørte patienter. Alle ti har blæk i
+   samme mængde som sider, vi ved har tekst (0,14–0,17 mod 0,14–0,23 på
+   stage 01's pilotbilleder). To blev set efter med øjnene — begge fulde af
+   tekst, den ene ender med "døde Kl. 8¾", altså den sidste side i
+   forløbet. De holdes ude af facit, som de gjorde, men nu af en kendt
+   grund frem for en formodning.
+3. **Prøvemængdens størrelse er mit valg.** Den bliver stående på en
+   tredjedel (13 patienter, ca. 55 sider).
+
+Mønstret bag de 40 er værd at holde fast i: de ligger i kun 7 af de 39
+patienter, altid som en sammenhængende hale sidst i forløbet — én patient
+har 14 utransskriberede sider i træk. Transskriptionen stopper altså
+tidligere end indlæggelsen gør, snarere end at springe enkeltsider over.
