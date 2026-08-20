@@ -3,6 +3,10 @@
 Status her vinder på "hvad er gjort"; `CONTEXT.md` vinder på "hvorfor".
 Videre til næste stage kun efter menneskelig gennemgang.
 
+## Dagbog
+
+- [2026-08-20 12:00](diary/2026-08-20.md) — Projektet 2ndpage bygget fra bunden: kortlægning, ICM-skelet, stage 00/01/04 gennemført
+
 ## Fase 0 — Kortlægning og plan (afsluttet 2026-08-18)
 
 - [x] Kortlagt ICM-metodikken, PatientJournals, kollegaens app, facit,
