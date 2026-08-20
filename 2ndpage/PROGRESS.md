@@ -45,13 +45,14 @@ uanset hvad litteraturen ellers siger.
 - [x] **Første tjek, model revideret**: billederne er IKKE symmetriske
       dobbeltopslag (undtagen forsideopslag) — hvert billede er asymmetrisk
       beskåret om ÉN målside med kun en smal strimmel af naboopslaget i én
-      kant. Facit findes altid fuldt i billedet. Strimlens side (v/h)
-      varierer, muligvis efter recto/verso-paritet — IKKE bekræftet.
-- [ ] **Kræver leads øjne**: bekræft modellen og strimmel-mønsteret på
-      `proeve_opslag/273098_001496/1508` + `273099_001361/62/63.webp`
-- [ ] `output/opslagsregister.csv` — billede, masterliste, facit, opløsning
-- [ ] `output/daekning.md` og `output/opslag_struktur.md`
-- [ ] **Gennemgang ved lead**
+      kant. Facit findes altid fuldt i billedet.
+- [x] **Strimmel-mønster bekræftet**: løst af recto/verso-reglen (se stage
+      04) — ikke en formodning længere.
+- [x] `output/opslagsregister.csv`, `output/daekning.md`,
+      `output/opslag_struktur.md` — alle skrevet 2026-08-18.
+- [ ] **Gennemgang ved lead** — ingen formel godkendelse af selve stage 01
+      endnu, kun de enkelte fund undervejs (indirekte dækket af, at
+      stage 04 er godkendt på samme materiale)
 
 ## Stage 02 — Facit
 
