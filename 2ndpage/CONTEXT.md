@@ -570,3 +570,44 @@ patientens forhistorie og levevilkår** — sygdomme, ernæringstilstand,
 boligforhold, smittekilde — ikke i de daglige kliniske målinger. Det bør
 farve, hvad vi prioriterer at få læst rigtigt, hvilke sider vi ser på først,
 og på sigt hvordan margenrecepterne vægtes (spørgsmål 25, udskudt).
+
+## 2026-08-20 (aften, fortsat) — Sideforskydningen bekræftet på alle bind, og en fejl fundet i selve facit
+
+### Forskydningen holder i alle 15 bind
+
+Antagelsen bag hente-scriptet — at kildeviserens interne sidenummer er
+`counter - 1` — var kun efterprøvet på bind 273098 og 273099. Efter at
+hele øvemængden var hentet, blev de resterende 13 bind kontrolleret: ét
+billede pr. bind, håndskriften på målsiden læst og sammenlignet med facits
+tekst for samme billed-id.
+
+**Alle 13 bekræftet, ingen tegn på forskydning nogen steder.** Verso/recto-
+reglen (ulige forskel fra forsiden = indhold til venstre, lige = til højre)
+stemte også hver gang. Det var en reel risiko: en forskydning i ét bind ville
+have parret billeder med den forkerte sides facittekst, og ingen test kan
+fange den slags.
+
+### Fundet undervejs: facit er ikke fejlfri
+
+Ved kontrollen af `37554_001491` blev der fundet en uoverensstemmelse, som
+derefter blev efterprøvet direkte på billedet:
+
+- **Facit skriver:** "Blev syg for **2** Dage siden"
+- **På siden står der:** "Blev syg for **3** Dage siden"
+
+Tallet er entydigt på billedet: linje 1 på samme side har "Morbilli for 2
+Aar" med et tydeligt fladbundet 2, mens linjen fire linjer nede har et tal
+med den dobbeltbuede top, der kendetegner et 3 i den skrivehånd. De to
+glyffer ligner ikke hinanden. Resten af blokken matcher ordret.
+
+**Hvorfor det betyder noget:** facit er vores målestok. Rummer målestokken
+selv fejl, sætter det et gulv under, hvor lav en fejlprocent vi overhovedet
+kan måle — en model, der læser "3 Dage" korrekt, bliver talt forkert. Det
+gør ikke projektet ugyldigt, men det betyder, at en meget lav måling skal
+mødes med skepsis frem for begejstring, og at de allerbedste resultater bør
+efterses manuelt, før de tros.
+
+Det er ét fund fra én stikprøve på tretten sider. Vi ved ikke, hvor hyppigt
+det er. Spørgsmålet om, hvordan den slags skal håndteres — rettes i facit,
+tælles som støj, eller opgøres særskilt — er lagt til lead og er endnu
+ubesvaret.

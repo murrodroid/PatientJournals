@@ -51,6 +51,16 @@ uanset hvad litteraturen ellers siger.
 - [x] **Hele øvemængden hentet selv** (2026-08-20, leads go): 118 sider fra
       15 bind via kbharkiv → `output/oeve_billeder/`. Prøvemængdens 50 sider
       hentes IKKE — de skal først røres ved den endelige bedømmelse.
+- [x] **Sideforskydningen efterprøvet på ALLE 15 bind** (2026-08-20): var kun
+      verificeret på 2. Ét billede pr. bind læst og sammenlignet med facit.
+      `page_number = counter - 1` holder overalt; recto/verso-reglen ligeså.
+      Ingen forskydning fundet — risikoen for at parre billede med forkert
+      facittekst er dermed lukket for det materiale, vi har.
+- [ ] **NYT ÅBENT PUNKT: facit rummer fejl.** Ved kontrollen blev der fundet
+      én sikker fejllæsning i facit (`37554_001491`: facit skriver "for 2
+      Dage siden", på siden står "for 3 Dage siden"). Det sætter et gulv
+      under, hvor lav en fejlprocent vi kan måle. Ét fund fra tretten
+      stikprøver — hyppigheden er ukendt. Afventer leads stillingtagen.
 - [x] **Første tjek, model revideret**: billederne er IKKE symmetriske
       dobbeltopslag (undtagen forsideopslag) — hvert billede er asymmetrisk
       beskåret om ÉN målside med kun en smal strimmel af naboopslaget i én
