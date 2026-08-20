@@ -432,3 +432,64 @@ symmetrisk). Scriptet er bevaret som udgangspunkt, men rygdetektion i
 stage 04 skal designes ud fra den asymmetriske model, ikke som en
 "midte-søgning", og skal have flere rigtige facit-labels at teste imod, før
 den regnes for pålidelig.
+
+## 2026-08-20 — Stage 02 bygget: facit-læseren og klammekortlægningen
+
+Stage 02 er bygget færdig og afventer nu din gennemgang. Koden ligger i
+`src/andenside/facit.py` (tolkningen) og `src/andenside/facit_bygger.py`
+(samling og skrivning). 45 tests i `tests/test_facit_parser.py` og
+`tests/test_facit_rtf.py`, plus syv kontrakttests i
+`tests/test_facit_kontrakt.py`. Alle fire outputfiler i
+`stages/02_facit/output/` er skrevet.
+
+### Fund, der ændrer noget
+
+- **Der er facit for 168 sider, ikke 257.** De 39 patienter har 268 sider ud
+  over forsiden i masterlisten (de 257 fra dødsfaldsmapperne plus Andrea
+  Olsens 11). RTF-filerne mærker 208 af dem med et sidemærke, og 40 af de 208
+  sidemærker står uden tekst efter sig. Tilbage står **168 sider med faktisk
+  transskriberet tekst**. Påstanden ovenfor fra 18. august om at alle 257
+  sider har `[page]`-blokke er altså forkert — transskriptionerne stopper
+  tidligere end indlæggelserne gør for en del patienter. Billedanmodningen på
+  257 billeder er stadig rigtig at sende (de resterende sider er stadig
+  gyldige andensider, bare uden facit), men **det målbare materiale er 168
+  sider**, ikke 257.
+- **To filer ville være tabt af en for snæver søgning.** Bind 37554 har et
+  femcifret bind-id, ikke et sekscifret som alle de andre. En regex på seks
+  cifre tabte begge filer uden at sige noget. Der er nu en test, der er set
+  fejle netop på det.
+- **<patientnavn>-filen bruger en anden sidemærkning** — `[273104_001637]`
+  uden ordet "page". Alle 39 filer læses nu ens.
+- **Klammer kan ligge inden i hinanden**, fx en understregningsnote der
+  citerer et ulæseligt sted. Læseren tæller derfor dybde i stedet for at
+  bruge en søgning efter enkeltklammer.
+- **Fire filer har en tastefejl i opmærkningen** (en klamme der aldrig lukkes,
+  tre løse slutklammer). De gættes ikke på plads — teksten bevares, og de
+  seks flagede steder står i `output/udeladte.md` til gennemsyn.
+
+### Beslutninger truffet undervejs
+
+| # | Beslutning | Hvorfor |
+|---|---|---|
+| 17 | **Egen RTF-afkodning frem for et færdigt bibliotek** | Linjeskiftene ER data (de svarer til linjerne på siden), og vi skal styre præcist, hvad der bliver til et linjeskift. Filerne er meget ensartede TextEdit-RTF uden tabeller eller billeder. |
+| 18 | **Mærker matches på mønster, ikke på faste strenge** | Opmærkningen er skrevet i hånden over flere år og rummer tastefejl: `crossedout`, `continuded on line`, `right side og page`, `addet on top of line`, `is underline`. En liste over faste strenge ville tabe dem i stilhed. |
+| 19 | **Overstreget tekst løber til linjeskiftet, hvis intet mærke lukker den** | Aflæst af materialet: overstregningen lukkes enten af `[written instead]`, af `[continued on line]`, af et håndskrevet linjeskift eller af et rigtigt linjeskift. Der findes ingen forekomst, der løber videre til næste linje. |
+| 20 | **Indskud og margentekst BEHOLDES i læseteksten; noter om understregning og placering fjernes** | Ordene i et indskud og i margenen er faktisk skrevet på siden — en model, der læser siden, ser dem. Noten "dette er understreget" omtaler derimod tekst, der allerede står der, og er ikke selv tekst. Margentekst får sin egen linje, så den ikke klistrer sig til journallinjen. |
+| 21 | **Bindestreg sidst på en linje samles kun, når næste linje fortsætter med lille bogstav** | Materialet bruger også bindestreg som punktum ("enkelte Rhonchi-" efterfulgt af en ny sætning). Uden reglen blev "Rhonchi- Ingen Snue" til "RhonchiIngen Snue". Står bindestregen efter fx `[?]`, bliver den stående — vi ved ikke, hvad der blev delt. |
+| 22 | **Prøvemængden er hver tredje patient, sorteret efter forsidens billed-id** | Ingen lodtrækning betyder ingen frøkerne at glemme og samme opdeling hver eneste gang. Id'erne løber kronologisk gennem bindene, så de 13 prøvepatienter fordeler sig af sig selv over hele perioden maj 1896 – august 1897. Opdelingen er pr. patient, aldrig pr. side: to sider fra samme indlæggelse ligner hinanden i håndskrift, blæk og ordforråd og ville lække fra øve- til prøvemængde. |
+
+### Kendt begrænsning, ikke løst
+
+Transskribenten deler nogle gange et ord hen over to linjer **uden** at sætte
+bindestreg — "ved Inspira" / "tion under affekt" er "Inspiration". Der findes
+ingen regel, der kan skille det fra to virkelige ord uden at kunne dansk, så
+udfladningen lader dem stå som to ord. Effekten på måletallet er lille, men
+den er der, og den rammer facit, ikke modellen. Din gennemgang af læseteksten
+er stedet, hvor den slags skal fanges.
+
+### Sidegevinst: `pillow` var aldrig erklæret som afhængighed
+
+`pyproject.toml` havde `dependencies = []`, mens `bogryg.py`,
+`kontaktark.py` og `opslagsregister.py` alle importerer `PIL`. Stage 04's
+tests kunne derfor ikke køre i et frisk miljø. `pillow>=11.0` er nu erklæret,
+og hele testsamlingen (101 tests) kører grønt.

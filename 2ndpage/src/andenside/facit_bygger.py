@@ -1,0 +1,252 @@
+"""Bygger stage 02's fire outputfiler ud af de 39 haandlavede RTF-filer.
+
+Koerer man modulet direkte, skrives alt i `stages/02_facit/output/`.
+Selve tolkningen af opmaerkningen ligger i `facit.py` og er testet der; her
+er kun samling, optaelling og skrivning.
+"""
+
+from __future__ import annotations
+
+import csv
+import json
+import re
+from collections import Counter
+from dataclasses import dataclass
+from pathlib import Path
+
+from andenside.facit import (
+    FACIT_ROOT,
+    Sideblok,
+    del_i_sideblokke,
+    klassificer_klamme,
+    ren_laesetekst,
+    rtf_til_tekst,
+    saml_orddeling,
+)
+
+STAGE02_OUTPUT = Path(__file__).resolve().parents[2] / "stages" / "02_facit" / "output"
+
+# Hver tredje patient, sorteret efter forsidens billed-id, laegges i
+# proevemaengden. Id'erne loeber kronologisk gennem bindene, saa udvalget
+# spreder sig af sig selv over hele perioden maj 1896 - august 1897 uden at
+# vi skal traekke lod. Ingen tilfaeldighed betyder ingen frøkerne at glemme,
+# og samme opdeling hver eneste gang.
+PROEVE_HVER = 3
+
+
+@dataclass(frozen=True)
+class Opslag:
+    """Én journalside med facit, klar til at maale imod."""
+
+    image_name: str
+    forside: str
+    kildefil: str
+    raa: str
+    linjer: list[str]
+    fladet: str
+    noter: list[str]
+
+
+def laes_alle_blokke(rod: Path = FACIT_ROOT) -> list[Sideblok]:
+    """Laeser alle RTF-filer under `rod`, sorteret efter filnavn."""
+    blokke: list[Sideblok] = []
+    for fil in sorted(rod.rglob("*.rtf"), key=lambda p: p.name):
+        tekst = rtf_til_tekst(fil.read_text(encoding="cp1252", errors="replace"))
+        blokke.extend(del_i_sideblokke(tekst, kildefil=fil.name))
+    return blokke
+
+
+def byg_opslag(blok: Sideblok) -> Opslag:
+    ren, noter = ren_laesetekst(blok.raa)
+    linjer = [linje for linje in ren.split("\n")]
+    return Opslag(
+        image_name=blok.image_name,
+        forside=blok.forside or "",
+        kildefil=blok.kildefil,
+        raa=blok.raa,
+        linjer=linjer,
+        fladet=saml_orddeling(ren),
+        noter=noter,
+    )
+
+
+def opdel_patienter(forsider: list[str]) -> dict[str, str]:
+    """Fordeler patienter paa oevemaengde og laast proevemaengde.
+
+    Opdelingen sker pr. patient, aldrig pr. side: to sider fra samme
+    indlaeggelse ligner hinanden i haandskrift, blaek og ordforraad, og
+    ville laekke fra oeve- til proevemaengde, hvis de blev skilt ad.
+    """
+    return {
+        forside: ("proeve" if n % PROEVE_HVER == 0 else "oeve")
+        for n, forside in enumerate(sorted(set(forsider)))
+    }
+
+
+# ---------------------------------------------------------------------------
+# Optaelling af klammeformer
+# ---------------------------------------------------------------------------
+
+_KLAMME = re.compile(r"\[[^\[\]]*(?:\[[^\[\]]*\][^\[\]]*)*\]")
+
+
+def tael_klammeformer(blokke: list[Sideblok]) -> list[tuple[str, str, int, str]]:
+    """Optaeller hver klammeform i materialet.
+
+    Returnerer (type, form, antal, eksempel) sorteret efter type og faldende
+    antal. Formen er skrevet med smaa bogstaver og tal erstattet af N, saa fx
+    alle sidemaerker samles i én raekke.
+    """
+    antal: Counter[tuple[str, str]] = Counter()
+    eksempel: dict[tuple[str, str], str] = {}
+    for blok in blokke:
+        tekst = blok.raa
+        for fund in _KLAMME.finditer(tekst):
+            indre = fund.group(0)[1:-1]
+            typ, _ = klassificer_klamme(indre)
+            form = re.sub(r"\d+", "N", " ".join(indre.split()).lower())
+            noegle = (typ, form)
+            antal[noegle] += 1
+            eksempel.setdefault(
+                noegle,
+                " ".join(tekst[max(0, fund.start() - 40) : fund.end() + 25].split()),
+            )
+    return sorted(
+        ((typ, form, n, eksempel[(typ, form)]) for (typ, form), n in antal.items()),
+        key=lambda r: (r[0], -r[2], r[1]),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Skrivning
+# ---------------------------------------------------------------------------
+
+
+def _skriv_facit(opslag: list[Opslag], sti: Path) -> None:
+    with sti.open("w", encoding="utf-8", newline="\n") as f:
+        for o in opslag:
+            f.write(
+                json.dumps(
+                    {
+                        "image_name": o.image_name,
+                        "forside": o.forside,
+                        "kildefil": o.kildefil,
+                        "raa": o.raa,
+                        "linjer": o.linjer,
+                        "fladet": o.fladet,
+                        "noter": o.noter,
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+
+
+def _skriv_klammekonventioner(rader: list[tuple[str, str, int, str]], sti: Path) -> None:
+    forklaring = {
+        "ulaeselig": "Ulaeseligt sted. Bevares som `[?]` i facit.",
+        "gaet": "Usikker laesning. Klammen falder vaek, ordet bliver staaende.",
+        "understregning": "Note om at noget er understreget. Falder helt vaek.",
+        "overstreget": "Start paa overstreget tekst. Teksten falder vaek.",
+        "erstatning": "Det der blev skrevet i stedet. Bliver staaende.",
+        "fortsaet": "Tilbage til hovedlinjen. Falder vaek som maerke.",
+        "position": "Hvor paa siden teksten staar. Maerket falder vaek, teksten bliver.",
+        "indskud": "Tekst skudt ind over eller under linjen. Teksten bliver.",
+        "ukendt": "Kunne ikke tolkes. Indholdet bliver staaende, og stedet er flaget.",
+    }
+    linjer = [
+        "# Klammekonventioner i facit",
+        "",
+        "Udtoemmende optaelling af hver klammeform i alle 39 RTF-filer, lavet af",
+        "`andenside.facit_bygger.tael_klammeformer`. Tal er erstattet af `N`, og",
+        "store bogstaver er slaaet ned, saa ens former samles i én raekke.",
+        "",
+        "Kolonnen **Tolkning** er den regel, `ren_laesetekst` foelger. Det er den,",
+        "der skal bekraeftes af et menneske: er det den tekst, du ville regne for",
+        "en korrekt laesning af siden?",
+        "",
+    ]
+    for typ in sorted({r[0] for r in rader}):
+        i_typen = [r for r in rader if r[0] == typ]
+        linjer += [
+            f"## {typ} ({sum(r[2] for r in i_typen)} forekomster, {len(i_typen)} former)",
+            "",
+            forklaring.get(typ, ""),
+            "",
+            "| Antal | Form | Eksempel i sammenhaeng |",
+            "|---:|---|---|",
+        ]
+        for _, form, n, eks in i_typen:
+            linjer.append(f"| {n} | `{form}` | {eks.replace('|', '/')} |")
+        linjer.append("")
+    sti.write_text("\n".join(linjer), encoding="utf-8", newline="\n")
+
+
+def _skriv_opdeling(opslag: list[Opslag], hold: dict[str, str], sti: Path) -> None:
+    pr_patient: Counter[str] = Counter(o.forside for o in opslag)
+    with sti.open("w", encoding="utf-8", newline="") as f:
+        skriver = csv.writer(f)
+        skriver.writerow(["forside", "maengde", "antal_sider", "kildefil"])
+        kilde = {o.forside: o.kildefil for o in opslag}
+        for forside in sorted(pr_patient):
+            skriver.writerow([forside, hold[forside], pr_patient[forside], kilde[forside]])
+
+
+def _skriv_udeladte(tomme: list[Sideblok], opslag: list[Opslag], sti: Path) -> None:
+    linjer = [
+        "# Udeladte blokke og flagede steder",
+        "",
+        "## Sidemaerker uden tekst",
+        "",
+        "Kilden er tvetydig her: siden kan have vaeret blank, eller den kan bare",
+        "vaere uskrevet i transskriptionen. De maa ikke bruges som facit -- en",
+        "model, der laeser en side med tekst paa, ville se ud til at digte.",
+        "",
+        "| Billed-id | Kildefil |",
+        "|---|---|",
+    ]
+    for b in tomme:
+        linjer.append(f"| {b.image_name} | {b.kildefil} |")
+    flaget = [(o, n) for o in opslag for n in o.noter]
+    linjer += [
+        "",
+        f"## Steder hvor opmaerkningen ikke kunne tolkes ({len(flaget)})",
+        "",
+        "Blokken er stadig med i facit -- teksten er bevaret -- men stedet skal",
+        "ses efter med oejnene, foer facit bruges til at maale paa.",
+        "",
+        "| Billed-id | Note |",
+        "|---|---|",
+    ]
+    for o, note in flaget:
+        linjer.append(f"| {o.image_name} | {note.replace('|', '/')} |")
+    linjer.append("")
+    sti.write_text("\n".join(linjer), encoding="utf-8", newline="\n")
+
+
+def byg(ud: Path = STAGE02_OUTPUT) -> dict[str, int]:
+    ud.mkdir(parents=True, exist_ok=True)
+    blokke = laes_alle_blokke()
+    tomme = [b for b in blokke if b.tom]
+    opslag = [byg_opslag(b) for b in blokke if not b.tom]
+    hold = opdel_patienter([o.forside for o in opslag])
+
+    _skriv_facit(opslag, ud / "facit.jsonl")
+    _skriv_klammekonventioner(tael_klammeformer(blokke), ud / "klammekonventioner.md")
+    _skriv_opdeling(opslag, hold, ud / "opdeling.csv")
+    _skriv_udeladte(tomme, opslag, ud / "udeladte.md")
+
+    return {
+        "filer": len({b.kildefil for b in blokke}),
+        "blokke": len(blokke),
+        "opslag": len(opslag),
+        "tomme": len(tomme),
+        "patienter": len(hold),
+        "proeve": sum(1 for v in hold.values() if v == "proeve"),
+        "flagede": sum(len(o.noter) for o in opslag),
+    }
+
+
+if __name__ == "__main__":
+    for navn, tal in byg().items():
+        print(f"{navn:12s} {tal}")

@@ -58,14 +58,29 @@ uanset hvad litteraturen ellers siger.
       endnu, kun de enkelte fund undervejs (indirekte dækket af, at
       stage 04 er godkendt på samme materiale)
 
-## Stage 02 — Facit
+## Stage 02 — Facit *(bygget 2026-08-20, afventer gennemgang)*
 
-- [ ] Kortlæg alle klammeformer udtømmende (ikke kun de otte læste filer)
-- [ ] RTF-læser med tests pr. konvention, hver set fejle
-- [ ] Ren læsetekst: overstreget fjernes, erstatning beholdes, `[?]` bevares
-- [ ] Fladet udgave med orddeling samlet
-- [ ] Opdeling i øvemængde og låst prøvemængde, pr. patient
-- [ ] **Gennemgang ved lead** (historikerens bekræftelse af læseteksten)
+- [x] Kortlæg alle klammeformer udtømmende (ikke kun de otte læste filer) —
+      alle 39 filer, 9 typer fordelt på 194 skrivemåder, i
+      `output/klammekonventioner.md`
+- [x] RTF-læser med tests pr. konvention, hver set fejle —
+      `src/andenside/facit.py`, 19 + 45 tests
+- [x] Ren læsetekst: overstreget fjernes, erstatning beholdes, `[?]` bevares
+- [x] Fladet udgave med orddeling samlet
+- [x] Opdeling i øvemængde (26 patienter) og låst prøvemængde (13 patienter),
+      pr. patient — hver tredje patient efter forsidens billed-id, ingen
+      lodtrækning
+- [x] **Tallene**: 39 filer → 208 sidemærker → 40 uden tekst → **168 sider med
+      facit**, fordelt på 39 patienter. Seks steder flaget til gennemsyn.
+- [ ] **Gennemgang ved lead** (historikerens bekræftelse af læseteksten) —
+      læs `output/klammekonventioner.md`'s tolkningsregler og stikprøv
+      `output/facit.jsonl` mod et par sider, du kender
+- [ ] **Åben**: transskribenten deler nogle gange ord over to linjer uden
+      bindestreg ("Inspira" / "tion"). Kan ikke skilles fra to virkelige ord
+      med en regel; står som to ord i den fladede udgave.
+- [ ] **Rettelse til tidligere tal**: der er facit for 168 sider, ikke 257.
+      De 257 er antallet af SIDER hos de 38 patienter, ikke antallet af
+      transskriberede sider. Billedanmodningen er stadig rigtig.
 
 ## Stage 03 — Måleapparat
 

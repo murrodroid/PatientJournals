@@ -3,7 +3,7 @@ name = "andenside"
 version = "0.1.0"
 description = "Metodetest for transskription af andensider i Blegdamshospitalets patientjournaler"
 requires-python = ">=3.13,<3.14"
-dependencies = []
+dependencies = ["pillow>=11.0"]
 
 [project.scripts]
 andenside = "andenside.cli:main"

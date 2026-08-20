@@ -56,6 +56,14 @@ Stage 04's snitpunkt-detektion er bygget og verificeret på alle 8
 pilotbilleder (`src/andenside/bogryg.py`) — kendt begrænsning: kun afprøvet
 på to bind fra samme fotograferingssession, bredere test mangler.
 
+Stage 02's facit-læser er bygget (`src/andenside/facit.py`,
+`src/andenside/facit_bygger.py`) og har skrevet alle fire outputfiler i
+`stages/02_facit/output/`: 168 sider med facit fra 39 patientforløb, en
+udtømmende optælling af klammeopmærkningen, opdelingen i øve- og
+prøvemængde, og de blokke og steder, der er lagt til side. Afventer
+gennemgang. Stage 03 (måleapparatet) er derefter det sidste, der mangler,
+før et forsøg overhovedet kan måles.
+
 ## Nøglefakta
 
 - Andensider: `patient_page_counter == 1` (verso). Tredjesider:
@@ -67,7 +75,10 @@ på to bind fra samme fotograferingssession, bredere test mangler.
   kant af et opslag der bærer naboopslagets strimmel, uden CV-gætteri.
 - Ét billede er asymmetrisk beskåret om én målside (ikke et symmetrisk
   dobbeltopslag) — kun en smal strimmel af naboopslaget er synlig i én kant.
-- Facit: 38 patientforløb fra dødsfald maj 1896 til august 1897, i alt 257
-  journalsider ud over forsiderne, med rig men ustandardiseret klammenotation.
+- Facit: 39 patientforløb fra dødsfald maj 1896 til august 1897. De har 268
+  journalsider ud over forsiderne, men kun **168 af dem er faktisk
+  transskriberet** — 40 sidemærker står uden tekst, og for en del patienter
+  stopper transskriptionen før indlæggelsen gør. Notationen er rig, men
+  ustandardiseret: 194 forskellige skrivemåder fordelt på 9 slags mærker.
 - Målingen bygger på `J-Hoffi/StadsCER`s fem varianter og tilføjer samling af
   orddeling hen over linjeskift, som mangler dér.
