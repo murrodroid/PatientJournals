@@ -20,6 +20,11 @@ from pathlib import Path
 
 BS = chr(92)  # backslash, skrevet saadan for at holde kildekoden laesbar
 
+# Usynligt maerke, laeseren saetter ind for at kunne finde en understregnings
+# linjenummer igen, EFTER teksten er ryddet op. Det fjernes fra kilden foerst,
+# saa et nultegn i selve kilden ikke bliver taelt med.
+MAERKE = chr(0)
+
 FACIT_ROOT = Path(
     r"<kilderod>"
     r"\PID-scapes and Blegdam Patient journals\Patient journals\Manual transcriptions"
@@ -227,7 +232,7 @@ _OVERSTREGET = re.compile(r"^crossed\s*out$", re.I)
 _ERSTATNING = re.compile(r"^written\s+instead$", re.I)
 _FORTSAET = re.compile(r"^contin\w*\s+(?:on|under)\s*line$", re.I)
 # Positionsmaerker er fritekst, men naevner altid side, hjoerne eller page.
-_POSITION = re.compile(r"\b(?:side|corner)\b|page", re.I)
+_POSITION = re.compile(r"\b(?:side|corner|page|midpage)\b", re.I)
 _INDSKUD = re.compile(r"^(?:note\s+)?add(?:ed|et)\b", re.I)
 _GAET = re.compile(r"^(.+?)\??$", re.S)
 # Prikker eller ellipse i et gaet er en pladsholder for bogstaver, ingen kunne
@@ -235,6 +240,11 @@ _GAET = re.compile(r"^(.+?)\??$", re.S)
 # "..rede". Stedet kan ikke maales paa -- en tegnfejlsmaaling ville regne paa
 # punktummerne. (lead 2026-08-20.)
 _PLADSHOLDER = re.compile(r"\.{2,}|…")
+
+# Citatet i en understregningsnote, fx »gullig Belægning« is underlined.
+# Der skal vaere et lukkende citattegn -- ellers opfanger den ogsaa selve
+# noten ("is underlined") som var det understreget tekst.
+_CITAT = re.compile(r'[»“„"]([^»«“”„"]+)[«”"]')
 
 
 def klassificer_klamme(indre: str) -> tuple[str, str]:
@@ -275,16 +285,51 @@ def klassificer_klamme(indre: str) -> tuple[str, str]:
     return "ukendt", kerne
 
 
+def _luk_glemte_klammer(tekst: str) -> tuple[str, list[str]]:
+    """Saetter den glemte slutklamme ind, FOER teksten deles i tokens.
+
+    Fire filer har en klamme, der aldrig lukkes. Retter man foerst bagefter,
+    er skaden sket: dybden kommer aldrig tilbage til nul, saa alle SENERE
+    maerker paa siden bliver aldrig genkendt og ender som raa tekst. Det skete
+    i det leverede facit -- `[added over line](Fibiger)` stod bogstaveligt i
+    teksten paa 273104_001643 -- og en aegte overstregning efter stedet blev
+    heller ikke fjernet fra den rettede udgave.
+
+    Vi reparerer mindst muligt: klammen lukkes ved foerste mellemrum efter
+    den. En rigtig klamme kan godt spaende over et linjeskift (der findes ét
+    tilfaelde i materialet), saa vi roerer kun dem, der ALDRIG lukkes.
+    """
+    aabne: list[int] = []
+    for i, c in enumerate(tekst):
+        if c == "[":
+            aabne.append(i)
+        elif c == "]" and aabne:
+            aabne.pop()
+    if not aabne:
+        return tekst, []
+
+    noter = []
+    # Bagfra, saa de tidligere pladser ikke forskydes af indsaetningerne.
+    for aabnet in reversed(aabne):
+        rest = tekst[aabnet + 1 :]
+        noter.append("uafsluttet klamme ved " + repr(rest[:40]))
+        brud = re.search(r"\s", rest)
+        slut = aabnet + 1 + (brud.start() if brud else len(rest))
+        tekst = tekst[:slut] + "]" + tekst[slut:]
+    noter.reverse()
+    return tekst, noter
+
+
 def _tokens(tekst: str) -> tuple[list[tuple[str, str]], list[str]]:
     """Deler teksten i almindelig tekst og klammemaerker.
 
     Klammer kan vaere indlejrede -- en understregningsnote kan rumme et
     ulaeselighedsmaerke -- saa vi taeller dybde frem for at bruge en regex.
-    Ubalanceret opmaerkning er en tastefejl i kilden (fire filer har den) og
-    bliver rapporteret, ikke gaettet paa plads.
+    Ubalanceret opmaerkning er en tastefejl i kilden og bliver rapporteret,
+    ikke gaettet paa plads.
     """
+    tekst, noter = _luk_glemte_klammer(tekst)
     ud: list[tuple[str, str]] = []
-    noter: list[str] = []
     buffer: list[str] = []
     dybde = 0
     start = 0
@@ -306,20 +351,7 @@ def _tokens(tekst: str) -> tuple[list[tuple[str, str]], list[str]]:
                 buffer = []
                 ud.append(("klamme", tekst[start:i]))
                 start = i + 1
-    rest = tekst[start:]
-    if dybde > 0:
-        # Slutklammen er glemt. Vi reparerer mindst muligt: klammen lukkes ved
-        # foerste mellemrum, og indholdet behandles som ethvert andet maerke.
-        # En rigtig klamme kan godt spaende over et linjeskift (der findes ét
-        # tilfaelde), saa det er kun de klammer, der ALDRIG lukkes, vi roerer.
-        noter.append("uafsluttet klamme ved " + repr(rest[:40]))
-        brud = re.search(r"\s", rest)
-        skaering = brud.start() if brud else len(rest)
-        ud.append(("tekst", "".join(buffer)))
-        buffer = []
-        ud.append(("klamme", rest[:skaering]))
-        rest = rest[skaering:]
-    buffer.append(rest)
+    buffer.append(tekst[start:])
     ud.append(("tekst", "".join(buffer)))
     return ud, noter
 
@@ -350,7 +382,10 @@ def laes_side(raa: str, behold_overstreget: bool = False) -> tuple[str, list[str
     """
     # Transskribenten skriver et bogstaveligt backslash-n for et haandskrevet
     # linjeskift, saerlig i receptblokke i margenen.
-    tekst = raa.replace(BS + "n", "\n")
+    # Vi bruger selv et nultegn som usynligt maerke laengere nede. Staar der
+    # ét i kilden, skal det vaek foerst -- ellers taelles det med og vaelter
+    # koerslen med en raa StopIteration midt i 39 filer.
+    tekst = raa.replace(MAERKE, "").replace(BS + "n", "\n")
     tokens, noter = _tokens(tekst)
 
     ud: list[str] = []
@@ -360,10 +395,6 @@ def laes_side(raa: str, behold_overstreget: bool = False) -> tuple[str, list[str
 
     understreget: list[dict[str, object]] = []
 
-    # Linjenummeret skal gaelde den FAERDIGE tekst, men den bliver ryddet op
-    # bagefter (tomme linjer slaas sammen). Vi saetter derfor et usynligt
-    # maerke ind paa stedet og finder linjen igen, naar teksten staar faerdig.
-    MAERKE = "\x00"
 
     overstreget = False
     for slags, vaerdi in tokens:
@@ -416,42 +447,61 @@ def laes_side(raa: str, behold_overstreget: bool = False) -> tuple[str, list[str
     samlet = "".join(ud).replace("\r", "")
     # Fjernede maerker efterlader mellemrum i hver ende af linjen. Indrykning
     # baerer ingen betydning i disse filer, saa den kan trimmes vaek.
-    renset = "\n".join(linje.strip() for linje in samlet.split("\n"))
-    # Flere blanke linjer i traek er ogsaa et affald af fjernede maerker;
-    # ÉN blank linje adskiller de daglige notater og skal blive staaende.
-    renset = re.sub(r"\n{3,}", "\n\n", renset)
-    # Find maerkerne igen i den faerdige tekst og giv hver understregning
-    # sit rigtige linjenummer. Maerkerne fjernes samtidig.
-    linjer = renset.strip("\n").split("\n")
+    linjer = [linje.strip() for linje in samlet.split("\n")]
+
+    # Giv hver understregning nummeret paa den linje, dens maerke staar paa,
+    # og fjern maerkerne igen.
     naeste = iter(understreget)
     for nr, linje in enumerate(linjer):
         for _ in range(linje.count(MAERKE)):
-            next(naeste)["linje"] = nr
-        linjer[nr] = linje.replace(MAERKE, "").rstrip()
+            fund = next(naeste, None)
+            if fund is not None:
+                fund["linje"] = nr
+        linjer[nr] = linje.replace(MAERKE, "").strip()
+
+    # Flere blanke linjer i traek er affald af fjernede maerker; ÉN blank linje
+    # adskiller de daglige notater og skal blive staaende. Linjerne flytter sig
+    # af det, saa understregningernes numre flytter med.
+    ryddet: list[str] = []
+    flyttet: list[int] = []
+    for linje in linjer:
+        if not linje and (not ryddet or not ryddet[-1]):
+            flyttet.append(max(0, len(ryddet) - 1))
+            continue
+        flyttet.append(len(ryddet))
+        ryddet.append(linje)
+    while ryddet and not ryddet[-1]:
+        ryddet.pop()
+    if not ryddet:
+        return "", noter, understreget
+
+    for fund in understreget:
+        nr = min(flyttet[int(fund["linje"])], len(ryddet) - 1)
+        # Bar linjen kun et maerke, er den tom nu -- saa hoerer understregningen
+        # til naermeste linje med tekst over den.
+        while nr > 0 and not ryddet[nr]:
+            nr -= 1
+        fund["linje"] = nr
 
     # Noten blev nogle gange sat foerst EFTER den naeste linje. Citatet er
-    # sidens egen tekst, saa vi kan finde den rigtige linje ved at lede
-    # efter det. Findes det ikke, bliver noten staaende -- vi gaetter ikke.
+    # sidens egen tekst, saa vi kan finde den rigtige linje ved at lede efter
+    # det. Findes det ikke, bliver noten staaende -- vi gaetter ikke.
     for fund in understreget:
         if fund["slags"] != "citat":
             continue
-        foerste_ord = str(fund["tekst"]).split()[0].lower()
+        # Mindst to ord skal passe, hvis citatet har dem. Ellers vinder en
+        # tilfaeldig linje med samme foerste ord over den rigtige.
+        ord_i_citat = str(fund["tekst"]).split()
+        noegle = " ".join(ord_i_citat[:2]).lower()
         nr = int(fund["linje"])
-        if foerste_ord in linjer[nr].lower():
+        if noegle in ryddet[nr].lower():
             continue
         for kandidat in range(nr - 1, max(-1, nr - 4), -1):
-            if foerste_ord in linjer[kandidat].lower():
+            if noegle in ryddet[kandidat].lower():
                 fund["linje"] = kandidat
                 break
-    return "\n".join(linjer), noter, understreget
 
-
-# Understregningsnoten er ikke tekst og hoerer ikke i laeseteksten -- men
-# HVAD der er understreget er en oplysning, vi ikke maa smide vaek. Lead
-# 2026-08-20: "understregning er ret godt til at benchmarke i senere
-# forsoeg". Den gemmes derfor for sig, saa den er der, naar vi faar brug for
-# den, uden at forurene den tekst, der maales paa.
-_CITAT = re.compile(r"[»“„\"]([^»«“”„\"]+)[«”\"]")
+    return "\n".join(ryddet), noter, understreget
 
 
 def ren_laesetekst(raa: str, behold_overstreget: bool = False) -> tuple[str, list[str]]:
