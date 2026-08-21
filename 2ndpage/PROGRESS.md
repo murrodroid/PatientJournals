@@ -7,6 +7,7 @@ Videre til næste stage kun efter menneskelig gennemgang.
 
 - [2026-08-20 12:00](diary/2026-08-20.md) — Projektet 2ndpage bygget fra bunden: kortlægning, ICM-skelet, stage 00/01/04 gennemført
 - [2026-08-20 16:20](diary/2026-08-20.md) — Stage 02 bygget: facit-læser, klammekortlægning, øve/prøve-opdeling
+- [2026-08-21](diary/2026-08-21.md) — Stage 02 godkendt og låst; 16 beslutninger truffet i dialog
 
 ## Fase 0 — Kortlægning og plan (afsluttet 2026-08-18)
 

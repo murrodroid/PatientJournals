@@ -1,0 +1,40 @@
+=== NOTER ===
+uafsluttet klamme ved 'ophentes? sekret af caviteten er dette\nf'
+
+=== TOKENS (type, value) ===
+tekst: '\nthoskopien viser intet abnormt.\n\n29/10 38.6/38. Har været lidt kortåndet og\ndøset noget. Opbringer endel slim\nIdag ses i operationsåret følg:\nFra '
+klamme: 'hudsåret?'
+tekst: ' og såret i trachea\nopadtil strækker sig en '
+klamme: '?'
+tekst: '-\n'
+klamme: '?'
+tekst: ' poche sig nedad\nog til h. fra trachea, uden iøvrigt\nat kommunicere med dette\nved anden åbning end den, \nder indtages af Canylen. Når der\n'
+klamme: 'ophentes?'
+tekst: ' sekret af caviteten er dette\nflydt ned. fra canylekanalen. Trods\nmeget ophyggelig examination og\nopsugning af det stagnerede sekret\ni pochen lykkes det ikke at kon-\nstatere nogen perforation til trachea [added over line](Fibiger)\n[?] [?] [?]. \n\n30/10 38,2/39,2. Hun døser ikke igår og\nvar ikke kortåndet. Inat\nhar hun ikke sovet godt og\nKastet én Gang op, samt været\nmere kortåndet. Hoster en Del, [?]\n\n'
+
+=== laes_side (behold_overstreget=True) OUTPUT ===
+thoskopien viser intet abnormt.
+
+29/10 38.6/38. Har været lidt kortåndet og
+døset noget. Opbringer endel slim
+Idag ses i operationsåret følg:
+Fra hudsåret og såret i trachea
+opadtil strækker sig en [?]-
+[?] poche sig nedad
+og til h. fra trachea, uden iøvrigt
+at kommunicere med dette
+ved anden åbning end den,
+der indtages af Canylen. Når der
+ophentes sekret af caviteten er dette
+flydt ned. fra canylekanalen. Trods
+meget ophyggelig examination og
+opsugning af det stagnerede sekret
+i pochen lykkes det ikke at kon-
+statere nogen perforation til trachea [added over line](Fibiger)
+[?] [?] [?].
+
+30/10 38,2/39,2. Hun døser ikke igår og
+var ikke kortåndet. Inat
+har hun ikke sovet godt og
+Kastet én Gang op, samt været
+mere kortåndet. Hoster en Del, [?]
