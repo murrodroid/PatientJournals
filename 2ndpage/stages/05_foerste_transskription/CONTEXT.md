@@ -36,7 +36,9 @@ allerede har målt på (Humphries m.fl.).
   IKKE bedt om at genkende overstreget tekst eller om at afgøre, hvad der
   skulle stå i stedet (beslutning 24). Lead har dårlige erfaringer med det:
   modellen forveksler understregninger med overstregninger, og der er 404
-  understregninger i materialet mod 33 overstregninger. Er noget streget ud,
+  understregningsNOTER i materialet mod 33 overstregninger. (Noterne giver
+  409 poster i facits `understreget`-felt, fordi en note kan rumme to
+  citater — de to tal måler ikke helt det samme.) Er noget streget ud,
   prøver vi bare at læse det, og vi læser også det, der står efter.
 - **Prompten beder heller ikke modellen om at markere ulæselige steder.**
   Måleapparatet håndterer dem (stage 03, punkt 6-7).

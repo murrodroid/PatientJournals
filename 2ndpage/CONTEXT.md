@@ -514,7 +514,7 @@ frem, og her er svarene:
    forløbet. De holdes ude af facit, som de gjorde, men nu af en kendt
    grund frem for en formodning.
 3. **Prøvemængdens størrelse er mit valg.** Den bliver stående på en
-   tredjedel (13 patienter, ca. 55 sider).
+   tredjedel (13 patienter, 50 sider).
 
 Mønstret bag de 40 er værd at holde fast i: de ligger i kun 7 af de 39
 patienter, altid som en sammenhængende hale sidst i forløbet — én patient
@@ -611,80 +611,6 @@ Det er ét fund fra én stikprøve på tretten sider. Vi ved ikke, hvor hyppigt
 det er. Spørgsmålet om, hvordan den slags skal håndteres — rettes i facit,
 tælles som støj, eller opgøres særskilt — er lagt til lead og er endnu
 ubesvaret.
-
-## 2026-08-20 (sent) — leads rettelser til facit-reglerne, og understregningen reddet
-
-### Fire ændringer i læsereglerne
-
-| # | Ændring | Hvorfor |
-|---|---|---|
-| 31 | **`[..rede?]` bliver til `[?]`, ikke til teksten "..rede"** | lead: det er ikke en plausibel læsning, men "et ord der ender på -rede". Bogstaverne er ukendte, så stedet kan ikke måles på — en tegnfejlsmåling ville regne på punktummerne. Reglen er generel: enhver klamme med prikker eller ellipse som pladsholder bliver et ulæselighedsmærke. |
-| 32 | **En klamme uden spørgsmålstegn er også et læseforslag** | lead: "8 er at se som 7 bare uden ?". `[gangrenerede]` bliver til teksten `gangrenerede`. Kategorien "uforstået" er dermed næsten tom. |
-| 33 | **En uafsluttet klamme repareres ved første mellemrum** | lead om de fire tastefejl: "se det som forslag, men for nu bare fjern `[`, `]`, `?`". `[ophentes? sekret af...` bliver til `ophentes sekret af...`. Vi rører kun de klammer, der ALDRIG lukkes — der findes én lovlig klamme, som spænder over et linjeskift. |
-| 34 | **Lægens egne spørgsmålstegn røres ikke** | Der er syv `?` uden for klammer, og de er skrevet af LÆGEN: `(Scarlatina?)`, `(injectionssted?)`, `Pneunomia?`, `DB?`. Det er tekst på siden. "Fjern `?`" kan derfor kun gælde transskribentens opmærkning, aldrig teksten. |
-
-### Understregningen bliver gemt for sig i stedet for at gå tabt
-
-Lead: "understregning er ret godt til at benchmarke i senere forsøg, men ikke
-så vigtigt lige nu". Reglen om at fjerne noten fra læseteksten står — men
-oplysningen om HVAD der var understreget blev hidtil kastet væk sammen med
-noten. Den ville være dyr at grave frem igen.
-
-`facit.jsonl` har nu et felt `understreget` pr. side: én post pr.
-understregning med linjenummer i `alt_linjer`, om det er hele linjen eller et
-citat, og selve citatet. **409 understregninger** er bevaret: 253 hele linjer
-og 156 citater.
-
-Linjenummeret er ikke gættet. Det sættes af et usynligt mærke, der følger med
-gennem hele oprydningen af teksten, så det peger på den færdige tekst og ikke
-på en midlertidig udgave. Transskribenten satte nogle gange noten først EFTER
-den næste linje; i de tilfælde ledes der baglæns efter citatet i sidens egen
-tekst. **Alle 156 citater rammer nu den linje, de faktisk står på** — mod 150
-uden den søgning.
-
-### To ting til senere, som lead rejste
-
-- **Modellen forveksler understregning med overstregning.** Det er en fejl,
-  Lead har set før, når man prompter en model til at genkende overstreget
-  tekst. Det er en selvstændig grund til IKKE at prompte for overstregning nu
-  (beslutning 24), og det er noget, et senere forsøg skal måle direkte —
-  netop derfor er understregningsdataene værd at have gemt.
-- **Hans forslag til overstregning på sigt**: en separat model eller prompt,
-  der udelukkende leder efter, hvad der KAN være streget ud, og så kombinerer
-  de to svar bagefter og skiller det overstregede fra, før tegnfejlene
-  regnes. Det hører hjemme i stage 06 eller 07, ikke nu.
-- **Åbent historisk spørgsmål**: Lead ved ikke, hvorfor nogle dele er
-  understreget og andre ikke. 253 hele linjer og 156 citater er et materiale
-  at undersøge det på, hvis nogen får lyst.
-
-### Krav til stage 03, fastlagt nu
-
-- **Der skal måles pr. linje, ikke kun på den fladede tekst.** lead: "jeg vil
-  ikke nødvendigvis have det fladet ud men også sammenligne pr linje". Begge
-  udgaver ligger i facit (`alt_linjer` og `alt_fladet`).
-- **Fejllæsninger i facit accepteres som udgangspunkt** (svar på spørgsmålet
-  rejst tidligere samme dag): "Vi må som udgangspunkt bare acceptere at der
-  kan være fejllæsninger."
-- **Stavefejlene i opmærkningen fanges af mønstre**, ikke af faste strenge.
-  Efter leads udtrykkelige ønske om at være sikker på det er der nu en test,
-  der gennemgår samtlige 31 stavemåder, optællingen fandt, og kræver at hver
-  eneste havner i den rigtige kategori. Testen er set fejle: fjernes
-  fleksibiliteten i ét mønster, falder `continuded on line` og
-  `continued under line` igennem med det samme.
-
-### Kildefilerne er og bliver skrivebeskyttede
-
-Lead 2026-08-20: "jeg regner ikke med at du renser op i de filer, jeg regner
-med du transformerer dem over i en klon eller kontinuerligt bare bruger et
-script paa dem". Det er praecis, hvordan det er bygget:  laeser
-RTF-filerne paa OneDrive og roerer dem aldrig; alt skrives til
-.
-
-Det loefte staar nu ikke kun i en README. 
-tager stoerrelse og aendringstidspunkt paa alle 39 kildefiler, koerer hele
-bygningen, og kraever at intet har flyttet sig. Testen er set fejle: laegges
-der en linje ind i , der blot roerer én fils tidsstempel, bliver den
-roed med det samme.
 
 ## 2026-08-20 (sent) — leads rettelser til facit-reglerne, og understregningen reddet
 

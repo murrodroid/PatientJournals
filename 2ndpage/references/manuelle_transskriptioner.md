@@ -55,7 +55,10 @@ transskriberet.
 - To RTF-afsnitsformater: "01 May 1896" bruger ét `\pard`-blok for hele filen;
   fra "02 June 1896" og frem gentages `\pard\tx566…` pr. afsnit (kun kosmetisk,
   men rammer RTF-stripning).
-- Kun 8 af 39 RTF'er blev stikprøvelæst — flere tag-varianter kan findes.
+- ~~Kun 8 af 39 RTF'er blev stikprøvelæst — flere tag-varianter kan
+  findes.~~ **Overhalet 2026-08-20**: alle 39 filer er nu kortlagt
+  udtømmende i `stages/02_facit/output/klammekonventioner.md` — 194
+  skrivemåder fordelt på 8 slags mærker. Der er ikke flere ukendte.
 
 ## Kobling til scanninger + nabo-mapper
 

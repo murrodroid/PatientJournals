@@ -23,7 +23,6 @@ PROGRESS.md              Tjekliste — status
 _config/tdd.md          Testregler
 stages/00..08/          Ni stages, hver med CONTEXT.md og output/
 references/              Kortlægninger af omverdenen
-research/                Litteraturarbejde
 billedanmodning/         Liste over billeder bestilt hos kollegaen
 scripts/                 Midlertidige værktøjer, uden for ICM-stagestrukturen
 src/andenside/           Python-pakken: masterliste, opslagsregister, bogryg-snit
@@ -44,7 +43,7 @@ tests/                   Herunder strukturtesten
 
 ## Status
 
-Kortlægning og planlægning er færdig, og 35 beslutninger er låst i
+Kortlægning og planlægning er færdig, og 38 beslutninger er låst i
 `CONTEXT.md`.
 
 **Billeder (stage 01):** kbharkiv.dk's kildeviser har et åbent API, så vi

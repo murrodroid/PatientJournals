@@ -17,7 +17,16 @@ hvordan de hænger sammen med masterlisten. Uden dette kan intet måles.
 
 ## Process
 
-1. Aflever billedanmodningen til kollegaen; modtag de 307 billeder.
+1. **To kanaler, og den selvbetjente er den, der har leveret.**
+   a. Billedanmodningen til kollegaen (307 billeder) er sendt 2026-08-20
+      og afventer levering. Den er den rene, langsigtede kanal.
+   b. `scripts/kbharkiv_hent.py` henter selv fra kbharkiv.dk's åbne API.
+      Forskydningen er `page_number = counter - 1`, efterprøvet på ALLE
+      15 bind 2026-08-21. Herfra kommer de 118 øvebilleder, vi arbejder
+      på. **Prøvemængdens 50 sider hentes bevidst ikke** — de røres først
+      ved den endelige bedømmelse.
+      Kildeviseren kan ikke levere højere opløsning: API'et har ingen
+      størrelsesparameter, og vi får ~900-1.000 pixels pr. tekstside.
 2. **Første tjek når billederne lander**: se et fortsættelsesopslag med egne
    øjne og afgør, om der står tekst på begge halvsider, og om facits
    `[page]`-blok dækker hele opslaget eller kun den ene halvdel. Alt senere
@@ -36,6 +45,13 @@ hvordan de hænger sammen med masterlisten. Uden dette kan intet måles.
 | `output/opslagsregister.csv` | Én række pr. opslag: billedfil, masterliste-felter, facit-fil, opløsning |
 | `output/daekning.md` | Optælling af hvad vi har og mangler, med huller navngivet |
 | `output/opslag_struktur.md` | Svaret på om et opslag rummer to tekstsider, og hvordan facit dækker det |
+| `output/proeve_opslag/` | De 8 første selvhentede pilotbilleder (webp), stage 04 er verificeret på dem |
+| `output/oeve_billeder/` | **Hele øvemængden: 118 sider fra 15 bind**, selvhentet 2026-08-20 |
+| `output/oevemaengde_billeder.txt` | Listen over de 118 billed-id'er, som hente-scriptet fik |
+| `output/kbharkiv_kalibrering/` | Materiale fra da forskydningen mellem kildeviserens sidetal og masterlistens billed-id blev fastlagt |
+
+Billedfilerne selv er ikke i git (se `.gitignore`) — de kan hentes igen med
+`scripts/kbharkiv_hent.py` ud fra `oevemaengde_billeder.txt`.
 
 ## Test Contract
 

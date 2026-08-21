@@ -26,14 +26,29 @@ det.
    forekomster af klammer i hele materialet og gruppere dem. Kortlægningen
    skrives ned, før parseren skrives færdig — vi bygger ikke på de otte filer,
    der er stikprøvelæst.
-4. Udled en ren læsetekst pr. opslag efter disse regler:
-   overstreget tekst fjernes, den erstattende tekst beholdes; noter om
-   understregning og placering fjernes; `[?]` bevares som et
-   ulæselighedsmærke; et gæt som `[dygtig?]` reduceres til ordet selv.
+4. Udled en ren læsetekst pr. opslag i **TO udgaver** (beslutning 24 omgør
+   her delvist beslutning 7 — læs videre, før du implementerer punktet):
+
+   - **`alt_*`**: alt hvad der står på siden, også det overstregede.
+     **Det er den udgave, der måles på**, fordi modellen bliver bedt om at
+     læse hele siden og udtrykkeligt IKKE bedt om at afgøre, hvad der er
+     streget ud. Målte vi mod den rettede læsning, blev modellen straffet
+     33 steder for at gøre præcis det, vi bad om.
+   - **`rettet_*`**: overstreget tekst fjernes, erstatningen beholdes. Den
+     historisk korrekte tekst, som et færdigt datasæt skal rumme.
+
+   Fælles for begge: noter om understregning og placering fjernes fra
+   teksten (men HVAD der var understreget gemmes i feltet `understreget`);
+   `[?]` bevares som ulæselighedsmærke; et gæt som `[dygtig?]` reduceres
+   til ordet selv, også uden spørgsmålstegn (beslutning 32); en klamme med
+   prikker eller ellipse som pladsholder bliver til `[?]`, fordi
+   bogstaverne er ukendte og stedet ikke kan måles på (beslutning 31).
 5. Bevar linjeskiftene i facit, men gem også en fladet udgave, hvor orddeling
    hen over linjeskift er samlet.
-6. Undersøg efterstillede `[page]`-mærker uden tekst: blank side eller
-   uskrevet transskription. Mærk dem, brug dem ikke som facit.
+6. ~~Undersøg efterstillede `[page]`-mærker uden tekst: blank side eller
+   uskrevet transskription.~~ **Afklaret 2026-08-20**: de 40 tomme mærker
+   er sider, der ER beskrevet i journalen, men ikke transskriberet.
+   Kontrolleret på ti af dem. De bruges ikke som facit.
 7. Del i øvemængde og prøvemængde **pr. patient**, aldrig pr. opslag, så
    sider fra samme forløb ikke havner på begge sider. Prøvemængden låses og
    røres ikke, før en metode skal endeligt bedømmes.

@@ -48,7 +48,9 @@ uanset hvad litteraturen ellers siger.
 - [x] 16 rigtige andensider hentet til `output/proeve_opslag/`, tre af dem
       krydstjekket ord for ord mod facit
 - [x] **Billedanmodningen er sendt til kollegaen** (bekræftet af lead
-      2026-08-20). Afventer hans levering.
+      2026-08-20). Afventer hans levering. **Bemærk**: anmodningen dækker
+      de 38 dødsfaldspatienter, ikke <patientnavns> 10 sider — de er
+      selvhentet via kbharkiv og ligger i øvemængden, så hullet er lukket.
 - [x] **Hele øvemængden hentet selv** (2026-08-20, leads go): 118 sider fra
       15 bind via kbharkiv → `output/oeve_billeder/`. Prøvemængdens 50 sider
       hentes IKKE — de skal først røres ved den endelige bedømmelse.
@@ -81,13 +83,17 @@ uanset hvad litteraturen ellers siger.
       `output/klammekonventioner.md`
 - [x] RTF-læser med tests pr. konvention, hver set fejle —
       `src/andenside/facit.py`, 19 + 45 tests
-- [x] Ren læsetekst: overstreget fjernes, erstatning beholdes, `[?]` bevares
+- [x] Ren læsetekst — i TO udgaver efter beslutning 24: `rettet_*` hvor
+      overstreget fjernes og erstatningen beholdes, og `alt_*` hvor alt
+      hvad der står bliver stående. `alt_*` er den, der måles på.
+      `[?]` bevares i begge.
 - [x] Fladet udgave med orddeling samlet
 - [x] Opdeling i øvemængde (26 patienter) og låst prøvemængde (13 patienter),
       pr. patient — hver tredje patient efter forsidens billed-id, ingen
       lodtrækning
 - [x] **Tallene**: 39 filer → 208 sidemærker → 40 uden tekst → **168 sider med
-      facit**, fordelt på 39 patienter. Seks steder flaget til gennemsyn.
+      facit**, fordelt på 39 patienter (de 38 fra dødsfaldsmapperne plus
+      <patientnavn>). Fire steder flaget til gennemsyn.
 - [x] **leads rettelser til læsereglerne indarbejdet** (2026-08-20,
       beslutning 31-34): klammer med prikker/ellipse bliver `[?]` fordi de
       ikke kan måles på; klammer uden `?` er også læseforslag; uafsluttede
@@ -109,7 +115,8 @@ uanset hvad litteraturen ellers siger.
       af tegnene). Lead: kan endda være meningen, hvis skriveren ikke
       satte bindestreg — så er facit netop korrekt. Ingen ændring.
 - [x] **Rettelse til tidligere tal**: der er facit for 168 sider, ikke 257.
-      De 257 er antallet af SIDER hos de 38 patienter, ikke antallet af
+      De 257 er antallet af SIDER hos de 38 dødsfaldspatienter, ikke
+      antallet af
       transskriberede sider. Billedanmodningen er stadig rigtig.
 - [x] **De 40 tomme sidemærker er AFKLARET** (2026-08-20, lead + stikprøve):
       siderne er beskrevet i journalen, de er bare ikke transskriberet af
