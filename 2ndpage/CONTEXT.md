@@ -1026,3 +1026,56 @@ kvalificeret bud, der kan forelægges dig sammen med et tæt udklip af stedet.
 er. 3 kan fjerne noget af problemet ved roden. 4 vender resten til noget
 brugbart. De udelukker ikke hinanden, og ingen af dem ændrer beslutning 38 —
 de bygger ovenpå den.
+
+## 2026-08-21 — De fire forslag skæres ned til ÉN funktion
+
+leads indvending mod at bygge alle fire: risiko for oppustet, uigennemskuelig
+kode. Den er berettiget — forslagene var skrevet som en liste over funktioner,
+ikke som et design.
+
+**Forslag 1, 2 og 4 kræver den samme ene handling:** find facits kendte stumper
+i modellens tekst. Alt andet er aflæsninger af dens resultat.
+
+```
+Facit-linje:    "væg, men denne var [?], og Canylen"
+Kendte stumper: "væg, men denne var"  |  ", og Canylen"
+Modelsvar:      "...væg, men denne var tynd, og Canylen..."
+                  └── stump 1 ────┘ └gab┘ └── stump 2 ──┘
+```
+
+- Stumperne er kendt sandhed → de måles (forslag 1).
+- Gabet er det, modellen skrev, hvor facit siger `[?]`; dets længde er
+  hallucinations-signalet (forslag 2).
+- Samme gab er modellens bud på stedet (forslag 4).
+
+### Hvad der bygges i stage 03
+
+Én funktion, med tests:
+
+    forankr(facit_linje, modeltekst) -> (fundne_stumper, gab, ikke_fundne)
+
+Regler, der holder den lille og ærlig:
+
+- **Stumper under 5 tegn bruges ikke** (122 af de 647). De kan forankre hvor
+  som helst og ville give falsk tryghed.
+- **Et gab tælles kun**, når stumperne på BEGGE sider er fundet. Ellers ved vi
+  ikke, hvor det begynder og slutter.
+- **En stump, der ikke findes, er ikke en fejl.** Den er uforankret, og linjen
+  falder tilbage til beslutning 38: hele linjen ud af målingen.
+
+Det sidste punkt er vigtigt for tilliden til tallet: **beslutning 38 forbliver
+grundreglen**, og forankringen er en forbedring oven på den med en defineret
+vej tilbage, når den ikke virker. Der er altså ikke to måder at måle på — der
+er én regel med et beskrevet fejltilfælde.
+
+### Hvad der IKKE bygges nu
+
+- **Ingen gennemsyns-app til forslag 4.** Gabene skrives bare til en fil.
+  Arbejdsgangen med udklip og ja/nej hører i stage 07 og bygges først, når der
+  er noget at se på.
+- **Intet mål for om modellen selv markerer usikkerhed.** Det ville kræve, at
+  prompten beder om det, og beslutning 24 siger, at vi ikke beder modellen om
+  den slags vurderinger. Kun gabets længde og indhold måles — det er gratis.
+- **Forslag 3 er ikke kode.** Det er et forsøg, der køres, når kollegaens
+  originalscanninger kommer: 20-30 tætte udklip, som lead ser på. Det står
+  som et punkt i stage 06's tjekliste, ikke som en opgave i stage 03.

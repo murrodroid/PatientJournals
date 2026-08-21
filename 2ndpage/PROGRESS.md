@@ -142,12 +142,15 @@ uanset hvad litteraturen ellers siger.
       opstilling er ikke til at stole på dér, hvor teksterne afviger.
       Koster 12,0 % af linjerne og 12,1 % af tegnene; ingen side mister
       over halvdelen; 33 sider mister intet.
-- [ ] **Fire forslag ligger klar** til at gøre linje-reglen mindre kostbar
-      (CONTEXT.md, 2026-08-21) — ingen besluttet: (1) genvind de 86 %
-      kendt tekst på de svære linjer ved at forankre i stumperne,
-      (2) brug de svære linjer som hallucinationsprøve, (3) efterprøv om
-      stederne er ulæselige eller bare dårligt fotograferet, (4) lad to
-      modeller foreslå læsninger dér, til din godkendelse.
+- [ ] **Byg ÉN funktion, ikke fire features**: `forankr(facit_linje,
+      modeltekst)` finder facits kendte stumper i modellens tekst. De
+      fundne stumper måles; gabet imellem dem er både
+      hallucinations-signal og modellens bud på det ulæselige sted.
+      Stumper under 5 tegn bruges ikke; et gab tælles kun med stumper
+      fundet på begge sider; en uforankret linje falder tilbage til
+      beslutning 38. Se CONTEXT.md 2026-08-21.
+- [ ] Ingen gennemsyns-app nu — gabene skrives til en fil, arbejdsgangen
+      hører i stage 07.
 - [ ] **Dækningen SKAL stå ved siden af hvert tal**: de udeladte 12 % er de
       sværeste linjer, så tallet er systematisk for pænt. Samme skævhed
       gør facit-fejl usynlige, når modellen fejler på samme måde.
@@ -200,6 +203,11 @@ selve læse-implementeringen, samme princip som resten af planen)*
 
 - [ ] Én akse ad gangen: model, prompt, opløsning, linjedetektion (baselines)
 - [ ] Test om prompt kan løse resterende beskæringsufuldkommenheder
+- [ ] **Er de ulæselige steder ulæselige, eller bare dårligt fotograferet?**
+      20-30 tætte udklip i højeste opløsning, forelagt lead. Kræver
+      kollegaens originalscanninger — kildeviseren kan ikke give mere end
+      de ~900-1.000 pixels pr. tekstside, vi allerede har (efterprøvet
+      2026-08-21). Ingen kode, kun et forsøg.
 - [ ] Undersøg fjern-opslags-bleed (se CONTEXT.md, leads fund om side 51 i side 101)
 - [ ] **Gennemgang ved lead** — bedste kombination udpeges
 
