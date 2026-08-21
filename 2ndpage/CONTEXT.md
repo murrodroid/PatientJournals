@@ -798,3 +798,62 @@ Dermed blokerer spørgsmålet ikke stage 03, og det behøver ikke besvares på
 forhånd. **Stage 05's allerførste kørsel svarer på det gratis** — vi skal bare
 huske at kigge efter det, og at notere svaret som et måleresultat frem for en
 formodning.
+
+## 2026-08-21 — Tre åbne punkter målt op, så de kan besluttes
+
+De tre resterende åbne punkter i stage 02 var beskrevet for løst til at kunne
+tages stilling til. Her er tallene bag dem.
+
+### 1. Umarkeret orddeling: 8 tilfælde, ikke et problem
+
+Metode: korpusset bruges som ordbog. Findes stumpen "Inspira" aldrig som
+selvstændigt ord i de 168 sider, mens "Inspiration" gør, er linjeskiftet efter
+al sandsynlighed midt i et ord. Konservativt skøn — det fanger kun de sikre.
+
+| Mål | Antal |
+|---|---|
+| Linjepar undersøgt | 3.124 |
+| Linjer der slutter med bindestreg (markeret orddeling) | 284 |
+| Kandidatpar (slutter på bogstav, næste starter med lille) | 925 |
+| **Formodet umarkeret orddeling** | **8** |
+
+De otte: `Inspira`+`tion`, `fau`+`ces`, `hal`+`sen`, `Respira`+`tionen`,
+`Legems`+`bygning`, `Dæm`+`pning`, `lø`+`ber`, `udskri`+`ves`.
+
+Umarkeret orddeling er altså ca. **3 % af alle orddelinger** (8 af 292).
+Koster den ét ekstra mellemrum hver, er det **0,009 % af tegnene** i facit.
+Det er under støjgrænsen for enhver beslutning, vi skal træffe.
+
+### 2. Fejl i facit: lille gulv under tallet, stor betydning for enkeltsager
+
+Grundlaget er tyndt: kontrollen af sideforskydningen sammenlignede kun de
+første 3-6 linjer på 13 sider, altså omkring 60 af korpussets 3.526 linjer.
+Dér blev fundet én sikker fejl.
+
+Holdt den rate for hele korpusset, ville det være **omkring 60 fejl**. Med én
+observation er usikkerheden enorm — det kunne lige så vel være 10 eller 200 —
+men det er tydeligvis ikke nul.
+
+**Det afgørende er, hvad 60 fejl betyder.** Er hver fejl ét tegn, er det 60 af
+92.604 tegn = **0,06 %**. Gulvet under tegnfejlsprocenten er altså
+forsvindende. Fejl i facit rammer derimod hårdt, når man ser på en ENKELT
+uenighed mellem model og facit og konkluderer "modellen tog fejl". Det er dér,
+forsigtigheden skal ligge — ikke i hovedtallet.
+
+### 3. Ulæselige steder fylder mere end noget andet åbent punkt
+
+| Mål | Værdi |
+|---|---|
+| Ulæselighedsmærker i facit | 498 |
+| Andel af tegnene i facit | **1,61 %** |
+| Sider helt uden et eneste | 33 af 168 |
+| Median pr. side | 3 |
+| Værste enkeltside | 14 |
+
+Til sammenligning: umarkeret orddeling er 0,009 %, og facit-fejl anslås til
+0,06 %. **De ulæselige steder er to størrelsesordener større end begge.**
+Beslutningen om, hvordan de behandles, er derfor den eneste af de tre, der
+reelt kan flytte et måletal — og den er allerede truffet (beslutning 23:
+skæres ud af begge tekster). Det, der endnu ikke er afgjort, er *mekanikken*:
+hvordan man finder det stykke af modellens tekst, der svarer til facits `[?]`,
+netop dér hvor teksterne er sværest at stille op mod hinanden.
