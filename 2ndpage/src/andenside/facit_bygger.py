@@ -161,15 +161,33 @@ def _skriv_facit(opslag: list[Opslag], sti: Path) -> None:
 
 def _skriv_klammekonventioner(rader: list[tuple[str, str, int, str]], sti: Path) -> None:
     forklaring = {
-        "ulaeselig": "Ulaeseligt sted. Bevares som `[?]` i facit.",
-        "gaet": "Usikker laesning. Klammen falder vaek, ordet bliver staaende.",
-        "understregning": "Note om at noget er understreget. Falder helt vaek.",
-        "overstreget": "Start paa overstreget tekst. Teksten falder vaek.",
+        "ulaeselig": (
+            "Ulaeseligt sted. Bevares som `[?]` i facit og skaeres ud af begge "
+            "tekster, foer der maales. Ogsaa klammer med prikker eller ellipse "
+            "som pladsholder havner her: `[..rede?]` betyder \"et ord der ender "
+            "paa -rede\", ikke laesningen \"..rede\", saa bogstaverne er ukendte."
+        ),
+        "gaet": (
+            "Forslag til laesning, med eller uden spoergsmaalstegn. Klammen "
+            "falder vaek, ordet bliver staaende."
+        ),
+        "understregning": (
+            "Note om at noget er understreget. Falder helt vaek af laeseteksten, "
+            "men HVAD der var understreget gemmes i feltet `understreget`."
+        ),
+        "overstreget": (
+            "Start paa overstreget tekst. I `rettet_*` falder teksten vaek; i "
+            "`alt_*` -- den der maales paa -- bliver den staaende, fordi "
+            "modellen bedes laese hele siden."
+        ),
         "erstatning": "Det der blev skrevet i stedet. Bliver staaende.",
         "fortsaet": "Tilbage til hovedlinjen. Falder vaek som maerke.",
         "position": "Hvor paa siden teksten staar. Maerket falder vaek, teksten bliver.",
         "indskud": "Tekst skudt ind over eller under linjen. Teksten bliver.",
-        "ukendt": "Kunne ikke tolkes. Indholdet bliver staaende, og stedet er flaget.",
+        "ukendt": (
+            "Flere ord, vi ikke genkendte som maerke. Indholdet bliver staaende "
+            "som tekst, og stedet er flaget i `udeladte.md`."
+        ),
     }
     linjer = [
         "# Klammekonventioner i facit",
@@ -178,9 +196,9 @@ def _skriv_klammekonventioner(rader: list[tuple[str, str, int, str]], sti: Path)
         "`andenside.facit_bygger.tael_klammeformer`. Tal er erstattet af `N`, og",
         "store bogstaver er slaaet ned, saa ens former samles i én raekke.",
         "",
-        "Kolonnen **Tolkning** er den regel, `ren_laesetekst` foelger. Det er den,",
-        "der skal bekraeftes af et menneske: er det den tekst, du ville regne for",
-        "en korrekt laesning af siden?",
+        "Under hver overskrift staar **Tolkning** -- den regel, laeseren foelger",
+        "for netop den slags maerke. Det er reglerne, der skal bekraeftes af et",
+        "menneske: giver de den tekst, du ville regne for en korrekt laesning?",
         "",
     ]
     for typ in sorted({r[0] for r in rader}):
@@ -188,7 +206,7 @@ def _skriv_klammekonventioner(rader: list[tuple[str, str, int, str]], sti: Path)
         linjer += [
             f"## {typ} ({sum(r[2] for r in i_typen)} forekomster, {len(i_typen)} former)",
             "",
-            forklaring.get(typ, ""),
+            "**Tolkning:** " + forklaring.get(typ, "(ingen regel nedskrevet)"),
             "",
             "| Antal | Form | Eksempel i sammenhaeng |",
             "|---:|---|---|",

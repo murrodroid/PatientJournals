@@ -4,13 +4,13 @@ Udtoemmende optaelling af hver klammeform i alle 39 RTF-filer, lavet af
 `andenside.facit_bygger.tael_klammeformer`. Tal er erstattet af `N`, og
 store bogstaver er slaaet ned, saa ens former samles i én raekke.
 
-Kolonnen **Tolkning** er den regel, `ren_laesetekst` foelger. Det er den,
-der skal bekraeftes af et menneske: er det den tekst, du ville regne for
-en korrekt laesning af siden?
+Under hver overskrift staar **Tolkning** -- den regel, laeseren foelger
+for netop den slags maerke. Det er reglerne, der skal bekraeftes af et
+menneske: giver de den tekst, du ville regne for en korrekt laesning?
 
 ## erstatning (11 forekomster, 1 former)
 
-Det der blev skrevet i stedet. Bliver staaende.
+**Tolkning:** Det der blev skrevet i stedet. Bliver staaende.
 
 | Antal | Form | Eksempel i sammenhaeng |
 |---:|---|---|
@@ -18,7 +18,7 @@ Det der blev skrevet i stedet. Bliver staaende.
 
 ## fortsaet (44 forekomster, 3 former)
 
-Tilbage til hovedlinjen. Falder vaek som maerke.
+**Tolkning:** Tilbage til hovedlinjen. Falder vaek som maerke.
 
 | Antal | Form | Eksempel i sammenhaeng |
 |---:|---|---|
@@ -28,7 +28,7 @@ Tilbage til hovedlinjen. Falder vaek som maerke.
 
 ## gaet (7 forekomster, 7 former)
 
-Usikker laesning. Klammen falder vaek, ordet bliver staaende.
+**Tolkning:** Forslag til laesning, med eller uden spoergsmaalstegn. Klammen falder vaek, ordet bliver staaende.
 
 | Antal | Form | Eksempel i sammenhaeng |
 |---:|---|---|
@@ -42,7 +42,7 @@ Usikker laesning. Klammen falder vaek, ordet bliver staaende.
 
 ## indskud (42 forekomster, 7 former)
 
-Tekst skudt ind over eller under linjen. Teksten bliver.
+**Tolkning:** Tekst skudt ind over eller under linjen. Teksten bliver.
 
 | Antal | Form | Eksempel i sammenhaeng |
 |---:|---|---|
@@ -56,7 +56,7 @@ Tekst skudt ind over eller under linjen. Teksten bliver.
 
 ## overstreget (33 forekomster, 2 former)
 
-Start paa overstreget tekst. Teksten falder vaek.
+**Tolkning:** Start paa overstreget tekst. I `rettet_*` falder teksten vaek; i `alt_*` -- den der maales paa -- bliver den staaende, fordi modellen bedes laese hele siden.
 
 | Antal | Form | Eksempel i sammenhaeng |
 |---:|---|---|
@@ -65,7 +65,7 @@ Start paa overstreget tekst. Teksten falder vaek.
 
 ## position (155 forekomster, 16 former)
 
-Hvor paa siden teksten staar. Maerket falder vaek, teksten bliver.
+**Tolkning:** Hvor paa siden teksten staar. Maerket falder vaek, teksten bliver.
 
 | Antal | Form | Eksempel i sammenhaeng |
 |---:|---|---|
@@ -88,7 +88,7 @@ Hvor paa siden teksten staar. Maerket falder vaek, teksten bliver.
 
 ## ulaeselig (498 forekomster, 3 former)
 
-Ulaeseligt sted. Bevares som `[?]` i facit.
+**Tolkning:** Ulaeseligt sted. Bevares som `[?]` i facit og skaeres ud af begge tekster, foer der maales. Ogsaa klammer med prikker eller ellipse som pladsholder havner her: `[..rede?]` betyder "et ord der ender paa -rede", ikke laesningen "..rede", saa bogstaverne er ukendte.
 
 | Antal | Form | Eksempel i sammenhaeng |
 |---:|---|---|
@@ -98,7 +98,7 @@ Ulaeseligt sted. Bevares som `[?]` i facit.
 
 ## understregning (404 forekomster, 155 former)
 
-Note om at noget er understreget. Falder helt vaek.
+**Tolkning:** Note om at noget er understreget. Falder helt vaek af laeseteksten, men HVAD der var understreget gemmes i feltet `understreget`.
 
 | Antal | Form | Eksempel i sammenhaeng |
 |---:|---|---|

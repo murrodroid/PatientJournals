@@ -42,10 +42,21 @@ det.
 
 | Fil | Beskrivelse |
 |---|---|
-| `output/facit.jsonl` | Én række pr. opslag: billed-id, rå blok, ren læsetekst med linjer, fladet tekst |
+| `output/facit.jsonl` | Én række pr. opslag. Felterne er beskrevet nedenfor. |
 | `output/klammekonventioner.md` | Fuld optælling af alle klammeformer i materialet, med eksempler |
 | `output/opdeling.csv` | Hvilke patienter der hører til øvemængde og til den låste prøvemængde |
 | `output/udeladte.md` | Blokke uden brugbar tekst, og hvorfor de er udeladt |
+
+Felterne i `facit.jsonl`, udvidet 2026-08-20 efter leads svar:
+
+| Felt | Indhold |
+|---|---|
+| `image_name`, `forside`, `kildefil` | Hvilken side, hvilken patient, hvilken RTF |
+| `raa` | Blokken som den står i RTF-filen, med al opmærkning |
+| `alt_linjer`, `alt_fladet` | **Alt hvad der står på siden, også det overstregede.** Det er den udgave, der måles på: modellen bliver bedt om at læse hele siden og bliver udtrykkeligt ikke bedt om at afgøre, hvad der er streget ud |
+| `rettet_linjer`, `rettet_fladet` | Den rettede læsning: overstreget fjernet, kun erstatningen tilbage. Den historisk korrekte tekst, som et færdigt datasæt skal rumme |
+| `understreget` | Hvad der var understreget, med linjenummer i `alt_linjer`. Hører ikke i læseteksten, men skal ikke gå tabt — den er god at benchmarke på senere |
+| `noter` | Steder hvor opmærkningen har en tastefejl og er repareret. Skal ses efter med øjnene |
 
 ## Test Contract
 
@@ -54,8 +65,15 @@ konvention: overstreget med erstatning, overstreget uden erstatning, stablede
 `[?]`, gæt med spørgsmålstegn inde i klammen, understregning af hel linje og
 af et citat, positionsmærke med håndskrevet linjeskift indeni, orddeling hen
 over linjeskift, og en tastefejl i et mærke. Hver test skal være set fejle,
-før den regnes som gyldig. Desuden en kontrakttest på, at hvert billed-id i
-facit findes i opslagsregistret.
+før den regnes som gyldig. Desuden en kontrakttest, der binder stage 01 og 02 sammen på billed-id'et.
+
+**Bevidst afvigelse fra denne kontrakt (2026-08-20):** kravet stod
+oprindeligt som "hvert billed-id i facit findes i opslagsregistret". Den
+retning er forkert: opslagsregistret rummer kun de sider, vi har billeder
+af, mens facit rummer alle 168. Testen kræver derfor det omvendte — at
+hvert billede, vi HAR, også har facit. Det er den retning, der fanger den
+fejl, kontrakten ville forhindre: at stage 05 måler et billede mod en
+anden sides tekst.
 
 ## Handoff
 
