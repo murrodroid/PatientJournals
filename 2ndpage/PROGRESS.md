@@ -142,6 +142,12 @@ uanset hvad litteraturen ellers siger.
       opstilling er ikke til at stole på dér, hvor teksterne afviger.
       Koster 12,0 % af linjerne og 12,1 % af tegnene; ingen side mister
       over halvdelen; 33 sider mister intet.
+- [ ] **Fire forslag ligger klar** til at gøre linje-reglen mindre kostbar
+      (CONTEXT.md, 2026-08-21) — ingen besluttet: (1) genvind de 86 %
+      kendt tekst på de svære linjer ved at forankre i stumperne,
+      (2) brug de svære linjer som hallucinationsprøve, (3) efterprøv om
+      stederne er ulæselige eller bare dårligt fotograferet, (4) lad to
+      modeller foreslå læsninger dér, til din godkendelse.
 - [ ] **Dækningen SKAL stå ved siden af hvert tal**: de udeladte 12 % er de
       sværeste linjer, så tallet er systematisk for pænt. Samme skævhed
       gør facit-fejl usynlige, når modellen fejler på samme måde.

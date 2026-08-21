@@ -925,3 +925,104 @@ person. Det er en kendt begrænsning i denne slags arbejde, ikke en fejl ved
 netop dette projekt, men det betyder, at vi **ikke kan sætte et tal** på
 facits kvalitet med de midler, vi har. Vi kan finde eksempler; vi kan ikke
 måle en rate.
+
+## 2026-08-21 — Fire forslag til fremadrettet arbejde med de ulæselige steder
+
+**Ingen af dem er besluttet.** Beslutning 38 (skær hele linjen fra) står som
+den fungerende regel; disse fire er veje, der kan gøre den mindre kostbar
+eller gøre problemet mindre. Rækkefølgen nedenfor er min anbefaling.
+
+### Målingerne, de bygger på
+
+| Mål | Værdi |
+|---|---|
+| Ulæselighedsmærker | 498 |
+| Svære linjer (mindst ét mærke) | 422 af 3.526 = 12,0 % |
+| **Kendt tekst på de svære linjer** | **9.404 tegn = 86 %** |
+| Ulæseligt på de samme linjer | 1.494 tegn = 14 % |
+| Kendte stumper mellem mærkerne | 647, median 12 tegn |
+| — heraf over 15 tegn (gode holdepunkter) | 252 |
+| — heraf under 5 tegn (svage) | 122 |
+
+Vi smider altså 9.404 tegn brugbart facit væk for at undgå 1.494 ukendte.
+
+**Opløsning, efterprøvet:** kbharkiv-API'et har ingen størrelsesparameter —
+`/file/<id>` giver ét billede, typisk 1610 × 2205 pixels for et helt opslag,
+altså omkring 900-1.000 pixels pr. tekstside. Vejen til højere opløsning går
+gennem kollegaens originalscanninger, ikke gennem kildeviseren.
+
+---
+
+### Forslag 1 — Genvind de 86 % ved at forankre i de kendte stumper
+
+I stedet for at kassere hele linjen deles den ved de ulæselige steder, og hver
+kendt stump søges i modellens tekst som en ren tekststump. Rammer stumpen,
+måles den; rammer den ikke, springes den over.
+
+- **Hvad det giver**: op mod 9.400 tegn tilbage i målingen, og dermed en
+  dækning nær 100 % i stedet for 88 %.
+- **Hvorfor det ikke er mulighed (a) igen**: (a) krævede en tegn-for-tegn-
+  opstilling af HELE teksten, som falder fra hinanden, når modellen fejler
+  andre steder. En søgning efter en enkelt stump på 12-30 tegn er langt mere
+  robust — den behøver ikke, at resten af siden passer.
+- **Risiko**: de 122 stumper under 5 tegn er for korte til at forankre
+  entydigt og skal formentlig udelades. Rammer en stump ikke, ved vi ikke om
+  modellen læste forkert eller bare skrev det anderledes — så en stump, der
+  ikke findes, må ikke tælle som en fejl uden videre.
+- **Hvornår**: stage 03, som en udvidelse af linje-reglen.
+
+### Forslag 2 — Brug de svære linjer som hallucinationsprøve
+
+De 422 linjer kasseres i dag. De er samtidig det bedste sted i hele materialet
+til at måle den fejl, der er farligst for en historiker: at modellen digter
+flydende tekst, hvor siden er ulæselig.
+
+Vi kan ikke måle korrekthed dér (der findes ingen sandhed), men vi kan måle
+**adfærd**: skriver modellen noget som helst? Markerer den selv usikkerhed?
+Hvor langt er det, den skriver, sammenlignet med det, transskribenten kunne
+læse rundt om det?
+
+- **Hvad det giver**: et selvstændigt tal for opdigtningstilbøjelighed, som
+  ikke kræver facit — og som er langt mere relevant for, om du tør bruge
+  teksten, end en tegnfejlsprocent.
+- **Risiko**: det er et adfærdsmål, ikke et korrekthedsmål, og må aldrig
+  præsenteres som om det var det sidste.
+- **Hvornår**: stage 03 (målet defineres), stage 05 (første tal).
+
+### Forslag 3 — Efterprøv om stederne overhovedet ER ulæselige
+
+Transskribenten arbejdede ud fra de billeder, hun havde. Stage 00 fandt
+billedskarphed som en målt risiko for hele projektet. Hvis en del af de 498
+mærker skyldes billedkvalitet snarere end blækket på papiret, forsvinder
+problemet delvist af sig selv, når kollegaens originalscanninger kommer.
+
+Fremgangsmåde: tag 20-30 ulæselige steder, klip tæt om dem i den højeste
+opløsning, vi kan skaffe, og se om et menneske eller en model nu kan læse dem.
+
+- **Hvad det giver**: et svar på, om 498 er et tal om kilden eller om vores
+  billedfil. Falder det markant, bliver både dækningen og facit bedre — og det
+  gavner hele korpusset, ikke kun målingen.
+- **Forudsætning**: kollegaens levering. Kildeviserens API kan ikke levere
+  mere end det, vi allerede har (efterprøvet).
+- **Hvornår**: når billederne kommer.
+
+### Forslag 4 — Lad modellen være anden transskribent netop dér
+
+De 498 steder er præcis dér, hvor en maskine kan tilføje noget, mennesket ikke
+kunne. Er to uafhængige modeller enige om en læsning på et `[?]`, er det et
+kvalificeret bud, der kan forelægges dig sammen med et tæt udklip af stedet.
+
+- **Hvad det giver**: problemet vendes fra en måleteknisk byrde til et
+  produkt — huller i din egen transskription bliver fyldt ud. Det er også den
+  eneste realistiske erstatning for dobbelt-indtastning, som vi ikke har.
+- **Risiko**: modeller opdigter overbevisende, og to modeller kan dele samme
+  skævhed. Må aldrig gå direkte i facit — kun forelægges med billedet, og du
+  taster ja eller nej.
+- **Hvornår**: stage 07, hvor Claude allerede er planlagt som anden stemme.
+
+---
+
+**Sammenhængen mellem dem**: 1 og 2 gør det bedste ud af materialet, som det
+er. 3 kan fjerne noget af problemet ved roden. 4 vender resten til noget
+brugbart. De udelukker ikke hinanden, og ingen af dem ændrer beslutning 38 —
+de bygger ovenpå den.
