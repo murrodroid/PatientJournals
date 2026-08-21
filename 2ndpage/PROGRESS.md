@@ -76,7 +76,7 @@ uanset hvad litteraturen ellers siger.
 ## Stage 02 — Facit *(bygget 2026-08-20, afventer gennemgang)*
 
 - [x] Kortlæg alle klammeformer udtømmende (ikke kun de otte læste filer) —
-      alle 39 filer, 9 typer fordelt på 194 skrivemåder, i
+      alle 39 filer, 8 typer fordelt på 194 skrivemåder, i
       `output/klammekonventioner.md`
 - [x] RTF-læser med tests pr. konvention, hver set fejle —
       `src/andenside/facit.py`, 19 + 45 tests

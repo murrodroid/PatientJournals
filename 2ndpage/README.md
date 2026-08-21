@@ -44,25 +44,31 @@ tests/                   Herunder strukturtesten
 
 ## Status
 
-Kortlægning og planlægning er færdig, 16 beslutninger er låst i `CONTEXT.md`.
-Stage 01 er ikke længere blokeret — et selvbetjent hente-script mod
-kbharkiv.dk's åbne API (se `references/kbharkiv-api.md` i memory,
-`scripts/kbharkiv_hent.py` her) har skaffet 8 rigtige anden-/tredjesider som
-pilotmateriale, mens den formelle billedanmodning til kollegaen
-(`billedanmodning/billedanmodning_2026-08-18.md`, 307 billeder) stadig
-afventer svar.
+Kortlægning og planlægning er færdig, og 35 beslutninger er låst i
+`CONTEXT.md`.
 
-Stage 04's snitpunkt-detektion er bygget og verificeret på alle 8
-pilotbilleder (`src/andenside/bogryg.py`) — kendt begrænsning: kun afprøvet
-på to bind fra samme fotograferingssession, bredere test mangler.
+**Billeder (stage 01):** kbharkiv.dk's kildeviser har et åbent API, så vi
+kan hente selv (`scripts/kbharkiv_hent.py`). Hele øvemængden er hentet —
+118 sider fra 15 bind i `stages/01_datagrundlag/output/oeve_billeder/`,
+plus 8 tidligere pilotbilleder. Prøvemængdens sider er bevidst **ikke**
+hentet. Forskydningen mellem kildeviserens sidetal og masterlistens
+billed-id er efterprøvet på alle 15 bind. Billedanmodningen til kollegaen
+(307 billeder) er sendt og afventer levering.
 
-Stage 02's facit-læser er bygget (`src/andenside/facit.py`,
-`src/andenside/facit_bygger.py`) og har skrevet alle fire outputfiler i
-`stages/02_facit/output/`: 168 sider med facit fra 39 patientforløb, en
-udtømmende optælling af klammeopmærkningen, opdelingen i øve- og
-prøvemængde, og de blokke og steder, der er lagt til side. Afventer
-gennemgang. Stage 03 (måleapparatet) er derefter det sidste, der mangler,
-før et forsøg overhovedet kan måles.
+**Facit (stage 02):** færdigbygget, afventer historikerens gennemgang.
+`src/andenside/facit.py` læser de 39 håndlavede RTF-filer og skriver fire
+filer i `stages/02_facit/output/`: 168 sider med facit fra 39 patientforløb
+i to udgaver (alt hvad der står / den rettede læsning), en udtømmende
+optælling af klammeopmærkningen, opdelingen i øve- og prøvemængde, og de
+blokke og steder, der er lagt til side. Kildefilerne på OneDrive læses kun
+— en test håndhæver, at de aldrig røres.
+
+**Billedforberedelse (stage 04):** godkendt og låst. Snitpunkt-detektionen
+(`src/andenside/bogryg.py`) er verificeret på alle 8 pilotbilleder — kendt
+begrænsning: kun afprøvet på to bind fra samme fotograferingssession.
+
+**Næste:** stage 03, måleapparatet. Det er det sidste, der mangler, før et
+forsøg overhovedet kan måles.
 
 ## Nøglefakta
 
@@ -79,6 +85,6 @@ før et forsøg overhovedet kan måles.
   journalsider ud over forsiderne, men kun **168 af dem er faktisk
   transskriberet** — 40 sidemærker står uden tekst, og for en del patienter
   stopper transskriptionen før indlæggelsen gør. Notationen er rig, men
-  ustandardiseret: 194 forskellige skrivemåder fordelt på 9 slags mærker.
+  ustandardiseret: 194 forskellige skrivemåder fordelt på 8 slags mærker.
 - Målingen bygger på `J-Hoffi/StadsCER`s fem varianter og tilføjer samling af
   orddeling hen over linjeskift, som mangler dér.
