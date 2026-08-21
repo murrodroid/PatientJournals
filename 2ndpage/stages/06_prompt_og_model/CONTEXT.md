@@ -49,6 +49,28 @@ engangs-check af billedforberedelsen og fra stage 07's uenighedslag.
 5. Gem altid rå modelsvar + fuld opsætning + dato.
 6. Ingen fuld kørsel uden dit udtrykkelige go.
 
+### Låst efter leads svar 2026-08-20/21
+
+- **Overstregning er et selvstændigt forsøg her, ikke i stage 05.** leads
+  eget forslag til, hvordan det kan gribes an: en separat model eller prompt,
+  der udelukkende leder efter, hvad der KAN være streget ud, hvorefter de to
+  svar kombineres, og det overstregede skilles fra, før tegnfejlene regnes.
+  Den kendte faldgrube, der skal måles direkte: modellen forveksler
+  understregning med overstregning. Facit har begge dele gemt —
+  `understreget`-feltet rummer 409 understregninger med linjenummer, og
+  `alt_*` mod `rettet_*` viser de 33 overstregninger.
+- **Margentekstens placering er udskudt hertil** (beslutning 25). Facit
+  placerer margentekst dér, hvor transskribenten satte mærket. Finder
+  modellen teksten i en anden rækkefølge, skal det håndteres — men det tages
+  op her, ikke før.
+- **Er de ulæselige steder ulæselige, eller bare dårligt fotograferet?**
+  20-30 tætte udklip i højeste tilgængelige opløsning, forelagt lead.
+  Kildeviseren kan ikke levere mere end de ~900-1.000 pixels pr. tekstside,
+  vi allerede har (API'et har ingen størrelsesparameter, efterprøvet
+  2026-08-21) — så det kræver kollegaens originalscanninger. Falder de 498
+  mærker markant, bliver både dækningen og facit bedre. Ingen kode, kun et
+  forsøg.
+
 ## Outputs
 
 | Fil | Beskrivelse |

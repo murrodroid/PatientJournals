@@ -30,6 +30,26 @@ allerede har målt på (Humphries m.fl.).
    og dato, så en kørsel kan genfindes og genkøres.
 5. Ingen fuld kørsel på hele materialet uden dit udtrykkelige go.
 
+### Låst efter leads svar 2026-08-20/21
+
+- **Prompten beder modellen om at læse hvad der står — punktum.** Den bliver
+  IKKE bedt om at genkende overstreget tekst eller om at afgøre, hvad der
+  skulle stå i stedet (beslutning 24). Lead har dårlige erfaringer med det:
+  modellen forveksler understregninger med overstregninger, og der er 404
+  understregninger i materialet mod 33 overstregninger. Er noget streget ud,
+  prøver vi bare at læse det, og vi læser også det, der står efter.
+- **Prompten beder heller ikke modellen om at markere ulæselige steder.**
+  Måleapparatet håndterer dem (stage 03, punkt 6-7).
+- **Kør på øvemængden.** 118 sider fra 15 bind ligger i
+  `../01_datagrundlag/output/oeve_billeder/`. Prøvemængdens sider er bevidst
+  ikke hentet.
+- **Kig efter, om modellen laver sine egne linjeskift eller følger sidens.**
+  Det er en ubevist antagelse i hele projektet (beslutning 35), og denne
+  kørsel svarer på den gratis. Skriv svaret ned som et måleresultat.
+- **Kig efter, hvad modellen skriver på de 422 svære linjer** — dem hvor
+  transskribenten gav op. Det er projektets bedste prøve på, om modellen
+  digter, hvor siden er ulæselig.
+
 ## Outputs
 
 | Fil | Beskrivelse |

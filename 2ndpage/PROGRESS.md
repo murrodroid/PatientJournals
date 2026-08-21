@@ -73,7 +73,7 @@ uanset hvad litteraturen ellers siger.
       endnu, kun de enkelte fund undervejs (indirekte dækket af, at
       stage 04 er godkendt på samme materiale)
 
-## Stage 02 — Facit *(bygget 2026-08-20, afventer gennemgang)*
+## Stage 02 — Facit — **GODKENDT OG LÅST 2026-08-21**
 
 - [x] Kortlæg alle klammeformer udtømmende (ikke kun de otte læste filer) —
       alle 39 filer, 8 typer fordelt på 194 skrivemåder, i
@@ -100,9 +100,10 @@ uanset hvad litteraturen ellers siger.
 - [x] **Kildefilerne kan ikke røres**: test tager tidsstempel og størrelse
       på alle 39 RTF'er, kører bygningen, kræver at intet har flyttet sig.
 
-- [ ] **Gennemgang ved lead** (historikerens bekræftelse af læseteksten) —
-      læs `output/klammekonventioner.md`'s tolkningsregler og stikprøv
-      `output/facit.jsonl` mod et par sider, du kender
+- [x] **Gennemgang ved lead — GODKENDT** (2026-08-21): "alt lyder godt".
+      Tolkningsreglerne, de to facit-udgaver og læseteksten er bekræftet.
+      **Stage 02 er hermed låst** som grundlag for stage 03. Genåbnes uden
+      tøven, hvis der senere dukker et problem op, der hører hjemme her.
 - [x] **Lukket**: umarkeret orddeling over to linjer (8 tilfælde, 0,009 %
       af tegnene). Lead: kan endda være meningen, hvis skriveren ikke
       satte bindestreg — så er facit netop korrekt. Ingen ændring.

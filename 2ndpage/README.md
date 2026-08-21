@@ -55,7 +55,7 @@ hentet. Forskydningen mellem kildeviserens sidetal og masterlistens
 billed-id er efterprøvet på alle 15 bind. Billedanmodningen til kollegaen
 (307 billeder) er sendt og afventer levering.
 
-**Facit (stage 02):** færdigbygget, afventer historikerens gennemgang.
+**Facit (stage 02):** færdigt, godkendt og låst 2026-08-21.
 `src/andenside/facit.py` læser de 39 håndlavede RTF-filer og skriver fire
 filer i `stages/02_facit/output/`: 168 sider med facit fra 39 patientforløb
 i to udgaver (alt hvad der står / den rettede læsning), en udtømmende

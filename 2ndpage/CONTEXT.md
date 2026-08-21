@@ -1079,3 +1079,26 @@ er én regel med et beskrevet fejltilfælde.
 - **Forslag 3 er ikke kode.** Det er et forsøg, der køres, når kollegaens
   originalscanninger kommer: 20-30 tætte udklip, som lead ser på. Det står
   som et punkt i stage 06's tjekliste, ikke som en opgave i stage 03.
+
+## 2026-08-21 — Stage 02 godkendt og låst
+
+Lead: "alt lyder godt". Tolkningsreglerne i `klammekonventioner.md`, de to
+facit-udgaver og læseteksten er bekræftet af historikeren. **Stage 02 er
+hermed låst** som grundlag for stage 03.
+
+Låst betyder ikke forseglet: dukker der senere et problem op, der hører
+hjemme i facit — fx hvis kollegaens originalscanninger viser, at flere af de
+498 ulæselige steder faktisk kan læses — genåbnes stagen uden tøven.
+
+### Beslutningerne er skrevet ud til de stages, de rører
+
+Beslutninger truffet i anden session stod kun i rod-`CONTEXT.md`. De er nu
+skrevet ind i de enkelte stage-kontrakter, så en agent, der kun læser sin
+egen stage, får dem med:
+
+| Stage | Hvad der er skrevet ind |
+|---|---|
+| **03 måleapparat** | Hele `Process`-afsnittet er skrevet om: arbejdstal (26), mål på `alt_*` (24), både fladet og pr. linje, den ubeviste linjeskifts-antagelse (35), orddelingsreglen (21), linje-reglen ved ulæselige steder (23 + 38) med målt pris, `forankr()`-funktionen som ÉN ting frem for fire features, ordfejl uden målrettet opmærkning (28), krav om at dækningen står ved hvert tal, ingen kvalitetsgrænse på forhånd (27), og at facit rummer fejl (37) |
+| **05 første transskription** | Prompten beder om at læse hvad der står — ikke om at genkende overstregning (24) eller markere ulæselige steder. Kør på øvemængdens 118 sider. To ting at kigge efter i første kørsel: laver modellen sine egne linjeskift, og hvad skriver den på de 422 svære linjer |
+| **06 prompt og model** | Overstregning som selvstændigt forsøg med leads eget forslag til fremgangsmåde. Margentekstens placering (25). Forsøget med højere opløsning på de ulæselige steder — kræver kollegaens scanninger, kildeviseren kan ikke levere mere |
+| **07 anden stemme** | Uenighedslisten er en læseliste, ikke en sorteringsmaskine. Dens skævhed skal stå i rapporten. To modeller enige mod facit er det stærkeste signal, vi har. Modellens bud på ulæselige steder forelægges her, ikke i stage 03 |

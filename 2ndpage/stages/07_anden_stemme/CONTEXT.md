@@ -28,6 +28,26 @@ en del af selve læsningen — derfor sin egen stage.
 4. Alle kørsler på øvemængden. Den låste prøvemængde røres ikke.
 5. Ingen fuld kørsel uden dit udtrykkelige go.
 
+### Låst efter leads svar 2026-08-20/21
+
+- **Uenighedslisten er en prioriteret læseliste, ikke en sorteringsmaskine.**
+  Den kan ikke skelne modelfejl fra fejl i facit; det kræver et blik på
+  billedet. Værdien er, at den skifter arbejdet fra at genlæse 3.526 linjer
+  til at se på nogle hundrede steder, hvor der faktisk er noget at afgøre.
+- **Den skævhed, listen har, skal stå i rapporten**: en fejl i facit bliver
+  kun synlig, hvis modellen læser stedet BEDRE end transskribenten. Fejler
+  modellen på samme måde — mest sandsynligt netop på de svære steder —
+  tælles det som enighed, og fejlen er usynlig. Listen ser altså systematisk
+  kun de facit-fejl, der sad på de lette steder.
+- **To uafhængige modeller enige mod facit** er det stærkeste enkeltsignal,
+  vi har, for at facit tager fejl. Ikke bevis — modeller kan dele samme
+  skævhed — men det er den eneste realistiske erstatning for den
+  dobbelt-indtastning, projektet ikke har.
+- **Modellens bud på de ulæselige steder forelægges lead her**, ikke i
+  stage 03. Stage 03 skriver blot gabene til en fil (se stage 03, punkt 7);
+  arbejdsgangen med tætte udklip og ja/nej bygges først, når der er noget at
+  se på. Et bud må aldrig gå direkte i facit.
+
 ## Outputs
 
 | Fil | Beskrivelse |
