@@ -108,6 +108,12 @@ uanset hvad litteraturen ellers siger.
       på alle 39 RTF'er, kører bygningen, kræver at intet har flyttet sig.
 
 - [x] **Gennemgang ved lead — GODKENDT** (2026-08-21): "alt lyder godt".
+- [x] **Gennemgang af begge sessioner, 2026-08-21**: 17 fund, alle
+      efterprøvet og rettet. Ét lå i det leverede facit — en uafsluttet
+      klamme slugte resten af siden, så `[added over line](Fibiger)` stod
+      bogstaveligt i teksten på 273104_001643, og en overstregning efter
+      stedet blev ikke fjernet fra den rettede udgave. Facit er bygget
+      igen. Se CONTEXT.md 2026-08-21.
       Tolkningsreglerne, de to facit-udgaver og læseteksten er bekræftet.
       **Stage 02 er hermed låst** som grundlag for stage 03. Genåbnes uden
       tøven, hvis der senere dukker et problem op, der hører hjemme her.

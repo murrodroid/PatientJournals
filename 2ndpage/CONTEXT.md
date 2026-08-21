@@ -1028,3 +1028,80 @@ egen stage, får dem med:
 | **05 første transskription** | Prompten beder om at læse hvad der står — ikke om at genkende overstregning (24) eller markere ulæselige steder. Kør på øvemængdens 118 sider. To ting at kigge efter i første kørsel: laver modellen sine egne linjeskift, og hvad skriver den på de 422 svære linjer |
 | **06 prompt og model** | Overstregning som selvstændigt forsøg med leads eget forslag til fremgangsmåde. Margentekstens placering (25). Forsøget med højere opløsning på de ulæselige steder — kræver kollegaens scanninger, kildeviseren kan ikke levere mere |
 | **07 anden stemme** | Uenighedslisten er en læseliste, ikke en sorteringsmaskine. Dens skævhed skal stå i rapporten. To modeller enige mod facit er det stærkeste signal, vi har. Modellens bud på ulæselige steder forelægges her, ikke i stage 03 |
+
+## 2026-08-21 — Gennemgang af begge sessioner: 17 fund, ét i det leverede facit
+
+Lead bad om en gennemgang af alt fra begge sessioner — kontekst, beslutninger,
+sammenspil — i stil med et "doven senior"-review. Arbejdet blev delt på to
+agenter, én til dokumentationen og én til koden, og deres fund er efterprøvet
+her, før der blev rettet.
+
+### Det alvorligste: en fejl i det leverede facit
+
+En uafsluttet klamme **slugte resten af siden**. Reparationen skete først ved
+enden af blokken, så dybdetællingen aldrig kom tilbage til nul — og dermed
+blev alle SENERE mærker på siden aldrig genkendt.
+
+Det stod i det leverede facit: `273104_001643` havde `[added over line](Fibiger)`
+bogstaveligt i både `alt_fladet` og `rettet_fladet`. Værre viste et konstrueret
+eksempel, at en ægte overstregning efter stedet heller ikke blev fjernet fra
+den rettede udgave — netop den udgave, hvis eneste opgave er at fjerne den.
+
+Rettet ved at sætte de glemte slutklammer ind **før** teksten deles op. Facit
+er bygget igen; ingen side har rå klammemærker tilbage.
+
+**Lærdommen**: stage 02 var godkendt og låst, da fejlen blev fundet. Det er
+netop derfor "låst" ikke må betyde "forseglet". En stage genåbnes, når der
+dukker noget op, der hører hjemme i den.
+
+### Fire mindre fejl i koden
+
+- Et nultegn i kilden ville vælte kørslen med et råt nedbrud, fordi læseren
+  selv bruger et nultegn som usynligt mærke. Kilden renses nu for det først.
+- Oprydningen af tomme linjer kørte FØR mærkerne blev fjernet, så mærkerne
+  forhindrede den i at se hele løbet af nylinjer. Oprydningen er skrevet om og
+  blev enklere: linjenumre tildeles først, mærkerne fjernes, og linjerne rykker
+  sammen med numrene følgende med.
+- Ordgrænsen manglede om "page" i positionsmønstret, så et læseforslag, der
+  blot indeholdt bogstavfølgen, forsvandt sporløst. Tastefejlen `midpage` er
+  beholdt udtrykkeligt i mønstret.
+- Den baglæns søgning efter et understregningscitat matchede kun første ord og
+  kunne lande på en forkert linje med samme første ord. Den kræver nu to ord.
+  Resultat: 155 citater rammer, 1 rammer forbi.
+
+### Tolv fund i dokumentationen
+
+Det vigtigste mønster: **stage-kontrakterne var løbet fra virkeligheden**. Både
+stage 01's og stage 02's egne `CONTEXT.md` beskrev regler, senere beslutninger
+havde omgjort. Det er alvorligt netop i denne metodik, hvor en agent kun læser
+sin egen stages kontrakt — den ville have bygget efter den forkerte regel.
+
+`CONTEXT.md` rummede desuden afsnittet om leads rettelser to gange, hvoraf den
+første kopi var forvansket: en kommando havde fejlet på backticks og nået at
+skrive en udgave, hvor filnavne og stier var faldet ud af teksten. Den er
+fjernet.
+
+Resten var forældede tal: 35 mod 38 beslutninger, seks mod fire flagede steder,
+"ca. 55" mod 50 sider i prøvemængden, 38 mod 39 patienter brugt om hinanden,
+404 noter mod 409 poster, en overhalet advarsel om at kun 8 af 39 filer var
+læst, og et tomt `research/` listet i README.
+
+### Hvad der IKKE blev rettet, med vilje
+
+- **Daterede afsnit i `CONTEXT.md`, hvor et tal var sandt på datoen.** Filen er
+  en append-only beslutningslog; omskrives historikken, holder den op med at
+  være en log. "Seks flagede steder" står stadig i afsnittet fra 20. august,
+  hvor det var seks — beslutning 32 gjorde det til fire, og det står i sit eget
+  afsnit.
+- **En midlertidig fil fra review-agenten** (`scratch_out.txt`) blev fejet med
+  ind i commit `8244f9b` og fjernet igen i `a6e66d6`. Den findes ikke i HEAD.
+  Historikken omskrives ikke for det.
+
+### Om at bruge agenter til gennemgang
+
+Begge agenter leverede fund, der holdt ved efterprøvning, og kode-agentens
+vigtigste fund var en fejl, der allerede lå i en leveret fil — den slags findes
+ikke ved at læse sin egen kode igennem igen. Men de blev alle efterprøvet her,
+før der blev handlet på dem, og ét forslag blev forkastet: at flage
+`[continued on line]` og indskudsmærker uden modpart ville have givet støj,
+fordi de legitimt optræder alene.
