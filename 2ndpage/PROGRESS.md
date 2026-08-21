@@ -126,6 +126,14 @@ uanset hvad litteraturen ellers siger.
 
 ## Stage 03 — Måleapparat
 
+- [ ] **Mål BÅDE fladet og pr. linje** (lead 2026-08-20). Linjemålingen
+      skal parre linjerne, så den ikke skrider efter første afvigende brud.
+- [ ] **Ubevist antagelse, må ikke bygges på**: vi VED ikke, om modellen
+      laver sine egne linjeskift eller følger sidens. Der er ikke kørt et
+      eneste modelkald endnu. Kollegaens app har allerede et
+      linje-for-linje-skema (`TextPage`/`PageLine`), hvilket peger den
+      anden vej. Stage 05's første kørsel svarer på det gratis —
+      husk at kigge efter det og notere svaret som måling, ikke formodning.
 - [ ] Overtag `cer.py` fra StadsCER med de fem varianter
 - [ ] Byg samling af orddeling hen over linjeskift (StadsCERs kendte mangel)
 - [ ] Byg hallucinationskontrol uden krav om identisk linjeopdeling

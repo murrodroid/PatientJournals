@@ -759,3 +759,42 @@ Det løfte står nu ikke kun i en tekstfil.
 ændringstidspunkt på alle 39 kildefiler, kører hele bygningen, og kræver at
 intet har flyttet sig. Testen er set fejle: lægges der en linje ind i `byg()`,
 der blot rører én fils tidsstempel, bliver den rød med det samme.
+
+## 2026-08-21 — En ubevist antagelse fanget: laver modellen sine egne linjeskift?
+
+Lead spurgte, om jeg havde belæg for at modellen ikke ville skrive linje for
+linje. **Det havde jeg ikke.** Jeg havde fremstillet det som en kendsgerning.
+
+Ved eftersøgning viste det sig, at samme ubeviste antagelse allerede stod i
+`references/stadscer.md` som en afgjort sag — formuleret "vores model laver
+sine egne linjeskift" — og at den dér er den **erklærede grund** til, at vi
+måler på fladet tekst frem for linjeforankret. En formodning var altså blevet
+til en præmis for et metodevalg, uden at nogen havde målt noget.
+
+Referencefilen er rettet, så antagelsen står som det, den er.
+
+### Hvad vi faktisk ved
+
+- **Intet måleresultat.** Der er ikke kørt et eneste modelkald i dette projekt
+  endnu.
+- **Ét holdepunkt der peger den anden vej**: kollegaens app har allerede et
+  linje-for-linje-skema (`TextPage` / `PageLine` med `text`, `metadata` og
+  autonummereret `page_line_number`). Nogen har altså bygget ud fra, at en
+  model kan levere linje for linje. Om det nogensinde blev afprøvet, står som
+  et åbent punkt i stage 08 ("afklar om `textpage` allerede er afprøvet") —
+  det er værd at spørge kollegaen om, da han kan have svaret liggende.
+- **StadsCERs egen erfaring kan ikke overføres**: dér fodres modellen med
+  facits baselines, så linjeopdelingen er ens per konstruktion. Det siger
+  intet om, hvad der sker, når modellen får en hel side.
+
+### Beslutning 35: måleapparatet må ikke afhænge af svaret
+
+Stage 03 bygges, så det virker uanset: der måles både på den fladede strøm og
+pr. linje via parring af linjerne. Er modellen linjetro, er parringen et
+nulled og koster intet. Er den ikke, redder den linjemålingen fra at skride
+efter det første afvigende linjebrud.
+
+Dermed blokerer spørgsmålet ikke stage 03, og det behøver ikke besvares på
+forhånd. **Stage 05's allerførste kørsel svarer på det gratis** — vi skal bare
+huske at kigge efter det, og at notere svaret som et måleresultat frem for en
+formodning.

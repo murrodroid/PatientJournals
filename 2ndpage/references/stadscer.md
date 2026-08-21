@@ -57,11 +57,24 @@ målingen, fordi mærket dækker en ukendt mængde ulæst tekst.
 > tekst udligne det til nul fejl — og dermed belønne modellen for at
 > hallucinere præcis rigtigt."
 
-**Forudsætningen holder ikke hos os.** StadsCER fodrer modellen med facits
-egne baselines, så linjeopdelingen er ens per konstruktion. Vores model laver
-sine egne linjeskift. Derfor: vi måler på den fladede strøm, men bygger en
-særskilt hallucinationskontrol, der ikke kræver identisk linjeopdeling —
-netop for at fange den fejl, citatet advarer imod.
+**Forudsætningen holder muligvis ikke hos os — men det er UBEVIST.**
+StadsCER fodrer modellen med facits egne baselines, så linjeopdelingen er ens
+per konstruktion. Hos os får modellen hele siden, og *hvis* den laver sine egne
+linjeskift, falder linjeforankringen fra hinanden.
+
+**Vi har ikke målt det.** Sætningen "vores model laver sine egne linjeskift"
+stod her oprindeligt som en kendsgerning; den var en formodning (påpeget af
+Lead 2026-08-21). Der findes ét modsatrettet holdepunkt: kollegaens app har
+allerede et linje-for-linje-skema (`TextPage`/`PageLine` med nummererede
+linjer, se `patientjournals_repo.md`), altså har nogen bygget ud fra, at det
+kan lade sig gøre — men om det nogensinde er afprøvet, står som et åbent
+punkt i stage 08.
+
+Konsekvensen for stage 03: måleapparatet må **ikke afhænge af svaret**. Vi
+måler på den fladede strøm OG pr. linje via parring. Er modellen linjetro,
+er parringen et nulled og koster intet; er den ikke, redder den målingen.
+Hallucinationskontrollen bygges i begge tilfælde, så den ikke kræver
+identisk linjeopdeling — netop for at fange den fejl, citatet advarer imod.
 
 `errors.py` har allerede hallucinationsdetektion (fuldførelser, forskudte
 brud, tabte begyndelser, opfindelser hen over linjegrænser), men forudsætter
