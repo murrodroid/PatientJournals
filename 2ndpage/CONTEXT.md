@@ -857,3 +857,71 @@ reelt kan flytte et måletal — og den er allerede truffet (beslutning 23:
 skæres ud af begge tekster). Det, der endnu ikke er afgjort, er *mekanikken*:
 hvordan man finder det stykke af modellens tekst, der svarer til facits `[?]`,
 netop dér hvor teksterne er sværest at stille op mod hinanden.
+
+## 2026-08-21 (fortsat) — De tre åbne punkter afgjort
+
+| # | Beslutning | leads begrundelse |
+|---|---|---|
+| 36 | **Umarkeret orddeling lukkes uden ændring.** De otte tilfælde står som to ord i den fladede tekst. | "det kan endda være meningen hvor skriveren måske ikke har sat en `-`". Pointen er god: transskribenten gengiver siden, og manglede bindestregen dér, er facit netop korrekt. Målt til 0,009 % af tegnene. |
+| 37 | **Fejl i facit accepteres.** Ingen systematisk gennemlæsning. | Uenighedslisten fra stage 05 kan ikke skelne facit-fejl fra modelfejl af sig selv — se nedenfor. |
+| 38 | **Ved ulæselige steder skæres HELE LINJEN fra målingen** (leads forslag), i stedet for at skære selve stedet ud. | Tegn-for-tegn-opstilling forudsætter, at teksterne ellers ligner hinanden. Gør de ikke det — og det må vi regne med, at de ikke altid gør — falder opstillingen fra hinanden netop dér, hvor den skal bruges. |
+
+### Hvad linje-reglen koster, målt
+
+| Mål | Værdi |
+|---|---|
+| Linjer i alt | 3.526 |
+| Linjer med mindst ét ulæseligt sted | 422 (**12,0 %**) |
+| Tegn på de linjer | 10.898 af 89.770 (**12,1 %**) |
+| Sider hvor mere end halvdelen ryger | **0** af 168 |
+| Sider hvor intet ryger | 33 |
+| Median andel tabt pr. side | 11 % |
+
+12 % er til at bære, og ingen enkeltside bliver udhulet. Reglen kræver
+desuden ingen tegn-for-tegn-opstilling inde i et sted, hvor den ene tekst er
+ukendt — den er robust præcis dér, hvor alternativerne er skrøbelige.
+
+### Den skævhed begge beslutninger deler, og som skal stå i enhver rapport
+
+De 12 % linjer, vi skærer fra, er ikke tilfældige: det er **de sværeste
+linjer på siden**. Det er jo netop derfor, transskribenten ikke kunne læse
+dem. Måler vi på de resterende 88 %, måler vi på det lettere materiale, og
+tallet bliver derfor **for pænt**.
+
+Nøjagtig samme skævhed rammer facit-fejlene: en fejl i facit bliver kun
+synlig, hvis modellen læser stedet BEDRE end transskribenten gjorde. Læser
+modellen forkert på samme måde — hvilket er mest sandsynligt netop på de
+svære steder — tælles det som enighed, og fejlen er usynlig for os.
+
+Derfor skal enhver rapport fra stage 03 og frem oplyse **dækningen** ved
+siden af tallet: "målt på 88 % af linjerne; de udeladte 12 % er de sværeste".
+Uden den oplysning er tallet misvisende, uanset hvor korrekt det er udregnet.
+
+### Om at skelne facit-fejl fra modelfejl (leads spørgsmål)
+
+Lead: "vi kommer jo til at finde andre fejl end dem som er transkriberet
+forkert, så kan vi vel ikke skelne". Det er rigtigt, og der er ingen skjult
+teknik, der løser det. Uenighedslisten er en **prioriteret læseliste**, ikke
+en sorteringsmaskine: den skifter arbejdet fra at genlæse 3.526 linjer til at
+se på nogle hundrede steder, hvor der faktisk er noget at afgøre. Selve
+afgørelsen kræver et blik på billedet.
+
+Tre ting gør listen kortere, uden at afgøre noget for os:
+
+1. **To uafhængige modeller, der er enige mod facit.** Stage 07 planlægger
+   allerede Claude som anden stemme. Er to læsere enige mod en tredje, peger
+   det på den tredje. Ikke bevis — modeller kan dele samme forkerte tilbøjelighed.
+2. **Hvilken slags forskel det er.** Et ciffer eller et egennavn er et sted,
+   hvor en model ikke har nogen grund til at foretrække det ene frem for det
+   andet; den slags uenighed er oftere en reel læseforskel end en opdigtning.
+   Strukturelle afvigelser — hele indskudte sætninger — er derimod modellens.
+3. **Enkeltstående mod systematisk.** Læser en model en bestemt bogstavform
+   forkert, sker det mange steder. En smutter hos transskribenten er ét sted.
+
+**Den standardmetode, vi ikke har:** normalt fastslås fejlprocenten i et
+facit ved dobbelt-indtastning — to personer transskriberer uafhængigt, og
+uenighederne afgøres af en tredje. Vores facit er skrevet én gang af én
+person. Det er en kendt begrænsning i denne slags arbejde, ikke en fejl ved
+netop dette projekt, men det betyder, at vi **ikke kan sætte et tal** på
+facits kvalitet med de midler, vi har. Vi kan finde eksempler; vi kan ikke
+måle en rate.

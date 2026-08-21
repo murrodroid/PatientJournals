@@ -103,9 +103,9 @@ uanset hvad litteraturen ellers siger.
 - [ ] **Gennemgang ved lead** (historikerens bekræftelse af læseteksten) —
       læs `output/klammekonventioner.md`'s tolkningsregler og stikprøv
       `output/facit.jsonl` mod et par sider, du kender
-- [ ] **Åben**: transskribenten deler nogle gange ord over to linjer uden
-      bindestreg ("Inspira" / "tion"). Kan ikke skilles fra to virkelige ord
-      med en regel; står som to ord i den fladede udgave.
+- [x] **Lukket**: umarkeret orddeling over to linjer (8 tilfælde, 0,009 %
+      af tegnene). Lead: kan endda være meningen, hvis skriveren ikke
+      satte bindestreg — så er facit netop korrekt. Ingen ændring.
 - [x] **Rettelse til tidligere tal**: der er facit for 168 sider, ikke 257.
       De 257 er antallet af SIDER hos de 38 patienter, ikke antallet af
       transskriberede sider. Billedanmodningen er stadig rigtig.
@@ -137,7 +137,14 @@ uanset hvad litteraturen ellers siger.
 - [ ] Overtag `cer.py` fra StadsCER med de fem varianter
 - [ ] Byg samling af orddeling hen over linjeskift (StadsCERs kendte mangel)
 - [ ] Byg hallucinationskontrol uden krav om identisk linjeopdeling
-- [ ] Fastlæg behandlingen af `[?]`
+- [x] **Behandlingen af `[?]` er fastlagt** (beslutning 38, lead): hele
+      LINJEN skæres fra målingen, ikke bare selve stedet. Tegn-for-tegn-
+      opstilling er ikke til at stole på dér, hvor teksterne afviger.
+      Koster 12,0 % af linjerne og 12,1 % af tegnene; ingen side mister
+      over halvdelen; 33 sider mister intet.
+- [ ] **Dækningen SKAL stå ved siden af hvert tal**: de udeladte 12 % er de
+      sværeste linjer, så tallet er systematisk for pænt. Samme skævhed
+      gør facit-fejl usynlige, når modellen fejler på samme måde.
 - [ ] Rapportformat + selvtest mod facit og forvanskede udgaver
 - [ ] **Gennemgang ved lead**
 
