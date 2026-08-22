@@ -1176,3 +1176,68 @@ står ved.
   den slags vurderinger.
 - **Ingen kvalitetsgrænse.** Beslutning 27 står: Lead ser det første rigtige
   tal, før der sættes grænser.
+
+## 2026-08-22 (senere) — Fantomfejlene efterprøvet: der var en mekanisme mere
+
+Da stage 03 blev skrevet ind ovenfor, stod der som forklaring på fantomfejlene:
+"når en hel blok mangler, forankrer nogle af de manglende linjer sig fejlagtigt
+i en linje, der ligner, andetsteds på siden." **Det var en formodning skrevet
+som en kendsgerning.** Den er nu efterprøvet linje for linje, og den holder —
+men den er kun halvdelen.
+
+### Hvad der faktisk sker
+
+**1. En manglende linje forankrer sig i en linje, der ligner.** Bekræftet.
+Facits `Hendes tilstand er i løbet af natten bleven` findes ikke i modellen,
+men `I løbet af natten` gør, og stumpen lander dér. `Tungen` lander i `Lunge`.
+`ingen Appetit, ligget hen og døset,` lander i `Det ligger hen og døser,`.
+
+**2. Og det skader de EFTERFØLGENDE linjer.** Det var ikke med i forklaringen,
+og det er den vigtigere halvdel. Forankringen går fra venstre mod højre, så et
+falsk træf flytter søgepunktet frem forbi det sted, hvor de næste linjer i
+virkeligheden står. De finder derefter kun en afskåret rest af sig selv:
+`begge Lunger overalt en Mængde fugtige` blev målt mod
+`r overalt en Mængde fugtige`, selvom modellen havde skrevet hele linjen
+rigtigt.
+
+### Hvad det betyder
+
+Målt pris på øvemængden: 181 tegn fordelt på 27 af de 118 sider, når hver side
+får sin midterste tredjedel skåret væk. Lille — men den **vokser med, hvor
+meget modellen springer over**, og den rammer linjer, modellen læste korrekt.
+
+Det ændrer ikke koden. Venstre-mod-højre-rækkefølgen er der af en grund: uden
+den kunne en gentaget vending forankre bagud og lave et gab med negativ
+længde. Prisen for at fjerne fejlen ville være en større fejl.
+
+**Men den udpeger en knap, hvis det senere viser sig at betyde noget.** Det
+mindste konstruerede eksempel, der fremkalder fejlen, bruger en facit-stump på
+præcis fem tegn — `Lunge` — som forankrer sig inde i ordet `Lunger` på næste
+linje. Det er lige netop grænsen `MINDSTE_STUMP = 5`, som beslutning 7 satte
+for at undgå stumper, der "kan forankre hvor som helst". Fem tegn var altså
+ikke nok i det tilfælde. Grænsen er ikke hævet: det ville koste dækning på
+netop de svære linjer, den er sat for at redde, og der er ingen måling endnu,
+der siger at falske forankringer er et problem i praksis. Men viser stage 05,
+at de er det, er `MINDSTE_STUMP` stedet at kigge — ikke rækkefølgen. En
+ordgrænse-regel duer i øvrigt ikke: facits linjer begynder og slutter
+rutinemæssigt midt i et ord (`Kvælnings` / `anfald`).
+
+Begrænsningen er pinnet som en test (`test_falsk_forankring_skader_ogsaa_den_
+naeste_linje`), så den ikke kan ændre sig ubemærket.
+
+Men det ændrer, hvordan rapporten skal læses, og det står nu skrevet begge
+steder: **en side med lav dækning skal ses efter med øjnene**, ikke tros.
+Rapporten fik derfor sin egen liste over de tyndest målte sider ved siden af
+listen over de værste — en side, hvor modellen sprang det meste over, får
+nemlig et FLOT tegnfejlstal og lander i bunden af "de værste", hvor ingen
+kigger.
+
+### Om at skrive formodninger som kendsgerninger
+
+Det er anden gang i dette projekt, at en forklaring er gledet ind i
+dokumenterne som noget målt (første gang: "modellen laver sine egne
+linjeskift", fanget af lead 21. august, nu beslutning 35 og 41). Begge gange
+var forklaringen rimelig, og den ene gang var den endda rigtig. Det er ikke
+pointen. Pointen er, at et projekt, hvis hele formål er at skelne målte tal fra
+formodninger om en models kvalitet, ikke kan tillade sig at være sjusket med
+samme skel i sine egne noter.

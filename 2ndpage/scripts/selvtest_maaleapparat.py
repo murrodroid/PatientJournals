@@ -183,11 +183,8 @@ FORVANSKNINGER = [
      "linjer kan ikke forankres."),
     ("den midterste tredjedel sprunget over", halv_side,
      "Dækningen skal falde til omkring to tredjedele. **Tegnfejlen bliver "
-     "IKKE nul** — og det er et målt fund, ikke en forventning: når en hel "
-     "blok mangler, forankrer nogle af de manglende linjer sig fejlagtigt i "
-     "en linje, der ligner, andetsteds på siden. Prisen er lille, men den er "
-     "der, og den er grunden til at rapporten udpeger de værste enkeltsider "
-     "til gennemsyn med øjnene frem for at lade dem gå op i et gennemsnit."),
+     "IKKE nul**, og det er et målt fund, ikke en forventning — se afsnittet "
+     "\"Falske forankringer\" nedenfor for hvad der faktisk sker."),
 ]
 
 
@@ -276,6 +273,36 @@ def selvtest(poster: list[dict]) -> str:
         "",
         "Det er derfor, dækningen skal stå ved hvert tal. Et tal på 5 % tegnfejl",
         "målt på 88 % af teksten er ikke det samme som 5 % på det hele.",
+    ]
+
+    # Falske forankringer -- efterprøvet, ikke formodet.
+    ud += [
+        "",
+        "## Falske forankringer",
+        "",
+        "Springer modellen en del af siden over, bliver tegnfejlen ikke nul,",
+        "selvom hvert eneste ord, den faktisk skrev, er rigtigt. Første forklaring var",
+        "en formodning; her er hvad der faktisk sker, efterprøvet linje for linje",
+        "på forvanskningen \"den midterste tredjedel sprunget over\":",
+        "",
+        "**1. En manglende linje forankrer sig i en linje, der ligner.** Facits",
+        "`Hendes tilstand er i løbet af natten bleven` findes ikke i modellen, men",
+        "`I løbet af natten` gør — og stumpen lander dér. `Tungen` lander i",
+        "`Lunge`. `ingen Appetit, ligget hen og døset,` lander i `Det ligger hen",
+        "og døser,`.",
+        "",
+        "**2. Og det skader de EFTERFØLGENDE linjer.** Det var ikke med i den",
+        "første forklaring, og det er den vigtigere halvdel. Forankringen går fra",
+        "venstre mod højre, så et falsk træf flytter søgepunktet frem forbi det",
+        "sted, hvor de næste linjer i virkeligheden står. De finder så kun en",
+        "afskåret rest af sig selv: `begge Lunger overalt en Mængde fugtige` blev",
+        "målt mod `r overalt en Mængde fugtige`, selvom modellen havde skrevet",
+        "hele linjen rigtigt.",
+        "",
+        "Prisen er lille på dette materiale — 181 tegn fordelt på 27 af de 118",
+        "sider — men den vokser med, hvor meget modellen springer over. Derfor:",
+        "**en side med lav dækning skal ses efter med øjnene**, ikke bare tros.",
+        "Rapporten har sin egen liste over de tyndest målte sider netop derfor.",
     ]
 
     # Knappen.

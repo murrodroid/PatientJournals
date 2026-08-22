@@ -339,3 +339,32 @@ def test_side_med_lav_daekning_udpeges_selvom_dens_tegnfejl_er_flot():
 
     vaerste_afsnit = tekst.split("værste sider")[1].split("tyndest målte")[0]
     assert vaerste_afsnit.index("`fyldig`") < vaerste_afsnit.index("`tynd`")
+
+
+def test_falsk_forankring_skader_ogsaa_den_naeste_linje():
+    """Kendt begraensning, pinnet med vilje (CONTEXT.md 2026-08-22, senere).
+
+    Forankringen gaar fra venstre mod hoejre. Et falsk traef flytter derfor
+    soegepunktet frem forbi det sted, hvor NAESTE linje i virkeligheden staar,
+    saa den kun finder en afskaaret rest af sig selv -- selvom modellen skrev
+    den helt rigtigt. Her: den korte facit-linje `Lunge` findes ikke som en
+    linje i modellen, men bogstaverne staar inde i `Lunger` paa naeste linje,
+    og saa aeder forankringen dét ord op.
+
+    Raekkefoelgen fjernes IKKE for at undgaa det: uden den kunne en gentaget
+    vending forankre bagud og give et gab med negativ laengde. Prisen for at
+    fjerne fejlen ville vaere en stoerre fejl. Testen staar her, saa
+    begraensningen ikke kan aendre sig ubemaerket -- og saa den, der en dag
+    laver den om, kan se hvad den kostede.
+    """
+    facit = ["Lunge", "begge Lunger overalt en Mængde fugtige"]
+    model = som_model(["Tungen er tør og belagt", "begge Lunger overalt en Mængde fugtige"])
+    m = maal_side("prøve", facit, model)
+
+    assert m.linjer[0].forankret          # falsk traef paa "Lunge" inde i "Lunger"
+    assert m.linjer[1].model_maalt == "r overalt en Mængde fugtige"
+    assert m.fladet["raa"].tegnafstand == 11
+
+    # Uden den korte, vildledende linje er der ingen fejl at finde.
+    uden = maal_side("prøve", facit[1:], model)
+    assert uden.fladet["raa"].tegnafstand == 0

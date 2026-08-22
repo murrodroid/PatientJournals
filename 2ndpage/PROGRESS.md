@@ -177,7 +177,7 @@ uanset hvad litteraturen ellers siger.
 - [x] **Dækningen står ved hvert tal** i rapportformatet, sammen med
       forbeholdet om at facit selv rummer fejl.
 - [x] Rapportformat, selvtest og gab-fil → `stages/03_maaleapparat/output/`.
-      204 tests grønne; 10 bevidste mutationer af koden blev alle fanget.
+      205 tests grønne; 10 bevidste mutationer af koden blev alle fanget.
       Søgefunktionen er desuden prøvet mod en rå gennemsøgning af alle
       udsnit på 240 tilfældige tilfælde.
 
@@ -192,10 +192,13 @@ uanset hvad litteraturen ellers siger.
 - **Knappen kan pynte, og det er dokumenteret**: strammes `MAKS_AFVIGELSE`
   fra 0,4 til 0,2, falder tegnfejlen fra 7,50 % til 7,13 % — pænere — mens
   dækningen falder og andelen af fundne fejl går fra 93,1 % til 86,4 %.
-- **Nyt fund**: springer modellen en hel blok over, forankrer nogle af de
-  manglende linjer sig fejlagtigt andetsteds på siden. Lille pris (0,45 %
-  tegnfejl hvor svaret burde være nul), men reel — derfor udpeger rapporten
-  de værste enkeltsider til gennemsyn med øjnene.
+- **Nyt fund, efterprøvet linje for linje**: springer modellen en hel blok
+  over, sker der TO ting. Nogle af de manglende linjer forankrer sig
+  fejlagtigt i en linje, der ligner — og det falske træf flytter søgepunktet
+  frem, så de EFTERFØLGENDE linjer kun finder en afskåret rest af sig selv,
+  selvom modellen læste dem rigtigt. Anden halvdel var ikke med i den første
+  forklaring. Målt pris: 181 tegn på 27 af 118 sider. Den vokser med, hvor
+  meget modellen springer over. Se CONTEXT.md 2026-08-22 (senere).
 - **Rettelse**: facit har 3.680 linjer, ikke 3.526 (tallet var fra FØR
   genbygningen 21. august). De 422 svære linjer holder; andelen bliver
   11,5 % i stedet for 12,0 %.
