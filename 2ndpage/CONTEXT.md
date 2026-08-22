@@ -1105,3 +1105,74 @@ ikke ved at læse sin egen kode igennem igen. Men de blev alle efterprøvet her,
 før der blev handlet på dem, og ét forslag blev forkastet: at flage
 `[continued on line]` og indskudsmærker uden modpart ville have givet støj,
 fordi de legitimt optræder alene.
+
+## 2026-08-22 — Stage 03 bygget: måleapparatet
+
+Stagens kontrakt lå fast fra 21. august. Under bygningen dukkede fem valg op,
+som kontrakten ikke havde taget stilling til, fordi de først bliver synlige,
+når koden skal skrives. De er truffet her og skrevet ind, så de kan ses efter.
+
+### Nye låste beslutninger
+
+| # | Beslutning | Begrundelse |
+|---|---|---|
+| 39 | **Forankringen søger med tolerance, ikke efter ordret træf.** En facit-stump regnes for fundet, hvis det nærmeste stykke modeltekst afviger med højst 40 % af stumpens længde (`MAKS_AFVIGELSE = 0,4`). | Krævede forankringen ordret træf, ville hver eneste forankret stump per definition have nul fejl. Tallet ville så måle, hvor tit modellen var fejlfri — ikke hvor god den er. Måleapparatet ville bekræfte sig selv. |
+| 40 | **Linjeparringen ER forankringen** — der bygges ikke en separat mekanisme til at parre linjer. Hver facit-linje søges i modellens rå tekst uden hensyn til dens linjeskift. | Kontraktens punkt 3 kræver parring, så målingen ikke skrider efter det første afvigende linjebrud. Det falder gratis ud af forankringen, og det holder stagen på ÉN funktion frem for to, der kan komme i modstrid. |
+| 41 | **Linjetrofasthed er noget vi MÅLER, ikke noget vi antager.** To tal i rapporten: hvor mange facit-linjer der ligger inden for én af modellens linjer, og hvor mange der får deres egen. | Beslutning 35 sagde, at vi ikke ved, om modellen laver sine egne linjeskift. Nu afhænger målingen ikke af svaret, og svaret kommer af sig selv ved stage 05's første kørsel. |
+| 42 | **Orddelingen afgøres på FACITS linjer og bruges på begge sider.** Deler facit et ord over to linjer, samles det både i facit og i modellens tekst. | Ellers straffes en model, der har læst rigtigt: facit deler `Infektions-` / `sygdomme.`, og en model, der skriver `Infektionssygdomme` i ét stykke, ville få en fejl for det. Linjedelingen er sidens artefakt, ikke tekstens indhold. |
+| 43 | **Fuldside-kontrollen indføres som fast del af rapporten.** På de sider, der slet ikke har `[?]`, sammenlignes hele siden direkte uden forankring. | Forankringen måler kun det, den kan parre. Den ser hverken tekst, modellen har fundet på, eller tekst, den har sprunget over. Kontrollen er det ene tal i rapporten, der ikke kan pynte på noget, og den skal stå der, uanset om den flatterer. |
+
+### Målt under bygningen
+
+Tallene stammer fra `stages/03_maaleapparat/output/selvtest.md`, kørt på
+øvemængdens 118 sider uden et eneste modelkald.
+
+- **Forankringen redder 94,6 % af de svære linjer.** 297 af øvemængdens 2.586
+  linjer har mindst ét `[?]`; 281 af dem kan forankres alligevel. Dækningen
+  bliver 97,6 % af tegnene i stedet for de knap 88 %, beslutning 38 lagde op
+  til. **Men det er en øvre grænse**: i selvtesten er "modellen" facit selv, så
+  hver stump findes ordret. En rigtig model læser dårligere.
+- **Skævheden er nu et tal.** Bytter vi selv 5.087 bogstaver om, finder
+  målingen 4.737 af dem — 93,1 %. Ved 2 % forvanskning: 93,9 %. Målingen
+  underrapporterer altså systematisk, fordi de linjer, den ikke kan forankre,
+  er de hårdest ramte. Det er præcis den skævhed, kravet om at anføre
+  dækningen ved hvert tal skal holde synlig.
+- **Knappen kan bruges til at pynte, og det er nu dokumenteret.** Sænkes
+  `MAKS_AFVIGELSE` fra 0,4 til 0,2, falder den målte tegnfejl fra 7,50 % til
+  7,13 % — den ser bedre ud — mens dækningen falder fra 97,2 % til 94,9 %, og
+  andelen af fundne fejl fra 93,1 % til 86,4 %. Den strengeste indstilling
+  giver det pæneste og mest misvisende tal. Tabellen står i selvtesten, så
+  valget ikke kan træffes ubemærket.
+- **Nyt fund: en sprunget-over blok giver fantomfejl.** Springer modellen en
+  hel del af siden over, forankrer nogle af de manglende linjer sig fejlagtigt
+  i en lignende linje andetsteds. Prisen er lille (0,45 % tegnfejl på en side,
+  hvor svaret burde være nul), men den er der. Det er grunden til, at
+  rapporten udpeger de værste enkeltsider til gennemsyn med øjnene frem for
+  at lade dem gå op i et gennemsnit.
+
+### Rettelse til et tidligere tal
+
+Facit rummer **3.680 linjer**, ikke 3.526. De 3.526 stammer fra opmålingen 21.
+august, som blev lavet FØR facit blev bygget igen efter de 17 fund samme dag.
+De øvrige tal fra den opmåling holder: 422 svære linjer, 647 stumper, median
+12 tegn, 122 under fem tegn. Andelen af svære linjer flytter sig derfor fra
+12,0 % til 11,5 %.
+
+### En sjette variant i tabellen
+
+StadsCER rapporterer fem varianter. Vi rapporterer seks: `arbejdstal` (uden
+versaler OG uden tegnsætning) er tilføjet, fordi beslutning 26 udpeger netop
+den kombination som det tal, vi træffer valg ud fra — og den kan ikke regnes
+ud ved at lægge de to enkeltfiltre sammen. `raa` er stadig det tal, leverancen
+står ved.
+
+### Hvad der bevidst IKKE blev bygget
+
+- **Ingen gennemsyns-app til gabene.** De skrives til en fil
+  (`output/gab_eksempel.csv` viser formatet) og som en afkortet tabel i
+  rapporten. Arbejdsgangen med tætte udklip og ja/nej hører i stage 07.
+- **Intet mål for om modellen selv markerer usikkerhed.** Det ville kræve, at
+  prompten bad om det, og beslutning 24 siger, at vi ikke beder modellen om
+  den slags vurderinger.
+- **Ingen kvalitetsgrænse.** Beslutning 27 står: Lead ser det første rigtige
+  tal, før der sættes grænser.

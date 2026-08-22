@@ -25,7 +25,7 @@ stages/00..08/          Ni stages, hver med CONTEXT.md og output/
 references/              Kortlægninger af omverdenen
 billedanmodning/         Liste over billeder bestilt hos kollegaen
 scripts/                 Midlertidige værktøjer, uden for ICM-stagestrukturen
-src/andenside/           Python-pakken: masterliste, opslagsregister, bogryg-snit
+src/andenside/           Python-pakken: facit-læser, måleapparat, bogryg-snit
 tests/                   Herunder strukturtesten
 ```
 
@@ -43,7 +43,7 @@ tests/                   Herunder strukturtesten
 
 ## Status
 
-Kortlægning og planlægning er færdig, og 38 beslutninger er låst i
+Kortlægning og planlægning er færdig, og 43 beslutninger er låst i
 `CONTEXT.md`.
 
 **Billeder (stage 01):** kbharkiv.dk's kildeviser har et åbent API, så vi
@@ -62,12 +62,27 @@ optælling af klammeopmærkningen, opdelingen i øve- og prøvemængde, og de
 blokke og steder, der er lagt til side. Kildefilerne på OneDrive læses kun
 — en test håndhæver, at de aldrig røres.
 
+**Måleapparat (stage 03):** bygget 2026-08-22, afventer gennemgang.
+`src/andenside/cer.py` er StadsCERs målekode overtaget direkte (fem
+varianter, dansk tegnfoldning). `src/andenside/maal.py` er projektets eget
+bidrag: **én** funktion, `forankr()`, finder facits kendte tekststumper i
+modellens tekst. Ud af den ene handling falder alt det øvrige — tegnfejlen
+måles på de fundne stumper, mellemrummet mellem to stumper er både
+hallucinations-signal og modellens bud på et ulæseligt sted, og
+linjeparringen sker gratis, fordi der søges i modellens rå tekst uden hensyn
+til dens linjeskift. `src/andenside/rapport.py` skriver måletallene ud med
+dækningen ved hvert eneste tal. Selvtesten
+(`scripts/selvtest_maaleapparat.py`) kører apparatet mod facit selv og mod
+ti konstruerede forvanskninger, hvor svaret er kendt på forhånd, og opgør
+hvor stor en del af de indlagte fejl målingen faktisk finder igen.
+
 **Billedforberedelse (stage 04):** godkendt og låst. Snitpunkt-detektionen
 (`src/andenside/bogryg.py`) er verificeret på alle 8 pilotbilleder — kendt
 begrænsning: kun afprøvet på to bind fra samme fotograferingssession.
 
-**Næste:** stage 03, måleapparatet. Det er det sidste, der mangler, før et
-forsøg overhovedet kan måles.
+**Næste:** stage 05, første transskription. Alt er nu på plads til at måle
+et forsøg — facit, billeder og måleapparat. Der køres ingen modelkald, før
+stage 03's rapportformat er gennemgået og der er givet go.
 
 ## Nøglefakta
 
@@ -86,4 +101,10 @@ forsøg overhovedet kan måles.
   stopper transskriptionen før indlæggelsen gør. Notationen er rig, men
   ustandardiseret: 194 forskellige skrivemåder fordelt på 8 slags mærker.
 - Målingen bygger på `J-Hoffi/StadsCER`s fem varianter og tilføjer samling af
-  orddeling hen over linjeskift, som mangler dér.
+  orddeling hen over linjeskift, som mangler dér. En sjette variant,
+  `arbejdstal` (uden versaler og tegnsætning), er det tal, valg træffes ud
+  fra; `raa` er det, leverancen står ved.
+- **Dækningen står ved hvert måletal.** De 11,5 % af linjerne, der rummer et
+  ulæseligt sted, er de sværeste på siden. Forankringen henter de fleste af
+  dem tilbage, men et måletal uden sin dækning er systematisk for pænt, og
+  rapportformatet tillader ikke at udelade den.

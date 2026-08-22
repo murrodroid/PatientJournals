@@ -32,7 +32,7 @@ en del af selve læsningen — derfor sin egen stage.
 
 - **Uenighedslisten er en prioriteret læseliste, ikke en sorteringsmaskine.**
   Den kan ikke skelne modelfejl fra fejl i facit; det kræver et blik på
-  billedet. Værdien er, at den skifter arbejdet fra at genlæse 3.526 linjer
+  billedet. Værdien er, at den skifter arbejdet fra at genlæse 3.680 linjer
   til at se på nogle hundrede steder, hvor der faktisk er noget at afgøre.
 - **Den skævhed, listen har, skal stå i rapporten**: en fejl i facit bliver
   kun synlig, hvis modellen læser stedet BEDRE end transskribenten. Fejler

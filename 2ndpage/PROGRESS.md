@@ -8,6 +8,7 @@ Videre til næste stage kun efter menneskelig gennemgang.
 - [2026-08-20 12:00](diary/2026-08-20.md) — Projektet 2ndpage bygget fra bunden: kortlægning, ICM-skelet, stage 00/01/04 gennemført
 - [2026-08-20 16:20](diary/2026-08-20.md) — Stage 02 bygget: facit-læser, klammekortlægning, øve/prøve-opdeling
 - [2026-08-21](diary/2026-08-21.md) — Stage 02 godkendt og låst; 16 beslutninger truffet i dialog
+- [2026-08-22](diary/2026-08-22.md) — Stage 03 bygget: måleapparatet; beslutning 39-43; skævheden gjort til et tal
 
 ## Fase 0 — Kortlægning og plan (afsluttet 2026-08-18)
 
@@ -139,38 +140,69 @@ uanset hvad litteraturen ellers siger.
       historisk rigtige tekst til et færdigt datasæt. Modellen promptes
       IKKE til at genkende overstregninger.
 
-## Stage 03 — Måleapparat
+## Stage 03 — Måleapparat  *(bygget 2026-08-22, afventer gennemgang)*
 
-- [ ] **Mål BÅDE fladet og pr. linje** (lead 2026-08-20). Linjemålingen
-      skal parre linjerne, så den ikke skrider efter første afvigende brud.
-- [ ] **Ubevist antagelse, må ikke bygges på**: vi VED ikke, om modellen
-      laver sine egne linjeskift eller følger sidens. Der er ikke kørt et
-      eneste modelkald endnu. Kollegaens app har allerede et
-      linje-for-linje-skema (`TextPage`/`PageLine`), hvilket peger den
-      anden vej. Stage 05's første kørsel svarer på det gratis —
-      husk at kigge efter det og notere svaret som måling, ikke formodning.
-- [ ] Overtag `cer.py` fra StadsCER med de fem varianter
-- [ ] Byg samling af orddeling hen over linjeskift (StadsCERs kendte mangel)
-- [ ] Byg hallucinationskontrol uden krav om identisk linjeopdeling
-- [x] **Behandlingen af `[?]` er fastlagt** (beslutning 38, lead): hele
-      LINJEN skæres fra målingen, ikke bare selve stedet. Tegn-for-tegn-
-      opstilling er ikke til at stole på dér, hvor teksterne afviger.
-      Koster 12,0 % af linjerne og 12,1 % af tegnene; ingen side mister
-      over halvdelen; 33 sider mister intet.
-- [ ] **Byg ÉN funktion, ikke fire features**: `forankr(facit_linje,
-      modeltekst)` finder facits kendte stumper i modellens tekst. De
-      fundne stumper måles; gabet imellem dem er både
-      hallucinations-signal og modellens bud på det ulæselige sted.
-      Stumper under 5 tegn bruges ikke; et gab tælles kun med stumper
-      fundet på begge sider; en uforankret linje falder tilbage til
-      beslutning 38. Se CONTEXT.md 2026-08-21.
-- [ ] Ingen gennemsyns-app nu — gabene skrives til en fil, arbejdsgangen
-      hører i stage 07.
-- [ ] **Dækningen SKAL stå ved siden af hvert tal**: de udeladte 12 % er de
-      sværeste linjer, så tallet er systematisk for pænt. Samme skævhed
-      gør facit-fejl usynlige, når modellen fejler på samme måde.
-- [ ] Rapportformat + selvtest mod facit og forvanskede udgaver
-- [ ] **Gennemgang ved lead**
+- [x] **Mål BÅDE fladet og pr. linje.** Linjeparringen er selve forankringen:
+      hver facit-linje søges i modellens rå tekst uden hensyn til dens
+      linjeskift, så målingen ikke skrider efter første afvigende brud
+      (beslutning 40).
+- [x] **Den ubeviste antagelse er nu et målt tal, ikke en formodning.**
+      Rapporten opgør, hvor mange facit-linjer der ligger inden for én af
+      modellens linjer, og hvor mange der får deres egen. Målingen afhænger
+      ikke længere af svaret (beslutning 41). Svaret selv kommer ved stage
+      05's første kørsel.
+- [x] Overtaget `cer.py` fra StadsCER → `src/andenside/cer.py`. Fem varianter
+      plus `arbejdstal` som den sjette. `compare()` er IKKE overtaget: den
+      matcher på linje-id, og dem har vi ikke.
+- [x] Orddeling hen over linjeskift samles — StadsCERs kendte mangel.
+      Beslutningen tages på FACITS linjer og bruges på begge sider, så en
+      model, der skrev ordet samlet, ikke straffes (beslutning 42). En test
+      holder de to steder op mod hinanden på alle 168 sider.
+- [x] Hallucinationskontrol uden krav om identisk linjeopdeling: tre
+      uafhængige signaler — modeltekst uden modstykke, tekst skrevet dér hvor
+      facit siger `[?]`, og fuldside-kontrollen.
+- [x] **Behandlingen af `[?]`** (beslutning 38) er grundreglen; forankringen
+      er lagt ovenpå med en defineret vej tilbage.
+- [x] **ÉN funktion, ikke fire features**: `forankr()` i
+      `src/andenside/maal.py`. Reglerne holder: stumper under 5 tegn bruges
+      ikke, gab tælles kun med stumper fundet på begge sider, en uforankret
+      linje falder tilbage til beslutning 38. **Nyt valg**: søgningen tåler
+      læsefejl inde i stumpen (beslutning 39) — ellers ville hver forankret
+      stump per definition have nul fejl, og måleapparatet ville bekræfte
+      sig selv.
+- [x] Ingen gennemsyns-app. Gabene skrives til en fil — `skriv_gab()`
+      lægger dem alle i CSV (`output/gab_eksempel.csv` viser formatet), og
+      rapporten viser de første femten. Kontrakten krævede en fil, ikke kun
+      en tabel.
+- [x] **Dækningen står ved hvert tal** i rapportformatet, sammen med
+      forbeholdet om at facit selv rummer fejl.
+- [x] Rapportformat, selvtest og gab-fil → `stages/03_maaleapparat/output/`.
+      204 tests grønne; 10 bevidste mutationer af koden blev alle fanget.
+      Søgefunktionen er desuden prøvet mod en rå gennemsøgning af alle
+      udsnit på 240 tilfældige tilfælde.
+
+**Målt i selvtesten** (118 øvesider, ingen modelkald):
+
+- Forankringen redder **94,6 %** af de svære linjer. Dækning 97,6 % af
+  tegnene i stedet for knap 88 %. **Øvre grænse** — her er "modellen" facit
+  selv, så hver stump findes ordret. En rigtig model læser dårligere.
+- **Skævheden er nu et tal**: bytter vi selv 5.087 bogstaver om, finder
+  målingen 4.737 = 93,1 %. Målingen underrapporterer systematisk, fordi de
+  linjer, den ikke kan forankre, er de hårdest ramte.
+- **Knappen kan pynte, og det er dokumenteret**: strammes `MAKS_AFVIGELSE`
+  fra 0,4 til 0,2, falder tegnfejlen fra 7,50 % til 7,13 % — pænere — mens
+  dækningen falder og andelen af fundne fejl går fra 93,1 % til 86,4 %.
+- **Nyt fund**: springer modellen en hel blok over, forankrer nogle af de
+  manglende linjer sig fejlagtigt andetsteds på siden. Lille pris (0,45 %
+  tegnfejl hvor svaret burde være nul), men reel — derfor udpeger rapporten
+  de værste enkeltsider til gennemsyn med øjnene.
+- **Rettelse**: facit har 3.680 linjer, ikke 3.526 (tallet var fra FØR
+  genbygningen 21. august). De 422 svære linjer holder; andelen bliver
+  11,5 % i stedet for 12,0 %.
+
+- [ ] **Gennemgang ved lead** — er det DE FELTER, du vil træffe valg ud fra?
+      Se `stages/03_maaleapparat/output/rapportformat.md` først, derefter
+      `selvtest.md`.
 
 ## Stage 04 — Billedforberedelse
 
@@ -238,3 +270,12 @@ selve læse-implementeringen, samme princip som resten af planen)*
 - [ ] Forslag til sideudvælgelse via `patient_page_counter` frem for `_fp`
 - [ ] Afklar dashboard-status og om `textpage` allerede er afprøvet
 - [ ] Efterprøvning: vores tal mod hans app på samme sider
+
+## Løse ender uden for stagestrukturen
+
+- [ ] **`pyproject.toml` peger på en fil, der ikke findes.**
+      `[project.scripts] andenside = "andenside.cli:main"`, men der er ingen
+      `src/andenside/cli.py`. Kommandoen `andenside` bliver derfor installeret
+      og fejler, hvis nogen kalder den. Ikke rørt, fordi den kan være tiltænkt
+      en kommende CLI — enten skrives filen, eller også fjernes linjen.
+      Fundet 2026-08-22 under stage 03.
