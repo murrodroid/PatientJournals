@@ -76,7 +76,7 @@ engangs-check af billedforberedelsen og fra stage 07's uenighedslag.
 | Fil | Beskrivelse |
 |---|---|
 | `output/koersler/` | Rå modelsvar pr. kørsel med fuld angivelse af opsætning |
-| `output/resultater.csv` | Én række pr. kørsel: opsætning og alle fem måletal |
+| `output/resultater.csv` | Én række pr. kørsel: opsætning og alle seks måletal |
 | `output/sammenligning.md` | Hvad hver akse viste, og hvad der blev valgt |
 
 ## Test Contract

@@ -48,16 +48,42 @@ allerede har målt på (Humphries m.fl.).
 - **Kig efter, om modellen laver sine egne linjeskift eller følger sidens.**
   Det er en ubevist antagelse i hele projektet (beslutning 35), og denne
   kørsel svarer på den gratis. Skriv svaret ned som et måleresultat.
-- **Kig efter, hvad modellen skriver på de 422 svære linjer** — dem hvor
+- **Kig efter, hvad modellen skriver på de svære linjer** — dem hvor
   transskribenten gav op. Det er projektets bedste prøve på, om modellen
-  digter, hvor siden er ulæselig.
+  digter, hvor siden er ulæselig. Der er 422 af dem i hele facit, hvoraf
+  **297 ligger i øvemængden** — og det er den, der køres på her.
+
+### Skrevet ud fra stage 03, da måleapparatet blev bygget (2026-08-22)
+
+- **Svaret skal være transskriptionen og INTET andet.** Skriver modellen "Her
+  er transskriptionen:" eller pakker teksten i markdown-hegn, tælles den
+  indledning som *modeltekst uden modstykke i facit* — altså som om modellen
+  havde digtet. Enten skal prompten forbyde det, eller også skal svaret renses,
+  før det måles. Renses det, skal det stå i bogholderiet, at det blev gjort.
+- **Måleapparatet kaldes sådan** — der skal ikke skrives ny målekode:
+
+      from andenside.maal import maal_saet
+      from andenside.rapport import skriv_rapport, skriv_gab
+
+      saet = maal_saet(facit_poster, {billed_id: modeltekst, ...})
+
+  `skriv_rapport(saet, titel=..., model=..., promptversion=..., dato=...)`
+  giver rapporten, `skriv_gab(saet)` giver CSV'en over, hvad modellen skrev
+  på de ulæselige steder. Se `stages/03_maaleapparat/output/` for begge
+  formater.
+- **Svaret på linjeskifts-spørgsmålet står i rapporten** under
+  *Linjetrofasthed*. Det skal ikke måles i hånden — bare læses og skrives ned
+  som et måleresultat, jf. punktet ovenfor.
+- **Se på "de tyndest målte sider" før "de værste sider".** En side, hvor
+  modellen sprang det meste over, får et FLOT tegnfejlstal og lander i bunden
+  af de værste. Lav dækning er det værre tegn.
 
 ## Outputs
 
 | Fil | Beskrivelse |
 |---|---|
 | `output/koersler/` | Rå modelsvar pr. kørsel med fuld angivelse af opsætning |
-| `output/resultater.csv` | Én række pr. kørsel: opsætning og alle fem måletal |
+| `output/resultater.csv` | Én række pr. kørsel: opsætning og alle seks måletal |
 | `output/foerste_tal.md` | Hvad det første forsøg viste: virker beskæringen godt nok til at gå videre? |
 
 ## Test Contract

@@ -71,7 +71,9 @@ måles på de fundne stumper, mellemrummet mellem to stumper er både
 hallucinations-signal og modellens bud på et ulæseligt sted, og
 linjeparringen sker gratis, fordi der søges i modellens rå tekst uden hensyn
 til dens linjeskift. `src/andenside/rapport.py` skriver måletallene ud med
-dækningen ved hvert eneste tal. Selvtesten
+dækningen ved hvert eneste tal — og lægger det, modellen skrev på de
+ulæselige steder, i en CSV for sig, så det kan forelægges senere uden
+nogensinde at havne i facit. Selvtesten
 (`scripts/selvtest_maaleapparat.py`) kører apparatet mod facit selv og mod
 ti konstruerede forvanskninger, hvor svaret er kendt på forhånd, og opgør
 hvor stor en del af de indlagte fejl målingen faktisk finder igen.

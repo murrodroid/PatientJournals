@@ -37,6 +37,37 @@ FORBEHOLD = """> **Sådan læses tallene.** Dækningen står ved hvert tal, ford
 > ingen af dem må vælges, fordi den klæder resultatet."""
 
 
+SAADAN_MAALES_DER = """## Sådan er der målt
+
+Rapporten bruger ordet **forankring** hele vejen igennem, så her er hvad det
+betyder, i almindeligt sprog:
+
+Facits tekst søges frem i modellens tekst, én linje ad gangen, fra toppen af
+siden og nedefter. Søgningen tåler læsefejl — den leder efter det stykke
+modeltekst, der ligner facit-linjen mest, og godtager det, hvis det ikke
+afviger for meget. Er stykket fundet, er linjen *forankret*, og de to
+tekststykker kan sammenlignes tegn for tegn. Kan linjen ikke findes, går den
+helt ud af målingen, i begge tekster.
+
+Der søges i modellens **rå tekst uden hensyn til dens linjeskift**. Derfor er
+det ligegyldigt for tallene, om modellen følger sidens linjer eller laver sine
+egne — og derfor kan vi måle bagefter, hvad den faktisk gjorde (se
+*Linjetrofasthed* nedenfor) i stedet for at gætte på forhånd.
+
+Hvor facit siger `[?]` — et sted transskribenten ikke kunne læse — deles
+linjen, og de kendte stumper på hver side søges hver for sig. Det, modellen
+skrev i mellemrummet, måles ikke; der findes ingen sandhed at måle det imod.
+Men det gemmes, både fordi længden siger noget om, hvor tilbøjelig modellen er
+til at digte, og fordi det er dens bud på et sted, ingen har kunnet læse.
+
+**Ordforklaring:** *tegnafstand* = hvor mange enkelttegn der skal rettes,
+indsættes eller slettes for at nå fra modellens tekst til facits. *CER* er den
+afstand delt med antallet af tegn i facit; *WER* er det samme regnet på hele
+ord, og den er derfor altid et større tal — ét forkert bogstav gør hele ordet
+forkert. *Fladet tekst* betyder, at linjeskiftene er taget ud og ord, der er
+delt hen over et linjeskift, er sat sammen igen."""
+
+
 def _pct(x: float) -> str:
     return f"{x * 100:.2f} %".replace(".", ",")
 
@@ -81,6 +112,18 @@ def skriv_rapport(
     pr_linje = saet.pr_linje
     sider = saet.sider
 
+    # Opsummeringer regnes ét sted, saa de samme tal ikke kan komme til at
+    # staa forskelligt i to afsnit af samme rapport.
+    model_i_alt = sum(s.model_tegn_i_alt for s in sider)
+    uforankret = sum(s.model_tegn_uforankret for s in sider)
+    gab = saet.gab
+    gabtegn = sum(len("".join(g.model_tekst.split())) for _, g in gab)
+    svaere = sum(s.svaere_linjer for s in sider)
+    reddet = sum(s.svaere_linjer_reddet for s in sider)
+    uden_skift = sum(s.uden_linjeskift_indeni for s in sider)
+    egen = sum(s.egen_modellinje for s in sider)
+    maalte_linjer = sum(s.linjer_maalt for s in sider)
+
     ud: list[str] = [
         f"# {titel}",
         "",
@@ -94,6 +137,8 @@ def skriv_rapport(
         "",
         FORBEHOLD,
         "",
+        SAADAN_MAALES_DER,
+        "",
         "## Hovedtal — fladet tekst",
         "",
         f"Målt på **{_pct(saet.daekning)} af facits tegn** "
@@ -102,6 +147,14 @@ def skriv_rapport(
         "",
     ]
     ud += _varianttabel(fladet)
+    ud += [
+        "",
+        f"Af de {svaere} linjer med mindst ét `[?]` kunne forankringen redde "
+        f"**{reddet}** ind i målingen ved at måle de kendte stumper omkring "
+        "det ulæselige sted. Grundreglen er ellers, at hele linjen går ud "
+        "(beslutning 38), så uden det trin ville dækningen have været "
+        "væsentligt lavere.",
+    ]
 
     ud += [
         "",
@@ -153,31 +206,21 @@ def skriv_rapport(
     else:
         ud += ["Ingen af de målte sider er helt uden `[?]`, så kontrollen kan ikke køres."]
 
-    # Hallucination og linjetrofasthed.
-    model_i_alt = sum(s.model_tegn_i_alt for s in sider)
-    uforankret = sum(s.model_tegn_uforankret for s in sider)
-    gab = saet.gab
-    gabtegn = sum(len("".join(g.model_tekst.split())) for _, g in gab)
-    svaere = sum(s.svaere_linjer for s in sider)
-    reddet = sum(s.svaere_linjer_reddet for s in sider)
-    uden_skift = sum(s.uden_linjeskift_indeni for s in sider)
-    egen = sum(s.egen_modellinje for s in sider)
-    maalte_linjer = sum(s.linjer_maalt for s in sider)
-
     ud += [
         "",
         "## Opdigtning",
         "",
-        "Tre uafhængige signaler. Ingen af dem er et korrekthedsmål — der findes",
-        "ingen sandhed at måle imod dér, hvor facit siger `[?]` — men de siger,",
-        "om modellen skriver noget, den ikke har dækning for.",
+        "To signaler. Ingen af dem er et korrekthedsmål — der findes ingen sandhed",
+        "at måle imod dér, hvor facit siger `[?]` — men de siger, om modellen",
+        "skriver noget, den ikke har dækning for. Det tredje sted at kigge er",
+        "kontroltallet ovenfor: det er det eneste, der tæller opdigtet tekst med",
+        "som egentlige fejl.",
         "",
         "| Signal | Værdi |",
         "|---|---:|",
         f"| Modeltekst uden modstykke i facit | {uforankret} tegn "
         f"= {_pct(uforankret / model_i_alt if model_i_alt else 0)} af modellens tekst |",
         f"| Tekst skrevet dér hvor facit siger `[?]` | {gabtegn} tegn fordelt på {len(gab)} steder |",
-        f"| Svære linjer reddet af forankringen | {reddet} af {svaere} |",
         "",
         "**\"Uden modstykke\" har et gulv og er ikke nul, selv når intet er digtet.**",
         "Modellen skriver noget dér, hvor facit siger `[?]`, og den skriver også de",
@@ -195,6 +238,15 @@ def skriv_rapport(
         "|---|---:|",
         f"| Facit-linjer der ligger inden for én af modellens linjer | {uden_skift} af {maalte_linjer} |",
         f"| Facit-linjer der får deres egen modellinje | {egen} af {maalte_linjer} |",
+        "",
+        "**Sådan læses de to tal.** Er de begge lig antallet af målte linjer,",
+        "har modellen skrevet sidens linjer, som de står — én facit-linje pr.",
+        "modellinje. Er det FØRSTE tal højt og det andet lavt, har modellen",
+        "samlet flere af sidens linjer i én af sine egne. Er det første tal lavt,",
+        "løber facits linjer hen over modellens linjeskift, altså laver modellen",
+        "sine egne brud. Ingen af delene er en fejl i sig selv, og ingen af dem",
+        "påvirker tallene ovenfor — men svaret afgør, om linjeskiftene kan",
+        "afleveres videre til kollegaens `PageLine`-skema, og det er værd at vide.",
     ]
 
     # De vaerste sider, saa de kan ses efter med oejnene.

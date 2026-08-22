@@ -177,6 +177,12 @@ uanset hvad litteraturen ellers siger.
 - [x] **Dækningen står ved hvert tal** i rapportformatet, sammen med
       forbeholdet om at facit selv rummer fejl.
 - [x] Rapportformat, selvtest og gab-fil → `stages/03_maaleapparat/output/`.
+      Rapporten forklarer sig selv: et afsnit "Sådan er der målt" i almindeligt
+      sprog, før det første tal, plus en ordforklaring af tegnafstand, CER, WER
+      og fladet tekst. Den skal kunne læses uden CONTEXT.md ved hånden.
+      **Determinismen efterprøvet i fuld skala**: to kørsler på alle 118 sider
+      gav samme rapport og samme gab-fil, tegn for tegn — og de stemmer med
+      filerne i repoet.
       205 tests grønne; 10 bevidste mutationer af koden blev alle fanget.
       Søgefunktionen er desuden prøvet mod en rå gennemsøgning af alle
       udsnit på 240 tilfældige tilfælde.

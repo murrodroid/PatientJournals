@@ -23,6 +23,36 @@
 > hvor meget af fejlen der er ortografisk støj frem for egentlige læsefejl —
 > ingen af dem må vælges, fordi den klæder resultatet.
 
+## Sådan er der målt
+
+Rapporten bruger ordet **forankring** hele vejen igennem, så her er hvad det
+betyder, i almindeligt sprog:
+
+Facits tekst søges frem i modellens tekst, én linje ad gangen, fra toppen af
+siden og nedefter. Søgningen tåler læsefejl — den leder efter det stykke
+modeltekst, der ligner facit-linjen mest, og godtager det, hvis det ikke
+afviger for meget. Er stykket fundet, er linjen *forankret*, og de to
+tekststykker kan sammenlignes tegn for tegn. Kan linjen ikke findes, går den
+helt ud af målingen, i begge tekster.
+
+Der søges i modellens **rå tekst uden hensyn til dens linjeskift**. Derfor er
+det ligegyldigt for tallene, om modellen følger sidens linjer eller laver sine
+egne — og derfor kan vi måle bagefter, hvad den faktisk gjorde (se
+*Linjetrofasthed* nedenfor) i stedet for at gætte på forhånd.
+
+Hvor facit siger `[?]` — et sted transskribenten ikke kunne læse — deles
+linjen, og de kendte stumper på hver side søges hver for sig. Det, modellen
+skrev i mellemrummet, måles ikke; der findes ingen sandhed at måle det imod.
+Men det gemmes, både fordi længden siger noget om, hvor tilbøjelig modellen er
+til at digte, og fordi det er dens bud på et sted, ingen har kunnet læse.
+
+**Ordforklaring:** *tegnafstand* = hvor mange enkelttegn der skal rettes,
+indsættes eller slettes for at nå fra modellens tekst til facits. *CER* er den
+afstand delt med antallet af tegn i facit; *WER* er det samme regnet på hele
+ord, og den er derfor altid et større tal — ét forkert bogstav gør hele ordet
+forkert. *Fladet tekst* betyder, at linjeskiftene er taget ud og ord, der er
+delt hen over et linjeskift, er sat sammen igen.
+
 ## Hovedtal — fladet tekst
 
 Målt på **97,20 % af facits tegn** (93,58 % af linjerne). De udeladte er de sværeste.
@@ -35,6 +65,8 @@ Målt på **97,20 % af facits tegn** (93,58 % af linjerne). De udeladte er de sv
 | `uden_tegnsaetning` | 3,92 % | 19,82 % | 2349 | 59857 |
 | `arbejdstal` | 3,92 % | 19,82 % | 2349 | 59857 |
 | `lempeligst` | 3,92 % | 19,82 % | 2349 | 59857 |
+
+Af de 297 linjer med mindst ét `[?]` kunne forankringen redde **280** ind i målingen ved at måle de kendte stumper omkring det ulæselige sted. Grundreglen er ellers, at hele linjen går ud (beslutning 38), så uden det trin ville dækningen have været væsentligt lavere.
 
 ## Pr. linje
 
@@ -82,15 +114,16 @@ helt uden ulæselige steder.
 
 ## Opdigtning
 
-Tre uafhængige signaler. Ingen af dem er et korrekthedsmål — der findes
-ingen sandhed at måle imod dér, hvor facit siger `[?]` — men de siger,
-om modellen skriver noget, den ikke har dækning for.
+To signaler. Ingen af dem er et korrekthedsmål — der findes ingen sandhed
+at måle imod dér, hvor facit siger `[?]` — men de siger, om modellen
+skriver noget, den ikke har dækning for. Det tredje sted at kigge er
+kontroltallet ovenfor: det er det eneste, der tæller opdigtet tekst med
+som egentlige fejl.
 
 | Signal | Værdi |
 |---|---:|
 | Modeltekst uden modstykke i facit | 5527 tegn = 9,32 % af modellens tekst |
 | Tekst skrevet dér hvor facit siger `[?]` | 894 tegn fordelt på 92 steder |
-| Svære linjer reddet af forankringen | 280 af 297 |
 
 **"Uden modstykke" har et gulv og er ikke nul, selv når intet er digtet.**
 Modellen skriver noget dér, hvor facit siger `[?]`, og den skriver også de
@@ -108,6 +141,15 @@ laver modellen sine egne linjeskift, eller følger den sidens?
 |---|---:|
 | Facit-linjer der ligger inden for én af modellens linjer | 2420 af 2420 |
 | Facit-linjer der får deres egen modellinje | 2420 af 2420 |
+
+**Sådan læses de to tal.** Er de begge lig antallet af målte linjer,
+har modellen skrevet sidens linjer, som de står — én facit-linje pr.
+modellinje. Er det FØRSTE tal højt og det andet lavt, har modellen
+samlet flere af sidens linjer i én af sine egne. Er det første tal lavt,
+løber facits linjer hen over modellens linjeskift, altså laver modellen
+sine egne brud. Ingen af delene er en fejl i sig selv, og ingen af dem
+påvirker tallene ovenfor — men svaret afgør, om linjeskiftene kan
+afleveres videre til kollegaens `PageLine`-skema, og det er værd at vide.
 
 ## De 10 værste sider
 

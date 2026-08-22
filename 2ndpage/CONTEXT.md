@@ -1213,8 +1213,9 @@ længde. Prisen for at fjerne fejlen ville være en større fejl.
 **Men den udpeger en knap, hvis det senere viser sig at betyde noget.** Det
 mindste konstruerede eksempel, der fremkalder fejlen, bruger en facit-stump på
 præcis fem tegn — `Lunge` — som forankrer sig inde i ordet `Lunger` på næste
-linje. Det er lige netop grænsen `MINDSTE_STUMP = 5`, som beslutning 7 satte
-for at undgå stumper, der "kan forankre hvor som helst". Fem tegn var altså
+linje. Det er lige netop grænsen `MINDSTE_STUMP = 5`, som stage 03's punkt 7
+satte for at undgå stumper, der "kan forankre hvor som helst" (ikke at
+forveksle med beslutning 7, som handler om ren læsetekst). Fem tegn var altså
 ikke nok i det tilfælde. Grænsen er ikke hævet: det ville koste dækning på
 netop de svære linjer, den er sat for at redde, og der er ingen måling endnu,
 der siger at falske forankringer er et problem i praksis. Men viser stage 05,

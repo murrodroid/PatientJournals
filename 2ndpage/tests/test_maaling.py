@@ -368,3 +368,18 @@ def test_falsk_forankring_skader_ogsaa_den_naeste_linje():
     # Uden den korte, vildledende linje er der ingen fejl at finde.
     uden = maal_side("prøve", facit[1:], model)
     assert uden.fladet["raa"].tegnafstand == 0
+
+
+def test_rapporten_forklarer_forankring_foer_den_bruger_ordet():
+    """Rapporten skal kunne staa alene. Ordet 'forankring' baerer hele
+    maalingen, og en laeser, der ikke har CONTEXT.md ved haanden, skal kunne
+    forstaa tallene alligevel."""
+    from andenside.maal import maal_saet
+
+    saet = maal_saet([{"image_name": "a", "alt_linjer": SIDE}], {"a": som_model(SIDE)})
+    tekst = skriv_rapport(saet, titel="Prøve", model="m", promptversion="1", dato="2026-08-22")
+
+    forklaring = tekst.index("Sådan er der målt")
+    assert forklaring < tekst.index("## Hovedtal")
+    for ord in ("tegnafstand", "CER", "WER", "Fladet tekst"):
+        assert ord in tekst[forklaring:], ord

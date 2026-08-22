@@ -95,7 +95,7 @@ henviser til beslutningstabellerne i rod-`CONTEXT.md`.
     tegnene, altså et forsvindende gulv under hovedtallet. Men det betyder,
     at en ENKELT uenighed mellem model og facit ikke automatisk er modellens
     fejl. Skriv det i rapportformatet.
-12. Byg rapportformatet: fem varianter i tabel, hallucinationstal opgjort for
+12. Byg rapportformatet: alle varianter i tabel, hallucinationstal opgjort for
     sig, dækningen anført, og de værste enkeltopslag udpeget, så de kan ses
     efter med øjnene.
 
@@ -134,7 +134,8 @@ køres med `scripts/selvtest_maaleapparat.py`.
 
 Måleapparatet skal give nul fejl, når facit sammenlignes med sig selv, og et
 kendt, forud udregnet tal på konstruerede forvanskninger. Der skal være en
-test for hver af de fem varianter, en test for orddelingssamlingen, og en test
+test for hver variant (de fem fra StadsCER plus `arbejdstal`), en test for
+orddelingssamlingen, og en test
 for at to kørsler på samme data giver nøjagtig samme rapport — rækkefølge fra
 mængder og ordbøger har tidligere givet ikke-reproducerbare resultater i andre
 projekter.
