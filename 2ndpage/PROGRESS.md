@@ -10,6 +10,7 @@ Videre til næste stage kun efter menneskelig gennemgang.
 - [2026-08-21](diary/2026-08-21.md) — Stage 02 godkendt og låst; 16 beslutninger truffet i dialog
 - [2026-08-22](diary/2026-08-22.md) — Stage 03 bygget: måleapparatet; beslutning 39-43; skævheden gjort til et tal
 - [2026-08-23](diary/2026-08-23.md) — Stage 03 godkendt og låst; den strenge måling tilføjet (beslutning 44)
+- [2026-08-23 21:05](diary/2026-08-23.md) — Gennemgangen afslørede, at rapportens forklaring ikke virker; instrument-tal blev fremlagt som resultater
 
 ## Fase 0 — Kortlægning og plan (afsluttet 2026-08-18)
 
