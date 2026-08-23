@@ -383,3 +383,90 @@ def test_rapporten_forklarer_forankring_foer_den_bruger_ordet():
     assert forklaring < tekst.index("## Hovedtal")
     for ord in ("tegnafstand", "CER", "WER", "Fladet tekst"):
         assert ord in tekst[forklaring:], ord
+
+
+# --------------------------------------------------------------------------
+# Den strenge maaling: linjer med ulaeselige steder slet ikke med
+# (lead 2026-08-23 -- de reddede stumper kan give en skaevhed, og den skal
+#  kunne ses som et tal ved siden af hovedtallet)
+# --------------------------------------------------------------------------
+
+def test_streng_maaling_udelader_hele_linjen_med_ulaeseligt_sted():
+    """Hovedtallet maaler de kendte stumper omkring et [?]. Den strenge
+    maaling gaar den anden vej og lader linjen helt ude. Fejl paa den linje
+    maa derfor kun optraede i hovedtallet, aldrig i den strenge."""
+    facit = ["Der er rigelig [?] Udflod af egen art", "Barnet er kraftigt."]
+    # Modellen laeser den SVAERE linje forkert og den rene rigtigt.
+    model = som_model(["Der er rigelig blodig Udflad af egen art", "Barnet er kraftigt."])
+    m = maal_side("prøve", facit, model)
+
+    assert m.fladet["raa"].tegnafstand == 1      # 'o' -> 'a' i Udflod
+    assert m.rene["raa"].tegnafstand == 0        # den svaere linje er slet ikke med
+    assert m.rene_linjer_i_alt == 1
+    assert m.rene_linjer_maalt == 1
+
+
+def test_streng_maaling_ser_stadig_fejl_paa_de_rene_linjer():
+    """Den maa ikke bare vaere nul hele tiden."""
+    facit = ["Der er rigelig [?] Udflod", "Barnet er kraftigt."]
+    model = som_model(["Der er rigelig blodig Udflod", "Barnet er kraftigi."])
+    m = maal_side("prøve", facit, model)
+
+    assert m.rene["raa"].tegnafstand == 1
+    assert m.fladet["raa"].tegnafstand == 1
+
+
+def test_side_uden_rene_linjer_giver_en_tom_streng_maaling_ikke_et_krak():
+    facit = ["Der er rigelig [?] Udflod", "[?] i Trachea"]
+    m = maal_side("prøve", facit, "Der er rigelig blodig Udflod\nnoget i Trachea")
+
+    assert m.rene_linjer_i_alt == 0
+    assert m.rene["raa"].facit_tegn == 0
+    assert m.rene["raa"].cer == 0.0
+
+
+def test_rene_daekning_og_andel_af_facit_er_to_forskellige_tal():
+    """Det ene siger 'hvor meget af det vi maaler paa, fik vi fat i', det
+    andet 'hvor meget af siden ser den strenge maaling overhovedet'. De maa
+    ikke forveksles -- den anden er den, der afsloerer prisen."""
+    from andenside.maal import maal_saet
+
+    poster = [{"image_name": "a", "alt_linjer": [
+        "Der er rigelig [?] Udflod af en helt egen art og farve",
+        "Barnet er kraftigt og velnæret.",
+    ]}]
+    modeller = {"a": som_model([
+        "Der er rigelig blodig Udflod af en helt egen art og farve",
+        "Barnet er kraftigt og velnæret.",
+    ])}
+    saet = maal_saet(poster, modeller)
+
+    assert saet.rene_daekning == 1.0            # den rene linje blev fundet helt
+    assert saet.andel_af_facit_i_rene < 0.6     # men den er under halvdelen af siden
+
+
+def test_rapporten_stiller_den_strenge_maaling_op_mod_hovedtallet():
+    """lead 2026-08-23: skaevheden fra de reddede stumper skal kunne SES,
+    ikke bare vaere en mulighed man goer sig klart. Derfor staar den strenge
+    maaling lige efter hovedtallet, med forskellen skrevet ud."""
+    from andenside.maal import maal_saet
+
+    poster = [{"image_name": "a", "alt_linjer": [
+        "Der er rigelig [?] Udflod af egen art",
+        "Barnet er kraftigt og velnæret.",
+    ]}]
+    modeller = {"a": som_model([
+        "Der er rigelig blodig Udflad af egen art",
+        "Barnet er kraftigt og velnæret.",
+    ])}
+    tekst = skriv_rapport(
+        maal_saet(poster, modeller), titel="Prøve", model="m",
+        promptversion="1", dato="2026-08-23",
+    )
+
+    hoved = tekst.index("## Hovedtal")
+    streng = tekst.index("## Uden de linjer, der rummer et ulæseligt sted")
+    assert hoved < streng < tekst.index("## Pr. linje")
+    assert "Sammenlign de to" in tekst
+    # Forskellen skal staa som et tal, ikke kun som et forbehold.
+    assert "en forskel på" in tekst

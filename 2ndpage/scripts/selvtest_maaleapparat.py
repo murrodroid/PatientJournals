@@ -220,8 +220,8 @@ def selvtest(poster: list[dict]) -> str:
         "",
         "## Tallene",
         "",
-        "| Forvanskning | raa | uden_versaler | uden_diakritika | uden_tegnsætn. | arbejdstal | Dækning | Modeltekst uden modstykke |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|",
+        "| Forvanskning | raa | uden_versaler | uden_diakritika | uden_tegnsætn. | arbejdstal | arbejdstal, strengt | Dækning | Modeltekst uden modstykke |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     resultater = []
     for navn, funktion, forventet in FORVANSKNINGER:
@@ -232,10 +232,22 @@ def selvtest(poster: list[dict]) -> str:
         ud.append(
             f"| {navn} | {_pct(f['raa'].cer)} | {_pct(f['uden_versaler'].cer)} | "
             f"{_pct(f['uden_diakritika'].cer)} | {_pct(f['uden_tegnsaetning'].cer)} | "
-            f"{_pct(f['arbejdstal'].cer)} | {_pct(saet.daekning)} | {uforankret} tegn |"
+            f"{_pct(f['arbejdstal'].cer)} | {_pct(saet.rene['arbejdstal'].cer)} | "
+            f"{_pct(saet.daekning)} | {uforankret} tegn |"
         )
 
-    ud += ["", "### Hvad hver linje skal vise", ""]
+    ud += [
+        "",
+        "Kolonnen **arbejdstal, strengt** er den samme måling med linjer, der",
+        "rummer et `[?]`, helt ude (beslutning 44). Her i selvtesten forvanskes",
+        "alle bogstaver med samme sandsynlighed, så de svære linjer er IKKE",
+        "sværere end de andre — de to tal bør derfor ligge tæt. Gør de det,",
+        "ved vi, at selve maskineriet ikke skaber en forskel, og at en forskel",
+        "på rigtige data kommer fra materialet, ikke fra måden at måle på.",
+        "",
+        "### Hvad hver linje skal vise",
+        "",
+    ]
     for navn, _, _, forventet in resultater:
         ud.append(f"- **{navn}** — {forventet}")
 

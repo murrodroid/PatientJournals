@@ -1242,3 +1242,47 @@ var forklaringen rimelig, og den ene gang var den endda rigtig. Det er ikke
 pointen. Pointen er, at et projekt, hvis hele formål er at skelne målte tal fra
 formodninger om en models kvalitet, ikke kan tillade sig at være sjusket med
 samme skel i sine egne noter.
+
+## 2026-08-23 — Stage 03 godkendt af lead, med én tilføjelse
+
+leads svar på gennemgangen: *"jeg tror det giver et bias at måle på alt hvad
+vi ved, så vi skal også have et målt perspektiv hvor vi siger 'vi springer over
+de linjer som har ukendt i sig'. Derudover synes jeg ærligt talt afsnit 7 og 8
+virker lidt søgte, men vi kan prøve, alt andet virker ok. Vi kan sige det kan
+modificeres ved behov yderligere senere."*
+
+### Ny låst beslutning
+
+| # | Beslutning | Begrundelse |
+|---|---|---|
+| 44 | **Den strenge måling rapporteres ved siden af hovedtallet.** Samme måling, men linjer med mindst ét `[?]` er slet ikke med — heller ikke deres kendte stumper. Forskellen mellem de to tal skrives ud. | leads indvending, og den er rigtig: forankringen redder de kendte stumper på hver side af et ulæseligt sted, og det er netop dér, både modellen og opdelingen er mest usikre. Hovedtallet kan derfor være skævt, uden at nogen kan se det. Nu kan man se det, fordi de to tal står ved siden af hinanden. |
+
+Hvordan forskellen læses, står i rapporten selv: ligger de tæt, tilfører
+redningen ingen skævhed, og hovedtallet gælder, fordi det hviler på mest tekst.
+Er den strenge lavere, er de reddede stumper sværere end resten, og hovedtallet
+er for pessimistisk. Er den strenge højere, har redningen pyntet — og så er det
+den strenge, der gælder.
+
+**Bemærk forskellen på de to nævnere.** Den strenge måling har to procenttal,
+som ikke må forveksles: *hvor stor en del af facits tegn den overhovedet kan
+se* (resten ligger på linjer med et `[?]`) og *hvor meget af dét den fik fat i*.
+Det første er prisen for at være streng; det andet er dækningen inden for den
+pris.
+
+### Forbehold, noteret som leads egne ord
+
+**Afsnit 7 og 8 — "de 10 værste sider" og "de 10 tyndest målte sider" — virker
+søgte.** De bliver stående og prøves af på det første rigtige modelsvar. Viser
+de sig ikke at give noget, ryger de ud. Det samme gælder resten af formatet:
+det kan modificeres yderligere ved behov. En godkendt stage er ikke forseglet.
+
+### Stage 03 er hermed låst
+
+Alt andet i formatet er godkendt. Næste skridt er stage 05, som er det første,
+der kræver modelkald — og som ikke startes uden leads udtrykkelige go.
+
+### Løs ende lukket samtidig
+
+`pyproject.toml` erklærede kommandoen `andenside = "andenside.cli:main"`, men
+`src/andenside/cli.py` findes ikke. Linjen er fjernet efter leads valg. Kan
+sættes ind igen, den dag der faktisk er en kommandolinje-indgang.

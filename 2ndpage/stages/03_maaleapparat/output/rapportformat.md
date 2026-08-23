@@ -68,6 +68,32 @@ Målt på **97,20 % af facits tegn** (93,58 % af linjerne). De udeladte er de sv
 
 Af de 297 linjer med mindst ét `[?]` kunne forankringen redde **280** ind i målingen ved at måle de kendte stumper omkring det ulæselige sted. Grundreglen er ellers, at hele linjen går ud (beslutning 38), så uden det trin ville dækningen have været væsentligt lavere.
 
+## Uden de linjer, der rummer et ulæseligt sted
+
+Hovedtallet ovenfor tager de kendte stumper med fra linjer, hvor
+transskribenten gav op — teksten på hver side af et `[?]`. Det er
+netop dér, både modellen og opdelingen er mest usikre, så det kan
+trække tallet skævt. Her er den samme måling med de linjer helt ude.
+
+Den strenge måling ser **87,84 % af facits tegn** (resten ligger på linjer med mindst ét `[?]`) og fik fat i 99,46 % af dem.
+
+| Variant | Tegnfejl (CER) | Ordfejl (WER) | Tegnafstand | Facit-tegn |
+|---|---:|---:|---:|---:|
+| `raa` | 3,72 % | 19,72 % | 2109 | 56719 |
+| `uden_versaler` | 3,72 % | 19,72 % | 2109 | 56719 |
+| `uden_diakritika` | 3,72 % | 19,72 % | 2109 | 56719 |
+| `uden_tegnsaetning` | 3,92 % | 19,77 % | 2108 | 53778 |
+| `arbejdstal` | 3,92 % | 19,77 % | 2108 | 53778 |
+| `lempeligst` | 3,92 % | 19,77 % | 2108 | 53778 |
+
+**Sammenlign de to.** Hovedtallet er 3,92 %, den strenge er 3,92 % (`arbejdstal`) — en forskel på 0,00 %.
+
+Ligger de tæt, tilfører redningen af de svære linjer ingen skævhed, og
+hovedtallet kan bruges, fordi det hviler på mest tekst. Er den strenge
+**lavere**, er de reddede stumper sværere end resten, og hovedtallet er
+for pessimistisk. Er den strenge **højere**, har redningen pyntet, og så
+er det den strenge, der gælder.
+
 ## Pr. linje
 
 Samme tekst, men målt linje for linje efter at linjerne er parret via

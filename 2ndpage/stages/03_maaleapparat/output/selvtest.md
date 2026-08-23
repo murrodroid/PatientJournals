@@ -9,18 +9,25 @@ data der fremkalder en bestemt fejl er sjældent typiske.
 
 ## Tallene
 
-| Forvanskning | raa | uden_versaler | uden_diakritika | uden_tegnsætn. | arbejdstal | Dækning | Modeltekst uden modstykke |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| facit mod sig selv | 0,00 % | 0,00 % | 0,00 % | 0,00 % | 0,00 % | 97,58 % | 2519 tegn |
-| alle ø skrevet som ö | 0,75 % | 0,75 % | 0,00 % | 0,79 % | 0,79 % | 97,58 % | 2519 tegn |
-| alt med små bogstaver | 5,30 % | 0,00 % | 5,30 % | 5,59 % | 0,00 % | 97,58 % | 2519 tegn |
-| al tegnsætning fjernet | 5,04 % | 5,04 % | 5,04 % | 0,10 % | 0,10 % | 97,55 % | 2447 tegn |
-| hele siden som ét afsnit | 0,00 % | 0,00 % | 0,00 % | 0,00 % | 0,00 % | 97,58 % | 2519 tegn |
-| hvert linjebrud flyttet ét ord | 0,00 % | 0,00 % | 0,00 % | 0,00 % | 0,00 % | 97,58 % | 2519 tegn |
-| et opdigtet afsnit tilføjet | 0,00 % | 0,00 % | 0,00 % | 0,00 % | 0,00 % | 97,58 % | 7475 tegn |
-| 2 % af bogstaverne byttet | 1,51 % | 1,51 % | 1,51 % | 1,59 % | 1,59 % | 97,25 % | 2735 tegn |
-| 10 % af bogstaverne byttet | 7,50 % | 7,50 % | 7,50 % | 7,92 % | 7,92 % | 97,16 % | 2916 tegn |
-| den midterste tredjedel sprunget over | 0,45 % | 0,44 % | 0,45 % | 0,42 % | 0,40 % | 61,38 % | 3900 tegn |
+| Forvanskning | raa | uden_versaler | uden_diakritika | uden_tegnsætn. | arbejdstal | arbejdstal, strengt | Dækning | Modeltekst uden modstykke |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| facit mod sig selv | 0,00 % | 0,00 % | 0,00 % | 0,00 % | 0,00 % | 0,00 % | 97,58 % | 2519 tegn |
+| alle ø skrevet som ö | 0,75 % | 0,75 % | 0,00 % | 0,79 % | 0,79 % | 0,80 % | 97,58 % | 2519 tegn |
+| alt med små bogstaver | 5,30 % | 0,00 % | 5,30 % | 5,59 % | 0,00 % | 0,00 % | 97,58 % | 2519 tegn |
+| al tegnsætning fjernet | 5,04 % | 5,04 % | 5,04 % | 0,10 % | 0,10 % | 0,00 % | 97,55 % | 2447 tegn |
+| hele siden som ét afsnit | 0,00 % | 0,00 % | 0,00 % | 0,00 % | 0,00 % | 0,00 % | 97,58 % | 2519 tegn |
+| hvert linjebrud flyttet ét ord | 0,00 % | 0,00 % | 0,00 % | 0,00 % | 0,00 % | 0,00 % | 97,58 % | 2519 tegn |
+| et opdigtet afsnit tilføjet | 0,00 % | 0,00 % | 0,00 % | 0,00 % | 0,00 % | 0,00 % | 97,58 % | 7475 tegn |
+| 2 % af bogstaverne byttet | 1,51 % | 1,51 % | 1,51 % | 1,59 % | 1,59 % | 1,56 % | 97,25 % | 2735 tegn |
+| 10 % af bogstaverne byttet | 7,50 % | 7,50 % | 7,50 % | 7,92 % | 7,92 % | 7,84 % | 97,16 % | 2916 tegn |
+| den midterste tredjedel sprunget over | 0,45 % | 0,44 % | 0,45 % | 0,42 % | 0,40 % | 0,36 % | 61,38 % | 3900 tegn |
+
+Kolonnen **arbejdstal, strengt** er den samme måling med linjer, der
+rummer et `[?]`, helt ude (beslutning 44). Her i selvtesten forvanskes
+alle bogstaver med samme sandsynlighed, så de svære linjer er IKKE
+sværere end de andre — de to tal bør derfor ligge tæt. Gør de det,
+ved vi, at selve maskineriet ikke skaber en forskel, og at en forskel
+på rigtige data kommer fra materialet, ikke fra måden at måle på.
 
 ### Hvad hver linje skal vise
 

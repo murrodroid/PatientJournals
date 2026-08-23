@@ -9,6 +9,7 @@ Videre til næste stage kun efter menneskelig gennemgang.
 - [2026-08-20 16:20](diary/2026-08-20.md) — Stage 02 bygget: facit-læser, klammekortlægning, øve/prøve-opdeling
 - [2026-08-21](diary/2026-08-21.md) — Stage 02 godkendt og låst; 16 beslutninger truffet i dialog
 - [2026-08-22](diary/2026-08-22.md) — Stage 03 bygget: måleapparatet; beslutning 39-43; skævheden gjort til et tal
+- [2026-08-23](diary/2026-08-23.md) — Stage 03 godkendt og låst; den strenge måling tilføjet (beslutning 44)
 
 ## Fase 0 — Kortlægning og plan (afsluttet 2026-08-18)
 
@@ -140,7 +141,7 @@ uanset hvad litteraturen ellers siger.
       historisk rigtige tekst til et færdigt datasæt. Modellen promptes
       IKKE til at genkende overstregninger.
 
-## Stage 03 — Måleapparat  *(bygget 2026-08-22, afventer gennemgang)*
+## Stage 03 — Måleapparat — **GODKENDT OG LÅST 2026-08-23**
 
 - [x] **Mål BÅDE fladet og pr. linje.** Linjeparringen er selve forankringen:
       hver facit-linje søges i modellens rå tekst uden hensyn til dens
@@ -209,9 +210,20 @@ uanset hvad litteraturen ellers siger.
   genbygningen 21. august). De 422 svære linjer holder; andelen bliver
   11,5 % i stedet for 12,0 %.
 
-- [ ] **Gennemgang ved lead** — er det DE FELTER, du vil træffe valg ud fra?
-      Se `stages/03_maaleapparat/output/rapportformat.md` først, derefter
-      `selvtest.md`.
+- [x] **Den strenge måling tilføjet** (beslutning 44, lead 2026-08-23):
+      samme måling, men linjer med et `[?]` slet ikke med — heller ikke deres
+      kendte stumper. Står lige efter hovedtallet med forskellen skrevet ud,
+      fordi de reddede stumper netop ligger op ad de ulæselige steder, hvor
+      alt er mest usikkert. Er den strenge højere end hovedtallet, har
+      redningen pyntet, og så er det den strenge, der gælder.
+- [x] **Gennemgang ved lead — GODKENDT** (2026-08-23): "alt andet virker ok".
+      **Stage 03 er hermed låst.** Genåbnes uden tøven, hvis der viser sig et
+      hul ved de første rigtige tal.
+- [ ] **leads forbehold, prøves af i stage 05**: afsnit 7 og 8 ("de 10 værste
+      sider", "de 10 tyndest målte sider") "virker lidt søgte, men vi kan
+      prøve". Giver de ikke noget på det første rigtige modelsvar, ryger de ud.
+- [x] **Løs ende lukket**: `pyproject.toml`s døde kommando-indgang
+      (`andenside.cli:main` uden en `cli.py`) er fjernet efter leads valg.
 
 ## Stage 04 — Billedforberedelse
 
@@ -279,12 +291,3 @@ selve læse-implementeringen, samme princip som resten af planen)*
 - [ ] Forslag til sideudvælgelse via `patient_page_counter` frem for `_fp`
 - [ ] Afklar dashboard-status og om `textpage` allerede er afprøvet
 - [ ] Efterprøvning: vores tal mod hans app på samme sider
-
-## Løse ender uden for stagestrukturen
-
-- [ ] **`pyproject.toml` peger på en fil, der ikke findes.**
-      `[project.scripts] andenside = "andenside.cli:main"`, men der er ingen
-      `src/andenside/cli.py`. Kommandoen `andenside` bliver derfor installeret
-      og fejler, hvis nogen kalder den. Ikke rørt, fordi den kan være tiltænkt
-      en kommende CLI — enten skrives filen, eller også fjernes linjen.
-      Fundet 2026-08-22 under stage 03.

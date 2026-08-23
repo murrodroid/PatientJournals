@@ -5,8 +5,6 @@ description = "Metodetest for transskription af andensider i Blegdamshospitalets
 requires-python = ">=3.13,<3.14"
 dependencies = ["pillow>=11.0"]
 
-[project.scripts]
-andenside = "andenside.cli:main"
 
 [dependency-groups]
 dev = ["pytest>=8.0"]

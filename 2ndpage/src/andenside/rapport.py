@@ -156,6 +156,37 @@ def skriv_rapport(
         "væsentligt lavere.",
     ]
 
+    # Den strenge maaling ved siden af hovedtallet. Staar HER, lige efter det,
+    # fordi den er svaret paa "er hovedtallet skaevt?" -- ikke et sidetal.
+    streng = saet.rene
+    ud += [
+        "",
+        "## Uden de linjer, der rummer et ulæseligt sted",
+        "",
+        "Hovedtallet ovenfor tager de kendte stumper med fra linjer, hvor",
+        "transskribenten gav op — teksten på hver side af et `[?]`. Det er",
+        "netop dér, både modellen og opdelingen er mest usikre, så det kan",
+        "trække tallet skævt. Her er den samme måling med de linjer helt ude.",
+        "",
+        f"Den strenge måling ser **{_pct(saet.andel_af_facit_i_rene)} af facits tegn** "
+        f"(resten ligger på linjer med mindst ét `[?]`) og fik fat i "
+        f"{_pct(saet.rene_daekning)} af dem.",
+        "",
+    ]
+    ud += _varianttabel(streng)
+    ud += [
+        "",
+        f"**Sammenlign de to.** Hovedtallet er {_pct(fladet['arbejdstal'].cer)}, "
+        f"den strenge er {_pct(streng['arbejdstal'].cer)} (`arbejdstal`) — "
+        f"en forskel på {_pct(abs(streng['arbejdstal'].cer - fladet['arbejdstal'].cer))}.",
+        "",
+        "Ligger de tæt, tilfører redningen af de svære linjer ingen skævhed, og",
+        "hovedtallet kan bruges, fordi det hviler på mest tekst. Er den strenge",
+        "**lavere**, er de reddede stumper sværere end resten, og hovedtallet er",
+        "for pessimistisk. Er den strenge **højere**, har redningen pyntet, og så",
+        "er det den strenge, der gælder.",
+    ]
+
     ud += [
         "",
         "## Pr. linje",

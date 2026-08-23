@@ -43,7 +43,7 @@ tests/                   Herunder strukturtesten
 
 ## Status
 
-Kortlægning og planlægning er færdig, og 43 beslutninger er låst i
+Kortlægning og planlægning er færdig, og 44 beslutninger er låst i
 `CONTEXT.md`.
 
 **Billeder (stage 01):** kbharkiv.dk's kildeviser har et åbent API, så vi
@@ -62,7 +62,7 @@ optælling af klammeopmærkningen, opdelingen i øve- og prøvemængde, og de
 blokke og steder, der er lagt til side. Kildefilerne på OneDrive læses kun
 — en test håndhæver, at de aldrig røres.
 
-**Måleapparat (stage 03):** bygget 2026-08-22, afventer gennemgang.
+**Måleapparat (stage 03):** færdigt, godkendt og låst 2026-08-23.
 `src/andenside/cer.py` er StadsCERs målekode overtaget direkte (fem
 varianter, dansk tegnfoldning). `src/andenside/maal.py` er projektets eget
 bidrag: **én** funktion, `forankr()`, finder facits kendte tekststumper i
@@ -73,7 +73,10 @@ linjeparringen sker gratis, fordi der søges i modellens rå tekst uden hensyn
 til dens linjeskift. `src/andenside/rapport.py` skriver måletallene ud med
 dækningen ved hvert eneste tal — og lægger det, modellen skrev på de
 ulæselige steder, i en CSV for sig, så det kan forelægges senere uden
-nogensinde at havne i facit. Selvtesten
+nogensinde at havne i facit. **Hvert tal rapporteres i to udgaver**: én der
+tager de kendte stumper med fra linjer med et ulæseligt sted, og én streng,
+hvor de linjer slet ikke er med. Forskellen mellem de to er skævheden, og den
+skrives ud. Selvtesten
 (`scripts/selvtest_maaleapparat.py`) kører apparatet mod facit selv og mod
 ti konstruerede forvanskninger, hvor svaret er kendt på forhånd, og opgør
 hvor stor en del af de indlagte fejl målingen faktisk finder igen.

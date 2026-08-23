@@ -421,6 +421,13 @@ class SideMaaling:
     pr_linje: dict[str, cer.Maaltal] = field(default_factory=dict)
     fuldside: dict[str, cer.Maaltal] | None = None
 
+    # Den strenge maaling: linjer med et `[?]` slet ikke med.
+    rene: dict[str, cer.Maaltal] = field(default_factory=dict)
+    rene_linjer_i_alt: int = 0
+    rene_linjer_maalt: int = 0
+    rene_tegn_i_alt: int = 0
+    rene_tegn_maalt: int = 0
+
     facit_tegn_i_alt: int = 0
     facit_tegn_maalt: int = 0
     linjer_i_alt: int = 0
@@ -485,8 +492,24 @@ def maal_side(
     facit_fladet = flad(facit_stykker, delinger)
     model_fladet = flad(model_stykker, delinger)
 
+    # Den strenge udgave (lead 2026-08-23): samme maaling, men linjer med et
+    # `[?]` er slet ikke med -- heller ikke deres kendte stumper. Findes ved
+    # siden af hovedtallet, fordi de reddede stumper netop ligger op ad de
+    # ulaeselige steder, hvor baade modellen og opdelingen er mest usikre. Er
+    # de to tal ens, tilfoerer redningen ingen skaevhed; er de forskellige,
+    # er forskellen selve skaevheden, og saa er det den strenge, der gaelder.
+    rene = [f for f in fund if f.forankret and not f.svaer]
+    rene_facit_stykker = [f.facit_maalt for f in rene]
+    rene_delinger = deler_ord(rene_facit_stykker)
+    rene_facit = flad(rene_facit_stykker, rene_delinger)
+    rene_model = flad([f.model_maalt for f in rene], rene_delinger)
+
     fladet = {
         navn: cer.maal_par(facit_fladet, model_fladet, **valg)
+        for navn, valg in cer.VARIANTER.items()
+    }
+    rene_maal = {
+        navn: cer.maal_par(rene_facit, rene_model, **valg)
         for navn, valg in cer.VARIANTER.items()
     }
 
@@ -533,12 +556,19 @@ def maal_side(
     daekket = sum(_tegn(s.model_tekst) for f in fund for s in f.fundne)
     daekket += sum(_tegn(g.model_tekst) for f in fund for g in f.gab)
 
+    alle_rene_linjer = [linje for f, linje in zip(fund, facit_linjer) if not f.svaer]
+
     return SideMaaling(
         image_name=image_name,
         linjer=tuple(fund),
         fladet=fladet,
         pr_linje=pr_linje,
         fuldside=fuldside,
+        rene=rene_maal,
+        rene_linjer_i_alt=len(alle_rene_linjer),
+        rene_linjer_maalt=len(rene),
+        rene_tegn_i_alt=_tegn(flad(alle_rene_linjer, deler_ord(alle_rene_linjer))),
+        rene_tegn_maalt=_tegn(rene_facit),
         facit_tegn_i_alt=_tegn(saml_orddeling("\n".join(facit_linjer))),
         facit_tegn_maalt=_tegn(facit_fladet),
         linjer_i_alt=len(fund),
@@ -572,6 +602,31 @@ class SaetMaaling:
     @property
     def pr_linje(self) -> dict[str, cer.Maaltal]:
         return self._sum("pr_linje")
+
+    @property
+    def rene(self) -> dict[str, cer.Maaltal]:
+        """Den strenge maaling: kun linjer helt uden ulaeselige steder."""
+        return self._sum("rene")
+
+    @property
+    def rene_daekning(self) -> float:
+        """Andel af de RENE linjers tegn, den strenge maaling naaede.
+
+        Naevneren er kun de rene linjer -- ikke hele facit. Tallet svarer paa
+        "hvor meget af det, vi maaler paa, fik vi fat i", ikke "hvor meget af
+        siden". Hvor stor en del af siden der er skaaret fra, staar for sig.
+        """
+        i_alt = sum(s.rene_tegn_i_alt for s in self.sider)
+        maalt = sum(s.rene_tegn_maalt for s in self.sider)
+        return maalt / i_alt if i_alt else 0.0
+
+    @property
+    def andel_af_facit_i_rene(self) -> float:
+        """Hvor stor en del af facits tegn den strenge maaling overhovedet
+        kan se. Resten ligger paa linjer med mindst ét `[?]`."""
+        i_alt = sum(s.facit_tegn_i_alt for s in self.sider)
+        rene = sum(s.rene_tegn_i_alt for s in self.sider)
+        return rene / i_alt if i_alt else 0.0
 
     @property
     def fuldside(self) -> dict[str, cer.Maaltal]:

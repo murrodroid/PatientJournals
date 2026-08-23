@@ -117,6 +117,15 @@ henviser til beslutningstabellerne i rod-`CONTEXT.md`.
     forankring. Det er rapportens eneste tal, der ikke kan pynte på noget:
     forankringen ser hverken tekst, modellen har fundet på, eller tekst, den
     har sprunget over — kun det, der kunne parres.
+16. **Den strenge måling rapporteres ved siden af hovedtallet** (beslutning
+    44, lead 2026-08-23). Samme måling, men linjer med mindst ét `[?]` er
+    slet ikke med — heller ikke deres kendte stumper. Grunden er, at
+    forankringen redder teksten på hver side af et ulæseligt sted, og det er
+    netop dér, både modellen og opdelingen er mest usikre; hovedtallet kan
+    derfor være skævt, uden at nogen kan se det. Forskellen mellem de to tal
+    skrives ud i rapporten sammen med, hvordan den læses. **Bemærk de to
+    nævnere**: hvor stor en del af facit den strenge måling overhovedet kan
+    se, og hvor meget af dét den fik fat i, er to forskellige tal.
 
 ## Outputs
 
@@ -146,8 +155,13 @@ Næste stage er `05_foerste_transskription`. `04_billedforberedelse` blev
 godkendt og låst 2026-08-18, altså før denne stage blev bygget — rækkefølgen i
 mappenavnene er ikke den rækkefølge, arbejdet faktisk faldt i.
 
-Reviewed betyder, at du har set `output/rapportformat.md` og er enig i, at det
-er DE FELTER, du vil træffe valg ud fra. Tallene i filen er konstruerede og
-betyder ingenting — det er formatet, der skal godkendes, ikke resultatet.
+**GENNEMGÅET OG GODKENDT 2026-08-23.** lead: "alt andet virker ok". Ét krav
+kom ud af gennemgangen og er indarbejdet — den strenge måling, punkt 16 —
+og ét forbehold står åbent: afsnit 7 og 8 i rapporten ("de 10 værste sider",
+"de 10 tyndest målte sider") "virker lidt søgte, men vi kan prøve". De prøves
+af på det første rigtige modelsvar; giver de ikke noget, ryger de ud.
+
+Stage 03 er dermed låst, men ikke forseglet: formatet kan modificeres ved
+behov, når der er rigtige tal at se på.
 
 Stage 05 er det første, der kræver modelkald. Ingen kørsel uden dit go.
