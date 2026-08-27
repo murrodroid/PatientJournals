@@ -14,7 +14,8 @@ from PIL import Image
 
 from andenside.masterlist import Side
 
-STRIMMEL_ANDEL = 0.30  # hvor stor en del af bredden strimlen forventes at fylde
+STRIMMEL_ANDEL = 0.40  # hvor stor en del af bredden strimlen forventes at fylde
+MIN_STIGNING = 0.01  # mindste troevaerdige spring i blaekprofilen over én kolonne
 
 
 @dataclass(frozen=True)
@@ -86,7 +87,7 @@ def smooth(values: list[float], window: int = 9) -> list[float]:
 @dataclass(frozen=True)
 class SnitResultat:
     x: int
-    styrke: float  # blaekmaengde ved snittet (lavere = mere sikker dal)
+    styrke: float  # stoerrelsen af springet i blaekprofilen; 0.0 = intet troevaerdigt snit
     vindue: SoegeVindue
 
 
@@ -94,29 +95,41 @@ def find_snitpunkt(
     img: Image.Image,
     side: Side,
     *,
-    ryg_taerskel: float = 0.30,
+    min_stigning: float = MIN_STIGNING,
     buffer_andel: float = 0.01,
 ) -> SnitResultat:
     """Finder graensen mellem hovedsidens tekst og naboopslagets strimmel.
 
-    To tidligere forsoeg fejlede: et globalt lyseste-punkt kunne lande
-    langt inde i naboens egen margen (forbi ryggen), og en "foerste
-    sammenhaengende blanke plet"-soegning fandt intet, fordi naboens
-    tekst ofte begynder for taet paa ryggen til at give en blank periode.
+    Tre tidligere forsoeg fejlede. Et globalt lyseste-punkt kunne lande
+    langt inde i naboens egen margen (forbi ryggen). En "foerste
+    sammenhaengende blanke plet"-soegning fandt intet, fordi naboens tekst
+    ofte begynder for taet paa ryggen til at give en blank periode. Og en
+    fast NIVEAU-taerskel (blaekmaengden skal krydse fx 0,30) kan slet ikke
+    virke generelt: det, profilen faktisk faar oeje paa, er SKYGGEN nede i
+    falsen, og den er kraftig i de fleste bind, men naesten fravaerende i
+    velfotograferede bind. Maalt paa oevemaengden topper falsen paa
+    273104_001639/1640 ved 0,291/0,293, mens den vaerste haandskrifts-stoej
+    paa vejen frem naar 0,300 paa andre sider -- intervallerne OVERLAPPER,
+    saa ingen absolut taerskel kan skille fals fra haandskrift.
 
-    Den fysiske bogryg viser sig i praksis som en KRAFTIG TOP i
-    blaekprofilen (0,5-1,0 -- langt over almindelig haandskrifts 0,05-0,15),
-    ikke en dal -- bekraeftet visuelt 2026-08-18 paa flere billeder efter
-    at soegningen blev afgraenset korrekt til kant-vinduet. Vi gaar fra
-    vores egen, betroede side og ind mod naboopslaget, og snitter ved
-    foerste kolonne hvor blaekmaengden krydser ryg_taerskel -- det er
-    ryggens naere kant.
+    Vi soeger derfor paa AENDRINGSHASTIGHEDEN i stedet for paa niveauet:
+    foerste differens af den udglattede profil, taget langs soegeretningen
+    (fra vores egen, betroede side og ind mod naboopslaget). Sidekanten er
+    et braat spring, uanset hvor moerk skyggen er, mens haandskrift stiger
+    og falder jaevnt. Snittet laegges ved den stoerste positive stigning i
+    soegevinduet.
 
     Et lille buffer (standard 1% af billedbredden) flyttes derefter VAEK
     fra vores egen tekst og ind mod ryggen/naboen. Uden buffer risikerer et
     snit lige paa graensen at skaere brodstykker af hoeje eller dybe
-    bogstavtraek, der strækker sig en anelse laengere end den udglattede
+    bogstavtraek, der straekker sig en anelse laengere end den udglattede
     profil viser. Lead paapegede behovet 2026-08-18.
+
+    Er den stoerste stigning mindre end min_stigning, er profilen for flad
+    til at rumme en kant overhovedet: der returneres styrke 0,0, saa
+    kaldere (fx beskaer.py) kan lade siden vaere i stedet for at skaere paa
+    et gaet. Gulvet ligger under det halve af den svageste bekraeftede fals
+    i oevemaengden (0,021), saa en svag men rigtig fals ikke kasseres.
     """
     profile = smooth(column_ink_profile(img))
     vindue = soegevindue(side, img.width)
@@ -124,19 +137,28 @@ def find_snitpunkt(
 
     if vindue.retning == "fra_hoejre":
         # vores side er til venstre for vinduet; gaa fra vindue.start og udad
-        raekkefoelge = range(vindue.start, vindue.slut)
+        raekkefoelge = range(vindue.start + 1, vindue.slut)
+        forrige = -1
     else:
         # vores side er til hoejre for vinduet; gaa fra vindue.slut og indad
-        raekkefoelge = range(vindue.slut - 1, vindue.start - 1, -1)
+        raekkefoelge = range(vindue.slut - 2, vindue.start - 1, -1)
+        forrige = 1
 
+    bedste_x: int | None = None
+    bedste_stigning = 0.0
     for x in raekkefoelge:
-        if profile[x] >= ryg_taerskel:
-            if vindue.retning == "fra_hoejre":
-                x_med_buffer = min(x + buffer_px, vindue.slut - 1)
-            else:
-                x_med_buffer = max(x - buffer_px, vindue.start)
-            return SnitResultat(x=x_med_buffer, styrke=profile[x], vindue=vindue)
+        stigning = profile[x] - profile[x + forrige]
+        if stigning > bedste_stigning:
+            bedste_stigning = stigning
+            bedste_x = x
 
-    # ingen ryg fundet i vinduet -- usikkert, marker med styrke 0.0 saa det
-    # kan filtreres fra i stedet for at blive brugt uden videre
-    return SnitResultat(x=vindue.start, styrke=0.0, vindue=vindue)
+    if bedste_x is None or bedste_stigning < min_stigning:
+        # ingen kant i vinduet -- usikkert, marker med styrke 0.0 saa det
+        # kan filtreres fra i stedet for at blive brugt uden videre
+        return SnitResultat(x=vindue.start, styrke=0.0, vindue=vindue)
+
+    if vindue.retning == "fra_hoejre":
+        x_med_buffer = min(bedste_x + buffer_px, vindue.slut - 1)
+    else:
+        x_med_buffer = max(bedste_x - buffer_px, vindue.start)
+    return SnitResultat(x=x_med_buffer, styrke=bedste_stigning, vindue=vindue)

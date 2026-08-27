@@ -88,11 +88,28 @@ Den strenge måling ser **87,84 % af facits tegn** (resten ligger på linjer med
 
 **Sammenlign de to.** Hovedtallet er 3,92 %, den strenge er 3,92 % (`arbejdstal`) — en forskel på 0,00 %.
 
-Ligger de tæt, tilfører redningen af de svære linjer ingen skævhed, og
-hovedtallet kan bruges, fordi det hviler på mest tekst. Er den strenge
-**lavere**, er de reddede stumper sværere end resten, og hovedtallet er
-for pessimistisk. Er den strenge **højere**, har redningen pyntet, og så
-er det den strenge, der gælder.
+Hvor stor en forskel der skal til, før den betyder noget, kan aflæses
+af selvtesten: dér forvanskes alle bogstaver lige meget, så de svære
+linjer er netop IKKE sværere end resten, og alligevel skiller de to tal
+sig 0,08 procentpoint ad (7,92 % mod 7,84 % ved 10 % forvanskning). En
+forskel af den størrelse er maskineriet selv. Er forskellen flere gange
+større, kommer den fra materialet, og så siger retningen følgende:
+
+**Er den strenge lavere**, er de reddede stumper sværere end resten af
+teksten. Det er det ventede — de ligger op ad de steder, transskribenten
+selv gav op over for. Hovedtallet er da en smule for pessimistisk og kan
+bruges som det står, fordi det hviler på mest tekst.
+
+**Er den strenge højere, er det et advarselstegn**, og så er det den
+strenge, der gælder. Grunden er, at en reddet stump kun tæller med i
+hovedtallet, hvis den overhovedet kunne findes i modellens svar. Har
+modellen slagtet stumpen — læst noget helt andet, eller sprunget stedet
+over — kan søgningen ikke genkende den, og linjen falder UD af målingen
+i stedet for at tælle som en fejl. Tilbage bliver kun de stumper,
+modellen klarede. Hovedtallet opgør altså de vellykkede redninger og
+kommer til at se pænere ud, jo dårligere modellen faktisk læste de
+svære steder. Den strenge måling kan ikke rammes af det, fordi den slet
+ikke ser de linjer.
 
 ## Pr. linje
 

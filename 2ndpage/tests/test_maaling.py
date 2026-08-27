@@ -470,3 +470,7 @@ def test_rapporten_stiller_den_strenge_maaling_op_mod_hovedtallet():
     assert "Sammenlign de to" in tekst
     # Forskellen skal staa som et tal, ikke kun som et forbehold.
     assert "en forskel på" in tekst
+    # lead 2026-08-23: et hoejere strengt tal skal forklares, ikke blot
+    # konstateres -- ellers kan laeseren ikke vide, hvorfor det er alvorligt.
+    assert "advarselstegn" in tekst
+    assert "falder UD af målingen" in tekst
