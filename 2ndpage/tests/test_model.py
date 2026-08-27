@@ -123,7 +123,7 @@ def test_projektets_noegle_er_IKKE_den_private(monkeypatch, tmp_path):
     from pathlib import Path
 
     kilde = Path(m.__file__).read_text(encoding="utf-8")
-    assert "api_keys.json" not in kilde, (
+    assert "api_keys" not in kilde, (
         "modulet peger paa en anden noeglefil end projektets egen"
     )
 

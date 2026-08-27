@@ -55,7 +55,7 @@ uanset hvad litteraturen ellers siger.
       krydstjekket ord for ord mod facit
 - [x] **Billedanmodningen er sendt til kollegaen** (bekræftet af lead
       2026-08-20). Afventer hans levering. **Bemærk**: anmodningen dækker
-      de 38 dødsfaldspatienter, ikke <patientnavns> 10 sider — de er
+      de 38 dødsfaldspatienter, ikke de 10 sider under `273104_001636` — de er
       selvhentet via kbharkiv og ligger i øvemængden, så hullet er lukket.
 - [x] **Hele øvemængden hentet selv** (2026-08-20, leads go): 118 sider fra
       15 bind via kbharkiv → `output/oeve_billeder/`. Prøvemængdens 50 sider
@@ -99,7 +99,7 @@ uanset hvad litteraturen ellers siger.
       lodtrækning
 - [x] **Tallene**: 39 filer → 208 sidemærker → 40 uden tekst → **168 sider med
       facit**, fordelt på 39 patienter (de 38 fra dødsfaldsmapperne plus
-      <patientnavn>). Fire steder flaget til gennemsyn.
+      `273104_001636`). Fire steder flaget til gennemsyn.
 - [x] **leads rettelser til læsereglerne indarbejdet** (2026-08-20,
       beslutning 31-34): klammer med prikker/ellipse bliver `[?]` fordi de
       ikke kan måles på; klammer uden `?` er også læseforslag; uafsluttede

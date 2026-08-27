@@ -34,7 +34,7 @@ Sti: `<kilderod>\PID-scapes and Blegdam Patient journals\Patient journals\Meta d
   `patientjournals_v2_1889-97_gemini_almost_complete.jsonl` (22.671),
   `..._final_pages.jsonl` (1.078), `..._remaining_deaths.jsonl` (894) —
   dvs. forsiderne er Gemini-transskriberet for årgangene 1889-97.
-- leads teori bekræftet: masterlisten peger ind i en billedmappe med præcis
+- Leads teori bekræftet: masterlisten peger ind i en billedmappe med præcis
   samme struktur (bind-mappe → `image_name`.ext), som kan skaffes.
 
 ## C:\Work\Alle patientjournaler_komprimeret (lokale billeder)

@@ -44,7 +44,7 @@ transskriberet.
 | Overstreget | `[crossed out]…[written instead]…` | "[crossed out]En Del [written instead]Lidt at Drikke" |
 | Marginaltekst | positions-tag + evt. håndskrevet `\n` | "[right side of page]Rp. Damp\nLincet. expect." |
 | Daglige notater | dato + temperaturer + narrativ | "9/5 [top page left]39,5-38,2 [top page right]Kultur 8/5 fauces: DB" |
-| Fortsættelses-header | patientnavn + Cont-nr (inkonsistent) | "<patientnavn> Cont II", "<patientnavn> Cmt. I" |
+| Fortsættelses-header | patientnavn + Cont-nr (inkonsistent) | `<navn> Cont II`, `<navn> Cmt. I` |
 
 ## Konsistens-problemer (bestemmer normaliseringslaget i eval)
 

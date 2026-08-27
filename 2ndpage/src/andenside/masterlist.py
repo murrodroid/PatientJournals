@@ -6,11 +6,9 @@ import csv
 from dataclasses import dataclass
 from pathlib import Path
 
-MASTERLIST_PATH = Path(
-    r"<kilderod>"
-    r"\PID-scapes and Blegdam Patient journals\Patient journals\Meta data"
-    r"\Blegdam_master_list.csv"
-)
+from andenside.kilder import masterliste
+
+MASTERLIST_PATH = masterliste()
 
 
 @dataclass(frozen=True)

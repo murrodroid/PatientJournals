@@ -18,6 +18,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from andenside.kilder import transskriptioner
+
 BS = chr(92)  # backslash, skrevet saadan for at holde kildekoden laesbar
 
 # Usynligt maerke, laeseren saetter ind for at kunne finde en understregnings
@@ -25,10 +27,7 @@ BS = chr(92)  # backslash, skrevet saadan for at holde kildekoden laesbar
 # saa et nultegn i selve kilden ikke bliver taelt med.
 MAERKE = chr(0)
 
-FACIT_ROOT = Path(
-    r"<kilderod>"
-    r"\PID-scapes and Blegdam Patient journals\Patient journals\Manual transcriptions"
-)
+FACIT_ROOT = transskriptioner()
 
 # Grupper hvis indhold er formatering/metadata, ikke tekst. Naar en gruppe
 # aabner med et af disse kontrolord, springes hele gruppen over.

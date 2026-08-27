@@ -74,7 +74,7 @@ henviser til beslutningstabellerne i rod-`CONTEXT.md`.
 8. **Ordfejl rapporteres ved siden af tegnfejl** (beslutning 28). Ingen
    målrettet opmærkning af datoer, temperaturer eller medicinnavne — det
    kræver et større apparat, og det er ikke dét, teksten skal bruges til.
-   leads egne ord: det er den fortællende optagelsestekst om patientens
+   Leads egne ord: det er den fortællende optagelsestekst om patientens
    forhistorie og levevilkår ("har haft mæslinger", "underernæret"), der er
    målet; temperaturer og medicin er mindre vigtige.
 9. **Dækningen SKAL stå ved siden af hvert eneste tal.** Det, vi skærer fra,

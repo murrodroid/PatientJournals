@@ -41,7 +41,7 @@ truth. Vinderen skal kunne loades ind som en metode i kollegaens app.
 
 - **Masterlisten løser side-identifikationen**: Blegdam_master_list.csv
   (570.519 rækker) har `patient_page_counter`; `== 2` giver 71.380 andensider
-  direkte. Forsider: 71.378. leads teori bekræftet: listen indekserer en
+  direkte. Forsider: 71.378. Leads teori bekræftet: listen indekserer en
   billedmappe med samme struktur, som kan skaffes.
 - **De lokale billeder er kun udvalgte opslag**: `C:\Work\Alle
   patientjournaler_komprimeret` (23.820 JPG, intake_front_*/intake_dead_*)
@@ -89,7 +89,7 @@ truth. Vinderen skal kunne loades ind som en metode i kollegaens app.
   (intake_dead_* dækker formentlig dødsfaldene 1896-97 = deaths-RTF'erne)?
 - `Transcription codebooks` og `Automatic transcription versions` +
   `validation data` (naboer til Manual transcriptions) — indhold ukendt.
-- leads fork har umerget `origin/patch-1` og lokal `Severity_prompt` —
+- Leads fork har umerget `origin/patch-1` og lokal `Severity_prompt` —
   stadig relevante, eller overhalet af upstream?
 - Koordinering med kollegaen: sidetype-udvælgelse i appen (fp_mode vs.
   masterliste-kobling) og om `textpage`-sporet allerede er testet af ham.
@@ -161,7 +161,7 @@ usikkerhedsmarkering et lag oven på teksten, ikke vævet ind i den.
 - Findes der skarpere originaler end ~1.650-2.000 px bredde pr. opslag?
 - Hvor står kollegaens dashboard-arbejde, og har han allerede afprøvet sin
   egen `textpage`-prompt på andensider?
-- leads fork har umerget `origin/patch-1` og lokal `Severity_prompt`.
+- Leads fork har umerget `origin/patch-1` og lokal `Severity_prompt`.
 
 ## 2026-08-18 (senere igen) — Selvbetjent billedadgang fundet mens vi ventede
 
@@ -458,7 +458,7 @@ Stage 02 er bygget færdig og afventer nu din gennemgang. Koden ligger i
   femcifret bind-id, ikke et sekscifret som alle de andre. En regex på seks
   cifre tabte begge filer uden at sige noget. Der er nu en test, der er set
   fejle netop på det.
-- **<patientnavn>-filen bruger en anden sidemærkning** — `[273104_001637]`
+- **Én af filerne (`273104_001636`) bruger en anden sidemærkning** — `[273104_001637]`
   uden ordet "page". Alle 39 filer læses nu ens.
 - **Klammer kan ligge inden i hinanden**, fx en understregningsnote der
   citerer et ulæseligt sted. Læseren tæller derfor dybde i stedet for at

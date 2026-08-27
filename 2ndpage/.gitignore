@@ -24,3 +24,6 @@ api_keys.py
 
 # Lokale Claude-artefakter hoerer ikke i repoet
 .claude/
+
+# Kildematerialets placering er maskinspecifik
+kilder.local.json

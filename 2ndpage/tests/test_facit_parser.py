@@ -22,7 +22,7 @@ BS = chr(92)
 
 
 def test_sidemarkoer_med_og_uden_ordet_page_genkendes_ens():
-    """<patientnavn>-filen skriver `[273104_001637]` uden ordet 'page'."""
+    """Filen 273104_001636 skriver `[273104_001637]` uden ordet 'page'."""
     tekst = (
         "[transcription of frontpage 273104_001636 - full journal]\n"
         "[273104_001637]\nBarnet indlaegges\n"

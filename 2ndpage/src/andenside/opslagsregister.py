@@ -7,15 +7,13 @@ from pathlib import Path
 
 from PIL import Image
 
+from andenside.kilder import transskriptioner
 from andenside.masterlist import Side, load_masterlist, lookup
 
 STAGE01_OUTPUT = Path(__file__).resolve().parents[2] / "stages" / "01_datagrundlag" / "output"
 PROEVE_OPSLAG = STAGE01_OUTPUT / "proeve_opslag"
 
-FACIT_ROOT = Path(
-    r"<kilderod>"
-    r"\PID-scapes and Blegdam Patient journals\Patient journals\Manual transcriptions"
-)
+FACIT_ROOT = transskriptioner()
 
 
 def frontpage_image_name(side: Side) -> str:
