@@ -12,6 +12,7 @@ Videre til næste stage kun efter menneskelig gennemgang.
 - [2026-08-23](diary/2026-08-23.md) — Stage 03 godkendt og låst; den strenge måling tilføjet (beslutning 44)
 - [2026-08-23 21:05](diary/2026-08-23.md) — Gennemgangen afslørede, at rapportens forklaring ikke virker; instrument-tal blev fremlagt som resultater
 - [2026-08-27 12:55](diary/2026-08-27.md) — Stage 04 genåbnet: falsdetektionen kunne ikke virke generelt, og piloten afslørede det
+- [2026-08-27 15:40](diary/2026-08-27.md) — Beskæringen følger nu falsen bånd for bånd; tre fejlmålinger undervejs
 
 ## Fase 0 — Kortlægning og plan (afsluttet 2026-08-18)
 
