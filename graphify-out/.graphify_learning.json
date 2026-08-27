@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-27T10:24:03.604955+00:00",
+  "generated_at": "2026-08-27T11:02:47.482208+00:00",
   "nodes": {
     "src_patientjournals_app_workflows_workflowservice": {
       "code_fingerprint": "ab423e98308ca0fa88315ecd15ca700381ab9b3b73e6afbabedb4f3f3f188145",
@@ -12,24 +12,125 @@
           "q": "Provide a clear path for the implementation of the 2 following changes. Explain the exact implementation method. Work through them one at a time. 1. Create a preprocessing step before sending through model, which OCR scans the entire page and provides all detected text with image positional arguments. These positions need to be correct for the actual bytes which are given to the model at the final stage, meaning the processed image. 2. Create a method for which we can implement agents to subdivide the transcription task into subproblems that are solved individually. Consider deeply different implementations of doing such and how we could do this best. https://pydantic.dev/docs/ai/core-concepts/agent/"
         }
       ],
-      "score": 0.9990536,
+      "score": 0.998432935,
       "source_file": "src/patientjournals/app/workflows.py",
       "status": "tentative",
       "uses": 1
     },
-    "src_patientjournals_local_model_client_localmodelclient": {
-      "code_fingerprint": "02b0c45b04760f152c06f151eee51d22b1e87ce602caa5122ac77818154041ae",
-      "label": "LocalModelClient",
-      "last": "2026-08-27T09:25:02.899264+00:00",
+    "src_patientjournals_batch_ocr_context_cloudblobidentity": {
+      "code_fingerprint": "b1dbc27c96005fad27a75dc44d73390b31ee5619a833c830f7e577b4c976afb3",
+      "label": "CloudBlobIdentity",
+      "last": "2026-08-27T10:58:30.938071+00:00",
       "provenance": [
+        {
+          "date": "2026-08-27T10:58:30.938071+00:00",
+          "outcome": "useful",
+          "q": "Implement the OCR method to work with batch jobs by retrieving cloud images and creating durable OCR metadata for each; make batch jobs the main point of usage."
+        }
+      ],
+      "score": 0.999931398,
+      "source_file": "src/patientjournals/batch/ocr_context.py",
+      "status": "tentative",
+      "uses": 1
+    },
+    "src_patientjournals_batch_ocr_context_cloudocrmetadata": {
+      "code_fingerprint": "b1dbc27c96005fad27a75dc44d73390b31ee5619a833c830f7e577b4c976afb3",
+      "label": "CloudOcrMetadata",
+      "last": "2026-08-27T10:58:30.938071+00:00",
+      "provenance": [
+        {
+          "date": "2026-08-27T10:58:30.938071+00:00",
+          "outcome": "useful",
+          "q": "Implement the OCR method to work with batch jobs by retrieving cloud images and creating durable OCR metadata for each; make batch jobs the main point of usage."
+        }
+      ],
+      "score": 0.999931398,
+      "source_file": "src/patientjournals/batch/ocr_context.py",
+      "status": "tentative",
+      "uses": 1
+    },
+    "src_patientjournals_batch_prepare_ocr_cloudocrpreparationsummary": {
+      "code_fingerprint": "017376b307c85c05475b0f57d26d5c29690399e014fc495f21d73fb4ab6dedec",
+      "label": "CloudOcrPreparationSummary",
+      "last": "2026-08-27T10:58:30.938071+00:00",
+      "provenance": [
+        {
+          "date": "2026-08-27T10:58:30.938071+00:00",
+          "outcome": "useful",
+          "q": "Implement the OCR method to work with batch jobs by retrieving cloud images and creating durable OCR metadata for each; make batch jobs the main point of usage."
+        }
+      ],
+      "score": 0.999931398,
+      "source_file": "src/patientjournals/batch/prepare_ocr.py",
+      "status": "tentative",
+      "uses": 1
+    },
+    "src_patientjournals_batch_submit": {
+      "code_fingerprint": "2ecdee4cd12cf0943fd96de5dacaa6ed838b60ae74738b81670d08afd5651315",
+      "label": "submit.py",
+      "last": "2026-08-27T10:58:30.938071+00:00",
+      "provenance": [
+        {
+          "date": "2026-08-27T10:58:30.938071+00:00",
+          "outcome": "useful",
+          "q": "Implement the OCR method to work with batch jobs by retrieving cloud images and creating durable OCR metadata for each; make batch jobs the main point of usage."
+        }
+      ],
+      "score": 0.999931398,
+      "source_file": "src/patientjournals/batch/submit.py",
+      "status": "tentative",
+      "uses": 1
+    },
+    "src_patientjournals_local_model_client_localmodelclient": {
+      "code_fingerprint": "5f8f52c06bec2e7bd319fa6770b63a375ab3ba406e6b4c51c516e9a89ea5b36a",
+      "label": "LocalModelClient",
+      "last": "2026-08-27T10:41:02.149338+00:00",
+      "provenance": [
+        {
+          "date": "2026-08-27T10:41:02.149338+00:00",
+          "outcome": "useful",
+          "q": "Implement OCR, with the goal of providing additional context for the model. Build while keeping minimization of input token usage in mind."
+        },
         {
           "date": "2026-08-27T09:25:02.899264+00:00",
           "outcome": "useful",
           "q": "Provide a clear path for the implementation of the 2 following changes. Explain the exact implementation method. Work through them one at a time. 1. Create a preprocessing step before sending through model, which OCR scans the entire page and provides all detected text with image positional arguments. These positions need to be correct for the actual bytes which are given to the model at the final stage, meaning the processed image. 2. Create a method for which we can implement agents to subdivide the transcription task into subproblems that are solved individually. Consider deeply different implementations of doing such and how we could do this best. https://pydantic.dev/docs/ai/core-concepts/agent/"
         }
       ],
-      "score": 0.9990536,
+      "score": 1.998083926,
       "source_file": "src/patientjournals/local/model_client.py",
+      "status": "preferred",
+      "uses": 2
+    },
+    "src_patientjournals_shared_ocr_ocrdocument": {
+      "code_fingerprint": "f017135c8f9e1bc45f4667889ae7ea533f3aff79421ad1cfd9441015ff1ad27c",
+      "label": "OcrDocument",
+      "last": "2026-08-27T10:41:02.149338+00:00",
+      "provenance": [
+        {
+          "date": "2026-08-27T10:41:02.149338+00:00",
+          "outcome": "useful",
+          "q": "Implement OCR, with the goal of providing additional context for the model. Build while keeping minimization of input token usage in mind."
+        }
+      ],
+      "score": 0.999650992,
+      "source_file": "src/patientjournals/shared/ocr.py",
+      "status": "tentative",
+      "uses": 1
+    },
+    "src_patientjournals_shared_preprocess_preparedpage": {
+      "code_fingerprint": "5d07bc294adb15836d72cb2e1158fd2a08f54582e7a7856a09321f4cf4bf9f7a",
+      "label": "PreparedPage",
+      "last": "2026-08-27T10:41:02.149338+00:00",
+      "provenance": [
+        {
+          "date": "2026-08-27T10:41:02.149338+00:00",
+          "outcome": "useful",
+          "q": "Implement OCR, with the goal of providing additional context for the model. Build while keeping minimization of input token usage in mind."
+        }
+      ],
+      "score": 0.999650992,
+      "source_file": "src/patientjournals/shared/preprocess.py",
       "status": "tentative",
       "uses": 1
     }

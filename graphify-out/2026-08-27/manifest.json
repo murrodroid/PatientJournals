@@ -186,9 +186,9 @@
     "semantic_hash": ""
   },
   "src/patientjournals/batch/upload.py": {
-    "mtime": 1787826689.9972084,
-    "seen": 1787827146.5572128,
-    "ast_hash": "c260804e1b6b1b66ab312f1fdf28ee94",
+    "mtime": 1787827210.530611,
+    "seen": 1787827235.003555,
+    "ast_hash": "4217ebda7089f872aa77bc9f85a8d14c",
     "semantic_hash": ""
   },
   "src/patientjournals/batch/upload_tuning.py": {
@@ -540,9 +540,9 @@
     "semantic_hash": ""
   },
   "tests/test_ocr.py": {
-    "mtime": 1787826998.7892997,
-    "seen": 1787827146.557237,
-    "ast_hash": "153c1ad306ceb21ed1e365b0f5a7b73e",
+    "mtime": 1787827221.5356417,
+    "seen": 1787827235.0035782,
+    "ast_hash": "49d426c095f73509bb63b250b310e447",
     "semantic_hash": ""
   },
   "AGENTS.md": {

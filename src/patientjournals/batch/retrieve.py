@@ -18,6 +18,7 @@ from google.genai import types
 from tqdm import tqdm
 
 from patientjournals.batch.client import get_batch_client, resolve_service_account_path
+from patientjournals.batch.ocr_context import ocr_context_for_blob
 from patientjournals.batch.output_records import (
     add_reproducibility_columns,
     add_response_metadata_columns,
@@ -33,7 +34,6 @@ from patientjournals.shared.generation_spec import (
     build_live_generation_config,
     prompt_text,
 )
-from patientjournals.shared.ocr import detect_configured_ocr, render_ocr_context
 from patientjournals.config.models import resolve_model_spec
 from patientjournals.shared.api_retry import (
     is_retryable_api_error,
@@ -531,10 +531,7 @@ async def _recover_one_missing_page_via_api_key(
 
             image_bytes = await asyncio.to_thread(blob.download_as_bytes)
             mime_type = _guess_blob_mime_type(blob, key)
-            ocr_attempt = await asyncio.to_thread(
-                detect_configured_ocr,
-                image_bytes,
-            )
+            ocr_context = await asyncio.to_thread(ocr_context_for_blob, blob)
             generation_started = time.perf_counter()
             response = await _generate_recovery_response(
                 recovery_client=recovery_client,
@@ -542,7 +539,7 @@ async def _recover_one_missing_page_via_api_key(
                 image_bytes=image_bytes,
                 mime_type=mime_type,
                 generation_config=generation_config,
-                ocr_context=render_ocr_context(ocr_attempt.document),
+                ocr_context=ocr_context,
             )
             generation_seconds = time.perf_counter() - generation_started
 

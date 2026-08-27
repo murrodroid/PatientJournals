@@ -108,6 +108,9 @@ class Config:
     batch_requests_file_name: str = "batch_requests.jsonl"
     batch_num_chunks: int = 1
     batch_input_source: Literal["gcs"] = "gcs"
+    batch_ocr_metadata_required: bool = True
+    batch_ocr_workers: int = 8
+    batch_ocr_manifest_object: str = "batch/ocr/metadata_manifest.json"
     batch_input_prefix: str = ""
     batch_input_prefixes: tuple[str, ...] = ()
     # When non-empty, restrict batch input selection to exactly these image
@@ -337,6 +340,9 @@ def _apply_external_json_config(cfg: Config) -> None:
         "schemas_gcs_prefix",
         "batch_input_prefix",
         "batch_input_prefixes",
+        "batch_ocr_metadata_required",
+        "batch_ocr_workers",
+        "batch_ocr_manifest_object",
         "target_folder",
         "upload_images_folder",
         "model",

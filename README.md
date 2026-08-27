@@ -35,6 +35,7 @@ Common tasks:
 uv run app
 uv run invoke local.run
 uv run invoke batch.upload
+uv run invoke batch.ocr
 uv run invoke batch.submit
 uv run invoke batch.status --watch
 uv run invoke batch.retrieve --wait
@@ -108,6 +109,8 @@ Schema versions and the shared active choice are synchronized through `<schemas_
 
 ![Pipeline](/visualizations/PatientJournals.png)
 
+Cloud batch jobs are the primary production workflow. Local generation remains available for development and recovery, but production features are expected to support the batch path first.
+
 ## Local Generation
 
 Local generation supports Gemini, OpenAI, and Anthropic. Set `config.model` in `src/patientjournals/config/settings.py`; provider resolution happens through `src/patientjournals/config/models.py`.
@@ -178,6 +181,7 @@ Typical flow:
 
 ```bash
 uv run invoke batch.upload
+uv run invoke batch.ocr
 uv run invoke batch.submit
 uv run invoke batch.status --watch
 uv run invoke batch.retrieve --wait
@@ -199,6 +203,8 @@ uv run invoke batch.collect-outputs --continue-dataset newest
 uv run invoke batch.status --simple --watch
 uv run invoke batch.check-models --contains gemini
 ```
+
+`batch.ocr` enumerates the configured GCS input images, downloads each exact object generation, creates compact OCR line metadata, and uploads an adjacent `.ocr.json` sidecar. It also writes the cloud manifest configured by `batch_ocr_manifest_object`. Existing sidecars are reused when their bucket, object name, generation, size, and checksums still match; use `batch.ocr --force` to rebuild them. Batch submission only reads these sidecars and does not run OCR or download image content. Missing or stale sidecars block submission when `batch_ocr_metadata_required=True` (the default).
 
 `batch.collect-outputs` scans `batch/outputs` for `*predictions.jsonl`, keeps the first schema-valid non-empty response per unique key, writes a recovered dataset, and reports coverage against `pages/`.
 For Vertex retrieval, `batch.retrieve --allow-partial` also parses available output files from non-succeeded jobs instead of dropping the whole chunk. Batch retrieval resolves chunk states and downloads outputs in parallel using `api_concurrent_tasks`; live API recovery is also parallelized.

@@ -95,6 +95,24 @@ def upload(context, extra: str = "") -> None:
     _run_module(context, "patientjournals.batch.upload", _split_extra(extra))
 
 
+@task(name="ocr")
+def prepare_ocr(
+    context,
+    workers: int | None = None,
+    force: bool = False,
+    limit: int | None = None,
+    allow_failures: bool = False,
+    extra: str = "",
+) -> None:
+    args: list[str] = []
+    _add_option(args, "--workers", workers)
+    _add_flag(args, "--force", force)
+    _add_option(args, "--limit", limit)
+    _add_flag(args, "--allow-failures", allow_failures)
+    args.extend(_split_extra(extra))
+    _run_module(context, "patientjournals.batch.prepare_ocr", args)
+
+
 @task
 def submit(
     context,
@@ -269,6 +287,7 @@ data.add_task(data_batch, "batch")
 
 batch = Collection("batch")
 batch.add_task(upload)
+batch.add_task(prepare_ocr)
 batch.add_task(submit)
 batch.add_task(status)
 batch.add_task(retrieve)

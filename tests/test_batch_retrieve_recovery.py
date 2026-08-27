@@ -64,6 +64,10 @@ def test_failed_page_retry_can_split_into_multiple_chunks(
     monkeypatch.setattr(config, "batch_requests_file_name", "batch_requests.jsonl")
     monkeypatch.setattr(config, "batch_job_display_name", "retry-test")
     monkeypatch.setattr(config, "batch_include_response_schema", False)
+    monkeypatch.setattr(
+        "patientjournals.batch.retry.ocr_context_for_blob",
+        lambda _blob: "",
+    )
 
     parent = tmp_path / "parent_submit"
     parent.mkdir()
@@ -192,6 +196,7 @@ def test_api_key_recovery_uses_configured_concurrency(monkeypatch) -> None:
     monkeypatch.setattr(config, "api_concurrent_tasks", 2)
     monkeypatch.setattr(config, "api_max_attempts", 1)
     monkeypatch.setattr(config, "output_model", SimpleOutput)
+    monkeypatch.setattr(retrieve, "ocr_context_for_blob", lambda _blob: "")
 
     class FakeModels:
         def __init__(self) -> None:
@@ -244,6 +249,7 @@ def test_api_key_recovery_retries_transient_errors(monkeypatch) -> None:
     monkeypatch.setattr(config, "api_retry_max_delay_seconds", 0)
     monkeypatch.setattr(config, "api_retry_jitter_seconds", 0)
     monkeypatch.setattr(config, "output_model", SimpleOutput)
+    monkeypatch.setattr(retrieve, "ocr_context_for_blob", lambda _blob: "")
 
     class FakeModels:
         def __init__(self) -> None:
@@ -276,6 +282,7 @@ def test_api_key_recovery_retries_transient_errors(monkeypatch) -> None:
 def test_api_key_recovery_failure_reason_includes_exception_detail(monkeypatch) -> None:
     monkeypatch.setattr(config, "api_concurrent_tasks", 1)
     monkeypatch.setattr(config, "api_max_attempts", 1)
+    monkeypatch.setattr(retrieve, "ocr_context_for_blob", lambda _blob: "")
 
     class FakeModels:
         async def generate_content(self, **kwargs) -> dict:

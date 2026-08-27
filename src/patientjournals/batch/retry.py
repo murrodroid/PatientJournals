@@ -196,6 +196,15 @@ def _build_retry_gemini_request_line(
         }
     }
     parts: list[dict[str, object]] = [media_part]
+    if (
+        bucket is None
+        and bool(config.ocr_enabled)
+        and bool(config.batch_ocr_metadata_required)
+    ):
+        raise RuntimeError(
+            "Cloud OCR metadata is required for batch retries, but GCS access "
+            "is unavailable. Run `uv run invoke batch.ocr` and retry."
+        )
     ocr_context = ocr_context_for_blob(bucket.blob(key)) if bucket is not None else ""
     prompt = prompt_text(ocr_context)
     if prompt:
@@ -760,6 +769,7 @@ def _submit_failed_pages_as_batch(
                 provider == "anthropic"
                 or bool(getattr(client, "vertexai", False))
                 or bool(config.ocr_required)
+                or bool(config.batch_ocr_metadata_required)
             ):
                 raise
 

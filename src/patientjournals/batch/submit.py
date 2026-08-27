@@ -11,6 +11,7 @@ from google.genai import types
 from google.cloud import storage
 
 from patientjournals.batch.client import get_batch_client, resolve_service_account_path
+from patientjournals.batch.ocr_context import validate_ocr_metadata_for_blobs
 from patientjournals.config import config
 from patientjournals.config.models import resolve_model_spec
 from patientjournals.batch.submit_requests import (
@@ -1130,6 +1131,13 @@ def submit_batch(args: argparse.Namespace | None = None) -> Path | None:
         print(
             f"Downscale applied ({downscale:.6g}): "
             f"{sampled_count}/{original_count} blob(s) selected."
+        )
+
+    validated_ocr_count = validate_ocr_metadata_for_blobs(blobs)
+    if validated_ocr_count:
+        log(
+            "Cloud OCR preflight passed for "
+            f"{validated_ocr_count} generation-bound sidecar(s)."
         )
 
     num_batches_requested = _resolve_num_batches(args)
