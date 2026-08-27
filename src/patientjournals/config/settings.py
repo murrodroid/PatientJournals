@@ -79,6 +79,11 @@ class Config:
     include_thoughts: bool = False
     include_confidence_scores: bool = False
     include_response_avg_logprobs: bool = True
+    ocr_enabled: bool = True
+    ocr_required: bool = False
+    ocr_backend: Literal["google_vision"] = "google_vision"
+    ocr_language_hints: tuple[str, ...] = ("da",)
+    ocr_sidecar_suffix: str = ".ocr.json"
     provider_api_keys: dict[str, str] = field(default_factory=_load_provider_api_keys)
     api_key: str = field(default_factory=_default_api_key)
     api_concurrent_tasks: int = 8
@@ -247,6 +252,14 @@ class Config:
             for name in raw_restrict
             if str(name).strip()
         )
+        raw_ocr_hints = self.ocr_language_hints or ()
+        if isinstance(raw_ocr_hints, str):
+            raw_ocr_hints = (raw_ocr_hints,)
+        self.ocr_language_hints = tuple(
+            str(hint).strip()
+            for hint in raw_ocr_hints
+            if str(hint).strip()
+        )
         if not (self.api_key or "").strip():
             self.api_key = self.provider_api_keys.get("gemini", "")
         if self.output_schema_override:
@@ -332,6 +345,11 @@ def _apply_external_json_config(cfg: Config) -> None:
         "output_schema_name",
         "output_schema_version_id",
         "output_schema_override",
+        "ocr_enabled",
+        "ocr_required",
+        "ocr_backend",
+        "ocr_language_hints",
+        "ocr_sidecar_suffix",
     }
     aliases = {
         "auth_mode": "gcp_auth_mode",

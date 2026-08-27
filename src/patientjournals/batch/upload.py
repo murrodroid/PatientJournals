@@ -11,12 +11,7 @@ import pypdfium2 as pdfium
 from tqdm import tqdm
 
 from patientjournals.config import config
-from patientjournals.shared.preprocess import (
-    resize_image,
-    crop_margins,
-    enhance_contrast,
-    image_to_bytes,
-)
+from patientjournals.shared.preprocess import preprocess_pil_image_with_metadata
 from patientjournals.shared.tools import list_input_files
 from patientjournals.batch.upload_tuning import UploadAutoTuner, build_upload_tuner
 
@@ -33,11 +28,13 @@ def _apply_image_settings(img):
     contrast_factor = settings.get("contrast_factor", 1.0)
     output_format = settings.get("output_format", "PNG")
 
-    img = resize_image(img, max_dim=max_dim)
-    left, top, right, bottom = margins
-    img = crop_margins(img, left=left, top=top, right=right, bottom=bottom)
-    img = enhance_contrast(img, factor=contrast_factor)
-    image_bytes, mime_type = image_to_bytes(img, format_hint=output_format)
+    image_bytes, mime_type, _metadata = preprocess_pil_image_with_metadata(
+        img,
+        max_dim=max_dim,
+        margins=margins,
+        contrast_factor=contrast_factor,
+        output_format=output_format,
+    )
 
     return image_bytes, mime_type, output_format
 
@@ -136,6 +133,9 @@ def _upload_blob_bytes(
                 image_bytes,
                 content_type=mime_type,
                 timeout=timeout_seconds,
+                # Page objects are content inputs. Never replace bytes after OCR
+                # or a previously built request could carry stale coordinates.
+                if_generation_match=0,
             )
             return True
         except Exception as exc:

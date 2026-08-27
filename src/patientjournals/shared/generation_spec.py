@@ -3,10 +3,17 @@ from __future__ import annotations
 from google.genai import types
 
 from patientjournals.config import config
+from patientjournals.shared.ocr import OcrDocument, render_ocr_context
 
 
-def prompt_text() -> str:
-    return config.input_prompt
+def prompt_text(ocr_context: OcrDocument | str | None = None) -> str:
+    if isinstance(ocr_context, OcrDocument):
+        rendered = render_ocr_context(ocr_context)
+    else:
+        rendered = str(ocr_context or "").strip()
+    if not rendered:
+        return config.input_prompt
+    return f"{config.input_prompt.rstrip()}\n\n{rendered}"
 
 
 def _thinking_level() -> str | None:
@@ -36,10 +43,14 @@ def _thinking_config_batch() -> dict[str, object] | None:
     return payload or None
 
 
-def build_live_request_contents(image_bytes: bytes, mime_type: str) -> list[object]:
+def build_live_request_contents(
+    image_bytes: bytes,
+    mime_type: str,
+    ocr_context: OcrDocument | str | None = None,
+) -> list[object]:
     return [
         types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
-        prompt_text(),
+        prompt_text(ocr_context),
     ]
 
 

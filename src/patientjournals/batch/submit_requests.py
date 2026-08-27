@@ -12,6 +12,7 @@ from typing import Any
 from google.cloud import storage
 from tqdm import tqdm
 
+from patientjournals.batch.ocr_context import ocr_context_for_blob
 from patientjournals.batch.submit_inputs import _normalize_prefix
 from patientjournals.config import config
 from patientjournals.shared.generation_spec import (
@@ -133,7 +134,7 @@ def _build_request_line(
     }
 
     parts = [media_part]
-    prompt = prompt_text()
+    prompt = prompt_text(ocr_context_for_blob(blob))
     if prompt:
         parts.append({"text": prompt})
 
@@ -244,7 +245,6 @@ def _build_anthropic_batch_requests(
     if not manifest:
         raise ValueError(f"Anthropic manifest is empty: {requests_path}")
 
-    prompt = prompt_text()
     include_schema = bool(config.batch_include_response_schema)
     max_tokens = max(1, int(config.model_max_output_tokens))
     expiration = _anthropic_signed_url_expiration()
@@ -263,11 +263,13 @@ def _build_anthropic_batch_requests(
                 f"{custom_id}"
             )
         seen_custom_ids.add(custom_id)
-        signed_url = bucket.blob(key).generate_signed_url(
+        image_blob = bucket.blob(key)
+        signed_url = image_blob.generate_signed_url(
             version="v4",
             method="GET",
             expiration=expiration,
         )
+        prompt = prompt_text(ocr_context_for_blob(image_blob))
         content: list[dict[str, Any]] = [
             {
                 "type": "image",
@@ -402,4 +404,3 @@ def _count_requests_file(path: Path) -> tuple[int, int]:
             if line.strip():
                 count += 1
     return count, total_bytes
-

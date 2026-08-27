@@ -31,7 +31,9 @@ from patientjournals.batch.retry import (
 from patientjournals.config import config
 from patientjournals.shared.generation_spec import (
     build_live_generation_config,
+    prompt_text,
 )
+from patientjournals.shared.ocr import detect_configured_ocr, render_ocr_context
 from patientjournals.config.models import resolve_model_spec
 from patientjournals.shared.api_retry import (
     is_retryable_api_error,
@@ -475,6 +477,7 @@ async def _generate_recovery_response(
     image_bytes: bytes,
     mime_type: str,
     generation_config: dict,
+    ocr_context: str = "",
 ) -> object:
     aio_client = getattr(recovery_client, "aio", None)
     aio_models = getattr(aio_client, "models", None)
@@ -484,7 +487,7 @@ async def _generate_recovery_response(
             model=recovery_model,
             contents=[
                 types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
-                config.input_prompt,
+                prompt_text(ocr_context),
             ],
             config=generation_config,
         )
@@ -494,7 +497,7 @@ async def _generate_recovery_response(
         model=recovery_model,
         contents=[
             types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
-            config.input_prompt,
+            prompt_text(ocr_context),
         ],
         config=generation_config,
     )
@@ -528,6 +531,10 @@ async def _recover_one_missing_page_via_api_key(
 
             image_bytes = await asyncio.to_thread(blob.download_as_bytes)
             mime_type = _guess_blob_mime_type(blob, key)
+            ocr_attempt = await asyncio.to_thread(
+                detect_configured_ocr,
+                image_bytes,
+            )
             generation_started = time.perf_counter()
             response = await _generate_recovery_response(
                 recovery_client=recovery_client,
@@ -535,6 +542,7 @@ async def _recover_one_missing_page_via_api_key(
                 image_bytes=image_bytes,
                 mime_type=mime_type,
                 generation_config=generation_config,
+                ocr_context=render_ocr_context(ocr_attempt.document),
             )
             generation_seconds = time.perf_counter() - generation_started
 

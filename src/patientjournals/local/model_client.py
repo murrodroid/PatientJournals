@@ -6,7 +6,11 @@ from dataclasses import dataclass
 from typing import Any
 
 from patientjournals.config import config
-from patientjournals.shared.generation_spec import build_live_generation_config, build_live_request_contents
+from patientjournals.shared.generation_spec import (
+    build_live_generation_config,
+    build_live_request_contents,
+    prompt_text,
+)
 from patientjournals.config.models import ModelSpec, ProviderName, resolve_model_spec
 from patientjournals.shared.response_parsing import extract_response_metadata
 
@@ -145,13 +149,31 @@ class LocalModelClient:
             )
         return warnings
 
-    async def generate_json(self, *, image_bytes: bytes, mime_type: str) -> LocalGenerationResult:
+    async def generate_json(
+        self,
+        *,
+        image_bytes: bytes,
+        mime_type: str,
+        ocr_context: str = "",
+    ) -> LocalGenerationResult:
         if self.provider == "gemini":
-            return await self._generate_with_gemini(image_bytes=image_bytes, mime_type=mime_type)
+            return await self._generate_with_gemini(
+                image_bytes=image_bytes,
+                mime_type=mime_type,
+                ocr_context=ocr_context,
+            )
         if self.provider == "openai":
-            return await self._generate_with_openai(image_bytes=image_bytes, mime_type=mime_type)
+            return await self._generate_with_openai(
+                image_bytes=image_bytes,
+                mime_type=mime_type,
+                ocr_context=ocr_context,
+            )
         if self.provider == "anthropic":
-            return await self._generate_with_anthropic(image_bytes=image_bytes, mime_type=mime_type)
+            return await self._generate_with_anthropic(
+                image_bytes=image_bytes,
+                mime_type=mime_type,
+                ocr_context=ocr_context,
+            )
         raise ValueError(f"Unsupported provider '{self.provider}'.")
 
     async def _generate_with_gemini(
@@ -159,10 +181,15 @@ class LocalModelClient:
         *,
         image_bytes: bytes,
         mime_type: str,
+        ocr_context: str,
     ) -> LocalGenerationResult:
         output = await self.client.aio.models.generate_content(
             model=self.model_name,
-            contents=build_live_request_contents(image_bytes=image_bytes, mime_type=mime_type),
+            contents=build_live_request_contents(
+                image_bytes=image_bytes,
+                mime_type=mime_type,
+                ocr_context=ocr_context,
+            ),
             config=build_live_generation_config(
                 include_schema=True,
                 include_temperature=True,
@@ -184,6 +211,7 @@ class LocalModelClient:
         *,
         image_bytes: bytes,
         mime_type: str,
+        ocr_context: str,
     ) -> LocalGenerationResult:
         image_data = base64.b64encode(image_bytes).decode("ascii")
         response = await self.client.responses.create(
@@ -192,7 +220,7 @@ class LocalModelClient:
                 {
                     "role": "user",
                     "content": [
-                        {"type": "input_text", "text": config.input_prompt},
+                        {"type": "input_text", "text": prompt_text(ocr_context)},
                         {
                             "type": "input_image",
                             "image_url": f"data:{mime_type};base64,{image_data}",
@@ -225,6 +253,7 @@ class LocalModelClient:
         *,
         image_bytes: bytes,
         mime_type: str,
+        ocr_context: str,
     ) -> LocalGenerationResult:
         image_data = base64.b64encode(image_bytes).decode("ascii")
         response = await self.client.messages.create(
@@ -243,7 +272,7 @@ class LocalModelClient:
                                 "data": image_data,
                             },
                         },
-                        {"type": "text", "text": config.input_prompt},
+                        {"type": "text", "text": prompt_text(ocr_context)},
                     ],
                 }
             ],

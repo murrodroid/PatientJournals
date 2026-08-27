@@ -12,6 +12,7 @@ from google.cloud import storage
 from google.genai import types
 
 from patientjournals.batch.client import resolve_service_account_path
+from patientjournals.batch.ocr_context import ocr_context_for_blob
 from patientjournals.config import config
 from patientjournals.shared.generation_spec import (
     build_batch_generation_config,
@@ -186,6 +187,7 @@ def _build_retry_gemini_request_line(
     *,
     bucket_name: str,
     for_vertex: bool,
+    bucket: storage.Bucket | None = None,
 ) -> dict[str, object]:
     media_part = {
         "fileData": {
@@ -194,7 +196,8 @@ def _build_retry_gemini_request_line(
         }
     }
     parts: list[dict[str, object]] = [media_part]
-    prompt = prompt_text()
+    ocr_context = ocr_context_for_blob(bucket.blob(key)) if bucket is not None else ""
+    prompt = prompt_text(ocr_context)
     if prompt:
         parts.append({"text": prompt})
 
@@ -229,6 +232,7 @@ def _write_retry_requests_file(
     provider: str,
     bucket_name: str,
     for_vertex: bool,
+    bucket: storage.Bucket | None = None,
 ) -> None:
     with open(output_path, "w", encoding="utf-8") as handle:
         for key in keys:
@@ -239,6 +243,7 @@ def _write_retry_requests_file(
                     key,
                     bucket_name=bucket_name,
                     for_vertex=for_vertex,
+                    bucket=bucket,
                 )
             handle.write(json.dumps(payload, ensure_ascii=False))
             handle.write("\n")
@@ -321,7 +326,6 @@ def _build_anthropic_batch_requests_for_retry(
     if not manifest:
         raise ValueError(f"Anthropic manifest is empty: {requests_path}")
 
-    prompt = prompt_text()
     include_schema = bool(config.batch_include_response_schema)
     max_tokens = max(1, int(config.model_max_output_tokens))
     expiration = _anthropic_signed_url_expiration()
@@ -341,11 +345,13 @@ def _build_anthropic_batch_requests_for_retry(
             )
         seen_custom_ids.add(custom_id)
 
-        signed_url = bucket.blob(key).generate_signed_url(
+        image_blob = bucket.blob(key)
+        signed_url = image_blob.generate_signed_url(
             version="v4",
             method="GET",
             expiration=expiration,
         )
+        prompt = prompt_text(ocr_context_for_blob(image_blob))
         content: list[dict[str, Any]] = [
             {
                 "type": "image",
@@ -735,14 +741,27 @@ def _submit_failed_pages_as_batch(
     )
 
     bucket: storage.Bucket | None = None
-    if provider == "anthropic" or bool(getattr(client, "vertexai", False)):
-        service_account_path = resolve_service_account_path(
-            _require_service_account_file()
-        )
-        storage_client = storage.Client.from_service_account_json(
-            str(service_account_path)
-        )
-        bucket = storage_client.bucket(bucket_name)
+    needs_bucket = (
+        provider == "anthropic"
+        or bool(getattr(client, "vertexai", False))
+        or bool(config.ocr_enabled)
+    )
+    if needs_bucket:
+        try:
+            service_account_path = resolve_service_account_path(
+                _require_service_account_file()
+            )
+            storage_client = storage.Client.from_service_account_json(
+                str(service_account_path)
+            )
+            bucket = storage_client.bucket(bucket_name)
+        except Exception:
+            if (
+                provider == "anthropic"
+                or bool(getattr(client, "vertexai", False))
+                or bool(config.ocr_required)
+            ):
+                raise
 
     jobs: list[dict[str, object]] = []
     client_backend = "anthropic" if provider == "anthropic" else "mldev"
@@ -774,6 +793,7 @@ def _submit_failed_pages_as_batch(
             provider=provider,
             bucket_name=bucket_name,
             for_vertex=bool(getattr(client, "vertexai", False)),
+            bucket=bucket,
         )
         request_count, request_bytes = _count_requests_file(requests_path)
         retry_log(

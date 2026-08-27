@@ -1,0 +1,38 @@
+{
+  "generated_at": "2026-08-27T10:24:03.604955+00:00",
+  "nodes": {
+    "src_patientjournals_app_workflows_workflowservice": {
+      "code_fingerprint": "ab423e98308ca0fa88315ecd15ca700381ab9b3b73e6afbabedb4f3f3f188145",
+      "label": "WorkflowService",
+      "last": "2026-08-27T09:25:02.899264+00:00",
+      "provenance": [
+        {
+          "date": "2026-08-27T09:25:02.899264+00:00",
+          "outcome": "useful",
+          "q": "Provide a clear path for the implementation of the 2 following changes. Explain the exact implementation method. Work through them one at a time. 1. Create a preprocessing step before sending through model, which OCR scans the entire page and provides all detected text with image positional arguments. These positions need to be correct for the actual bytes which are given to the model at the final stage, meaning the processed image. 2. Create a method for which we can implement agents to subdivide the transcription task into subproblems that are solved individually. Consider deeply different implementations of doing such and how we could do this best. https://pydantic.dev/docs/ai/core-concepts/agent/"
+        }
+      ],
+      "score": 0.9990536,
+      "source_file": "src/patientjournals/app/workflows.py",
+      "status": "tentative",
+      "uses": 1
+    },
+    "src_patientjournals_local_model_client_localmodelclient": {
+      "code_fingerprint": "02b0c45b04760f152c06f151eee51d22b1e87ce602caa5122ac77818154041ae",
+      "label": "LocalModelClient",
+      "last": "2026-08-27T09:25:02.899264+00:00",
+      "provenance": [
+        {
+          "date": "2026-08-27T09:25:02.899264+00:00",
+          "outcome": "useful",
+          "q": "Provide a clear path for the implementation of the 2 following changes. Explain the exact implementation method. Work through them one at a time. 1. Create a preprocessing step before sending through model, which OCR scans the entire page and provides all detected text with image positional arguments. These positions need to be correct for the actual bytes which are given to the model at the final stage, meaning the processed image. 2. Create a method for which we can implement agents to subdivide the transcription task into subproblems that are solved individually. Consider deeply different implementations of doing such and how we could do this best. https://pydantic.dev/docs/ai/core-concepts/agent/"
+        }
+      ],
+      "score": 0.9990536,
+      "source_file": "src/patientjournals/local/model_client.py",
+      "status": "tentative",
+      "uses": 1
+    }
+  },
+  "version": 1
+}

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 from pydantic import BaseModel
 
-from patientjournals.shared.preprocess import preprocess_image_with_metadata
+from patientjournals.shared.preprocess import prepare_page
 from patientjournals.config import config
 from patientjournals.local.model_client import LocalModelClient
 from patientjournals.shared.api_retry import (
@@ -27,8 +27,8 @@ async def generate_data(
     model_client: LocalModelClient,
     file_name: str,
 ) -> tuple[BaseModel, float, dict[str, Any], dict[str, Any]]:
-    image_bytes, mime_type, preprocessing = await asyncio.to_thread(
-        preprocess_image_with_metadata,
+    prepared_page = await asyncio.to_thread(
+        prepare_page,
         file_name,
         max_dim=config.image_settings.get("max_dim", 3000),
         margins=tuple(config.image_settings.get("margins", (0, 0, 0, 0))),
@@ -38,8 +38,9 @@ async def generate_data(
 
     start_time = time.perf_counter()
     output = await model_client.generate_json(
-        image_bytes=image_bytes,
-        mime_type=mime_type,
+        image_bytes=prepared_page.image_bytes,
+        mime_type=prepared_page.mime_type,
+        ocr_context=prepared_page.ocr_context,
     )
     end_time = time.perf_counter()
     duration = end_time - start_time
@@ -55,7 +56,7 @@ async def generate_data(
         config.output_model.model_validate_json(payload_text),
         duration,
         metadata,
-        preprocessing,
+        prepared_page.preprocessing,
     )
 
 
