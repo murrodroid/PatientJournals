@@ -8,6 +8,7 @@ from typing import Any, Iterable, Mapping
 
 from pydantic import BaseModel
 
+from patientjournals.config.prompts import build_subagent_prompt
 from patientjournals.config.schemas import model_from_json_schema
 
 
@@ -129,27 +130,12 @@ def specialist_prompt(
 ) -> str:
     """Build a compact search brief; the response schema carries field detail."""
 
-    description = " ".join(specialist.description.split())
-    if len(description) > 240:
-        description = description[:237].rsplit(" ", 1)[0].rstrip() + "..."
-    role_brief = (
-        "You are one transcription sub-agent in a larger page-extraction job.\n"
-        f"Your sole assignment is the top-level field `{specialist.field_name}`. "
-        "Do not extract or return any other top-level field.\n"
+    return build_subagent_prompt(
+        base_prompt=base_prompt,
+        field_name=specialist.field_name,
+        field_description=specialist.description,
+        specialist_count=specialist_count,
     )
-    if specialist_count > 1:
-        role_brief += "Other sub-agents are responsible for the remaining fields.\n"
-    if description:
-        role_brief += f"Task brief: {description}\n"
-    role_brief += (
-        "Search the entire page for this assignment. "
-        "Use the image as primary evidence and the supplied OCR as positional reading aid. "
-        "Do not infer missing facts. Preserve source spelling unless the schema says otherwise.\n"
-        "Return only JSON matching the supplied one-field schema."
-    )
-    if specialist_count == 1:
-        return f"{base_prompt.rstrip()}\n\nSub-agent role:\n{role_brief}"
-    return role_brief
 
 
 def encode_specialist_request_key(page_key: str, specialist_name: str) -> str:

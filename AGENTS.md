@@ -23,6 +23,15 @@ Rules:
   durable run artifacts; do not require an in-process agent coordinator for cloud
   batch execution.
 
+## Prompt ownership
+
+- Keep every non-schema model instruction in `src/patientjournals/config/prompts.py`.
+  This includes page prompts, sub-agent role/context, and OCR evidence instructions.
+- Keep JSON Schema `Field(description=...)` prompts beside their fields in
+  `src/patientjournals/config/schemas.py`.
+- Provider adapters and request builders may assemble prompts, but must not embed
+  new model-facing prose.
+
 ## graphify
 
 This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.

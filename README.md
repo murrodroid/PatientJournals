@@ -15,6 +15,11 @@ All project code lives under `src/patientjournals`. Runtime configuration is in:
 src/patientjournals/config/settings.py
 ```
 
+All non-schema model instructions are maintained in
+`src/patientjournals/config/prompts.py`: page prompts, sub-agent context, and the
+OCR evidence header. JSON Schema field descriptions remain co-located with their
+Pydantic fields in `src/patientjournals/config/schemas.py`.
+
 You can print that path with:
 
 ```bash

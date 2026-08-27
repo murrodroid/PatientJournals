@@ -7,6 +7,7 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel
 
+from patientjournals.config.prompts import PAGE_PROMPTS
 from patientjournals.config.schemas import FrontPage, model_from_json_schema, output_schema_name
 from patientjournals.shared.local_secrets import load_local_api_keys
 
@@ -196,44 +197,7 @@ class Config:
         }
     )
 
-    prompts: dict[str, str] = field(
-        default_factory=lambda: {
-            "frontpage": f"""
-                Context:
-                You are given a scanned page from a Danish hospital patient journal from the late 1800s.
-                Your task is to extract data from the content on the page.
-
-                Objective:
-                Fill each column with the information found in the image.
-                Not all columns are present within an image, meaning it isn't necessary to fill out all.
-
-                Guidelines:
-                - Examples are always written as 'Examples: [example1,example2,example3]'
-                - Use only what is visible in the image.
-                - Do not infer or guess beyond the evidence on the page.
-                - Preserve spellings exactly as written, even if archaic or non-standard. Only exception is numbers, which should be written as float-values.
-                - If nothing fits a Field, output an empty field for that position.
-                - If a line is crossed out, it should not be included in the datapoint of which it's relevant to.
-                """,
-            "textpage": """
-                **Role:**
-                You are an expert archivist specializing in late 19th-century Danish medical manuscripts. Your task is to transcribe the provided handwritten journal page into a structured JSON format, maintaining strict fidelity to the original text.
-                
-                **Scope & Focus:**
-                *   **Primary Page Only:** Transcribe **ONLY** the single page that is centered and in focus.
-                *   **Ignore Surroundings:** Strictly ignore any text visible on the facing page (across the binding/gutter) or any text cut off at the far edges of the image.
-                *   **Visual Boundaries:** The page usually has a vertical fold or red line separating the left-hand date margin from the main body. Do not transcribe text found outside the physical boundaries of the current page.
-                
-                **Transcription Rules:**
-                1.  **Line-by-Line:** Output a JSON object for every distinct vertical line of writing. Do not merge lines.
-                2.  **Margins:** If a date (e.g., "18/12") appears in the left margin, capture it in the `metadata` field. If the margin is blank for that line, leave it as a `None`-value.
-                3.  **Vital Signs Columns:** The text frequently breaks into columns of numbers (Time | Temp | Pulse). Transcribe these exactly as they appear visually within the `text` field, preserving spaces between numbers (e.g., `12   39,6   39`).
-                4.  **Language & Spelling:**
-                    *   Preserve archaic Danish spelling exactly (e.g., write "The" not "Te", "Smerter", "aa" instead of "å").
-                    *   Keep all medical abbreviations (e.g., "Rp.", "Tp.", "P.", "Steth.", "dgl.").
-                """,
-        }
-    )
+    prompts: dict[str, str] = field(default_factory=lambda: dict(PAGE_PROMPTS))
 
     # backend for config
     output_schema: dict[str, Any] = field(init=False)

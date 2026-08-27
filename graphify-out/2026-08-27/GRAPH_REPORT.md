@@ -1,11 +1,11 @@
 # Graph Report - PatientJournals  (2026-08-27)
 
 ## Corpus Check
-- 97 files · ~114,963 words
+- 97 files · ~115,166 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 1652 nodes · 4826 edges · 66 communities (55 shown, 11 thin omitted)
+- 1654 nodes · 4832 edges · 67 communities (56 shown, 11 thin omitted)
 - Extraction: 95% EXTRACTED · 5% INFERRED · 0% AMBIGUOUS · INFERRED: 241 edges (avg confidence: 0.91)
 - Token cost: 0 input · 0 output
 
@@ -19,7 +19,7 @@
 - tools.py
 - WorkflowService
 - retry.py
-- config/schemas.py
+- config/__init__.py
 - PatientJournalsApp
 - dashboard.py
 - upload.py
@@ -27,24 +27,25 @@
 - status.py
 - test_app_architecture.py
 - PatientJournals Conda Environment
-- workflows.py
+- datasets.py
 - submit.py
-- retrieve_batch
+- retrieve.py
 - ui.py
 - validation/cli.py
 - inspection.py
 - ValidatorApp
-- process_file
-- resolve_model_spec
-- patientjournals/tasks.py
+- generate.py
+- access.py
+- test_batch_retrieve_recovery.py
 - response_parsing.py
+- submit_inputs.py
 - model_client.py
 - BrowserValidationSession
-- generate.py
-- test_subagents.py
+- patientjournals/tasks.py
+- bucket.py
 - ocr.py
-- submit_requests.py
-- ImageAccessService
+- test_run_layout.py
+- image_name_from_reference
 - Journal
 - .name
 - ocr_context.py
@@ -72,14 +73,14 @@
 - patientjournals.app.datasets
 - patientjournals.app.image_access
 - patientjournals.app.settings_store
-- retrieve.py
+- _recover_missing_pages_via_api_key
 - collect_outputs.py
-- read_dataset_preview
-- run_layout.py
+- test_batch_submit_inputs.py
+- _api_key_recovery_failure_reason
 - FakeBlob
 - Q: Implement OCR, with the goal of providing additional context for the model. Build while keeping minimization of input token usage in mind.
-- image_name_from_reference
-- recover_dataset_gaps
+- dataset_coverage.py
+- batch/service.py
 - Q: Implement the OCR method to work with batch jobs by retrieving cloud images and creating durable OCR metadata for each; make batch jobs the main point of usage.
 
 ## God Nodes (most connected - your core abstractions)
@@ -103,8 +104,8 @@
   tests/test_app_architecture.py → src/patientjournals/app/models.py
 - `test_failed_page_retry_can_split_into_multiple_chunks()` --calls--> `_submit_failed_pages_as_batch()`  [INFERRED]
   tests/test_batch_retrieve_recovery.py → src/patientjournals/batch/retry.py
-- `test_batch_retrieve_request_namespace()` --uses--> `BatchRetrieveRequest`  [INFERRED]
-  tests/test_batch_service.py → src/patientjournals/batch/service.py
+- `test_gemini_model_progress_counts_prediction_rows()` --indirect_call--> `status()`  [INFERRED]
+  tests/test_batch_status.py → src/patientjournals/tasks.py
 
 ## Import Cycles
 - None detected.
@@ -120,27 +121,27 @@
 - **Synthetic Dataset Pipeline** — visualizations_patientjournals_front_page_images, visualizations_patientjournals_journal_schema, visualizations_patientjournals_orchestrator, visualizations_patientjournals_preprocessing, visualizations_patientjournals_parallel_api_requests, visualizations_patientjournals_llm, visualizations_patientjournals_dataset [EXTRACTED 1.00]
 - **Reproducible Dataset Lineage** — readme_immutable_schema_versioning, readme_image_name_dataset_identity, readme_row_level_provenance, readme_image_processing_measurements [INFERRED 0.85]
 
-## Communities (66 total, 11 thin omitted)
+## Communities (67 total, 11 thin omitted)
 
 ### Community 0 - "JobStore"
-Cohesion: 0.05
-Nodes (41): Connection, Row, Application services and desktop UI for PatientJournals., _copy_dataset_into_job(), _dataset_files(), JobStore, _json_dumps(), _json_loads() (+33 more)
+Cohesion: 0.06
+Nodes (39): Connection, Row, Application services and desktop UI for PatientJournals., _copy_dataset_into_job(), _dataset_files(), JobStore, _json_dumps(), _json_loads() (+31 more)
 
 ### Community 1 - "tools.py"
 Cohesion: 0.10
 Nodes (45): ProgressCallback, main(), parse_args(), _progress_printer(), Namespace, create_local_model_client(), _emit(), _input_without_existing() (+37 more)
 
 ### Community 2 - "WorkflowService"
-Cohesion: 0.06
-Nodes (40): BaseHTTPRequestHandler, CommandRunner, CompletedProcess, AccessCheckReport, AccessCheckResult, active_gcloud_account(), _bucket_fix(), _configured_prefixes() (+32 more)
+Cohesion: 0.16
+Nodes (10): _apply_runtime_overrides(), poll_local_batch_states(), One-shot API poll mapping each unfinished local batch run_dir to a live status.…, _restore_runtime_overrides(), run_local_draft_direct(), command_override_payload(), Any, App-facing workflow API. Tk, web handlers, and tests should call this layer… (+2 more)
 
 ### Community 3 - "retry.py"
-Cohesion: 0.13
-Nodes (37): _anthropic_custom_id_for_key(), _anthropic_signed_url_expiration(), _anthropic_strict_json_schema(), _append_retry_to_source_metadata(), _build_anthropic_batch_requests_for_retry(), _build_retry_anthropic_manifest_line(), _build_retry_batch_generation_config(), _build_retry_gemini_request_line() (+29 more)
+Cohesion: 0.05
+Nodes (104): ocr_context_for_blob(), _anthropic_custom_id_for_key(), _anthropic_signed_url_expiration(), _anthropic_strict_json_schema(), _append_retry_to_source_metadata(), _build_anthropic_batch_requests_for_retry(), _build_retry_anthropic_manifest_line(), _build_retry_batch_generation_config() (+96 more)
 
-### Community 4 - "config/schemas.py"
-Cohesion: 0.06
-Nodes (62): FieldConfidenceByPointer, fixture, model_validator, list_google_model_options(), list_live_google_model_options(), list_schema_options(), _model_option_from_name(), resolve_schema_class() (+54 more)
+### Community 4 - "config/__init__.py"
+Cohesion: 0.07
+Nodes (54): FieldConfidenceByPointer, fixture, model_validator, resolve_schema_class(), Configuration, schema, and model registry., Address, Age, Bottom (+46 more)
 
 ### Community 5 - "PatientJournalsApp"
 Cohesion: 0.10
@@ -148,43 +149,43 @@ Nodes (15): BooleanVar, Canvas, Frame, Label, LabelFrame, Misc, main(), _open_in
 
 ### Community 6 - "dashboard.py"
 Cohesion: 0.09
-Nodes (50): analyze_dataset_file(), _count_csv_rows(), count_dataset_rows(), _count_jsonl_rows(), _counter(), _counter_key(), dashboard_summary_json(), DashboardSummary (+42 more)
+Nodes (49): analyze_dataset_file(), _count_csv_rows(), count_dataset_rows(), _count_jsonl_rows(), _counter(), _counter_key(), dashboard_summary_json(), DashboardSummary (+41 more)
 
 ### Community 7 - "upload.py"
 Cohesion: 0.13
 Nodes (38): _allowed_page_extensions(), _apply_fp_mode_filter(), _apply_image_settings(), _build_bucket(), _effective_batch_limit(), _effective_workers(), _ensure_unique_pdf_names(), _extension_for_format() (+30 more)
 
 ### Community 8 - "jobs.py"
-Cohesion: 0.11
-Nodes (49): _append_retry_child_to_source_metadata(), _batch_chunk_summaries_from_payload(), _batch_submit_namespace(), BatchSubmitOutcome, command_overrides_for_run(), _count_output_rows(), _dataset_files_in_run_dir(), _dataset_rows() (+41 more)
+Cohesion: 0.08
+Nodes (67): _api_recovery_error_rows(), _api_recovery_error_summary(), _append_retry_child_to_source_metadata(), _batch_chunk_summaries_from_payload(), _batch_submit_namespace(), BatchSubmitOutcome, command_overrides_for_run(), _count_output_rows() (+59 more)
 
 ### Community 9 - "status.py"
-Cohesion: 0.10
-Nodes (42): _batch_model_progress(), cancel_batch_run(), Cancel every non-terminal batch job belonging to a submit run. Returns the…, _aggregate_state_lines(), _anthropic_model_progress(), _batch_state(), _batch_summary(), _cancel_batch_job() (+34 more)
+Cohesion: 0.07
+Nodes (56): _batch_model_progress(), cancel_batch_run(), Cancel every non-terminal batch job belonging to a submit run. Returns the…, _aggregate_state_lines(), _anthropic_model_progress(), _batch_state(), _batch_summary(), _cancel_batch_job() (+48 more)
 
 ### Community 10 - "test_app_architecture.py"
 Cohesion: 0.07
-Nodes (36): batch_run_provider(), find_dataset_near(), list_batch_chunks(), list_submit_jobs(), Return the text of any locally written error file for a run, if present., Return the recorded retrieval results for a run, if it has been retrieved., Return saved results when they satisfy the requested retrieval options. This is…, Locate a dataset file at ``reference`` or, failing that, in its directory.… (+28 more)
+Nodes (34): batch_run_provider(), find_dataset_near(), list_submit_jobs(), Return the text of any locally written error file for a run, if present., Return saved results when they satisfy the requested retrieval options. This is…, Locate a dataset file at ``reference`` or, failing that, in its directory.…, Read up to ``limit`` rows from a dataset for a quick on-screen preview. Returns…, One row per batch submission from the authoritative app store. (+26 more)
 
 ### Community 11 - "PatientJournals Conda Environment"
 Cohesion: 0.06
 Nodes (38): Document and Spreadsheet I/O Dependencies, Google AI and Cloud Dependency Stack, Image and Data Processing Dependency Stack, PatientJournals Conda Environment, Python 3.11, Anthropic, Anthropic Message Batches, Balanced UCB Validation Sampling (+30 more)
 
-### Community 12 - "workflows.py"
+### Community 12 - "datasets.py"
 Cohesion: 0.15
-Nodes (30): combine_dataset_files(), _count_csv_rows(), count_dataset_rows(), _count_jsonl_rows(), _dataset_content_type(), download_cloud_dataset(), _flatten_dataset_row(), _format_blob_updated() (+22 more)
+Nodes (28): combine_dataset_files(), _count_csv_rows(), count_dataset_rows(), _count_jsonl_rows(), _dataset_content_type(), download_cloud_dataset(), _flatten_dataset_row(), _format_blob_updated() (+20 more)
 
 ### Community 13 - "submit.py"
-Cohesion: 0.05
-Nodes (82): Fail before request generation when required cloud sidecars are unavailable., validate_ocr_metadata_for_blobs(), BatchChunkPlan, BatchCollectOutputsRequest, BatchSubmitPlan, BatchSubmitRequest, BatchSubmitService, Bucket (+74 more)
+Cohesion: 0.16
+Nodes (31): Fail before request generation when required cloud sidecars are unavailable., validate_ocr_metadata_for_blobs(), _batch_state_and_success(), _build_chunk_entry(), _build_rerun_entries(), _chunk_label(), _chunk_requests_file_name(), _discover_request_files_in_run_dir() (+23 more)
 
-### Community 14 - "retrieve_batch"
+### Community 14 - "retrieve.py"
 Cohesion: 0.12
-Nodes (21): CollectOutputsResult, RetrieveBatchResult, _arg_batch_names(), _effective_duplicate_strategy(), _expected_success_keys(), _extract_anthropic_response_metadata(), _extract_location_from_batch_name(), _failed_retry_num_batches() (+13 more)
+Nodes (33): add_response_metadata_columns(), _arg_batch_names(), _await_completion(), _batch_job_state(), _batch_job_successful(), _download_from_anthropic_output(), _effective_duplicate_strategy(), _expected_success_keys() (+25 more)
 
 ### Community 15 - "ui.py"
-Cohesion: 0.13
-Nodes (20): DuplicateStrategy, build_retrieve_command(), build_submit_command(), build_validation_command(), app_settings_path(), AppSettings, CommandSpec, Path (+12 more)
+Cohesion: 0.14
+Nodes (23): build_submit_command(), build_validation_command(), app_settings_path(), AppSettings, Path, SubmitJobDraft, _coerce_settings(), load_app_settings() (+15 more)
 
 ### Community 16 - "validation/cli.py"
 Cohesion: 0.13
@@ -192,63 +193,67 @@ Nodes (28): Random, build_validation_datapoints(), choose_balanced_ucb_datapoint
 
 ### Community 17 - "inspection.py"
 Cohesion: 0.10
-Nodes (37): main(), _nonnegative_int(), _parse_args(), _print_summary(), _print_validation(), Namespace, Local data inspection and health checks., collect_files() (+29 more)
+Nodes (38): main(), _nonnegative_int(), _parse_args(), _print_summary(), _print_validation(), Namespace, Local data inspection and health checks., collect_files() (+30 more)
 
 ### Community 18 - "ValidatorApp"
 Cohesion: 0.15
 Nodes (7): Button, Entry, display_image_name(), main(), Path, SamplingMode, ValidatorApp
 
-### Community 19 - "process_file"
-Cohesion: 0.18
-Nodes (14): _api_key_recovery_failure_reason(), _compact_exception_text(), _generate_recovery_response(), _guess_blob_mime_type(), BaseException, Blob, _recover_one_missing_page_via_api_key(), _redact_error_text() (+6 more)
+### Community 19 - "generate.py"
+Cohesion: 0.28
+Nodes (11): add_reproducibility_columns(), _generate_recovery_response(), _guess_blob_mime_type(), Blob, _recover_one_missing_page_via_api_key(), process_file(), ProcessedFileResult, is_fatal_api_error() (+3 more)
 
-### Community 20 - "resolve_model_spec"
-Cohesion: 0.43
-Nodes (6): all_registered_models(), _infer_provider_from_model_name(), ModelSpec, ProviderName, registered_google_models(), resolve_model_spec()
+### Community 20 - "access.py"
+Cohesion: 0.11
+Nodes (25): CommandRunner, CompletedProcess, AccessCheckReport, AccessCheckResult, active_gcloud_account(), _bucket_fix(), _configured_prefixes(), _default_runner() (+17 more)
 
-### Community 21 - "patientjournals/tasks.py"
-Cohesion: 0.09
-Nodes (31): Batch upload, submission, status, and retrieval commands., _add_flag(), _add_option(), app_run(), check_models(), collect_outputs(), config_path(), config_show() (+23 more)
+### Community 21 - "test_batch_retrieve_recovery.py"
+Cohesion: 0.10
+Nodes (10): Batch upload, submission, status, and retrieval commands., FakeBlob, FakeBucket, BaseModel, SimpleOutput, test_api_key_recovery_failure_reason_includes_exception_detail(), test_api_key_recovery_retries_transient_errors(), test_api_key_recovery_uses_configured_concurrency() (+2 more)
 
 ### Community 22 - "response_parsing.py"
+Cohesion: 0.14
+Nodes (32): GeminiOutputParseResult, iter_gemini_jsonl_results(), normalize_output_key(), parse_gemini_output_record(), response_has_value(), _chosen_token_logprobs(), _collect_leaf_value_spans(), _collect_logprobs_by_pointer() (+24 more)
+
+### Community 23 - "submit_inputs.py"
 Cohesion: 0.18
-Nodes (27): _chosen_token_logprobs(), _collect_leaf_value_spans(), _collect_logprobs_by_pointer(), confidence_from_avg_logprobs(), _escape_pointer_segment(), extract_field_confidence_by_pointer(), extract_response_avg_logprobs(), extract_response_metadata() (+19 more)
+Nodes (28): _allowed_extensions(), _apply_fp_mode_to_blobs(), _apply_fp_mode_to_pdf_paths(), _apply_image_name_restriction(), _apply_year_filter_to_blobs(), _assert_gcs_input_source(), _configured_year_filter_tokens(), _dedupe_blob_image_names() (+20 more)
 
 ### Community 24 - "model_client.py"
-Cohesion: 0.18
-Nodes (18): _build_provider_client(), _extract_anthropic_response_text(), _extract_openai_response_text(), _import_anthropic_async_client(), _import_openai_async_client(), LocalGenerationResult, LocalModelClient, _pick_value() (+10 more)
+Cohesion: 0.08
+Nodes (28): BaseHTTPRequestHandler, list_google_model_options(), list_live_google_model_options(), list_schema_options(), _model_option_from_name(), ModelOption, SchemaOption, AppHandler (+20 more)
 
 ### Community 25 - "BrowserValidationSession"
 Cohesion: 0.24
 Nodes (4): BrowserValidationSession, Server-side validation state for the browser validator., _score_for_label(), _stringify_value()
 
-### Community 26 - "generate.py"
-Cohesion: 0.19
-Nodes (21): _anthropic_metadata(), combine_subagent_jsonl_sources(), CombinedSubagentOutputs, Validate specialist results and join them into ordinary page records., _request_key_and_metadata(), generate_data(), Any, BaseModel (+13 more)
+### Community 26 - "patientjournals/tasks.py"
+Cohesion: 0.27
+Nodes (21): _add_flag(), _add_option(), app_run(), check_models(), collect_outputs(), config_path(), config_show(), data_batch() (+13 more)
 
-### Community 27 - "test_subagents.py"
-Cohesion: 0.24
-Nodes (11): decode_specialist_request_key(), page_key_from_request_key(), _FakeBlob, _gemini_line(), test_batch_request_fanout_and_disabled_compatibility(), test_combiner_joins_out_of_order_specialist_results(), test_combiner_withholds_page_when_specialist_is_missing(), test_merge_specialists_validates_full_page() (+3 more)
+### Community 27 - "bucket.py"
+Cohesion: 0.29
+Nodes (17): _blob_extension(), _blob_size(), _bucket_depth(), _bucket_parent(), _bucket_relative_name(), _content_type_format_issue(), _extension_format_issue(), _folder_names_from_blob() (+9 more)
 
 ### Community 28 - "ocr.py"
 Cohesion: 0.18
 Nodes (11): _break_name(), _configured_backend(), detect_configured_ocr_batch(), extract_google_vision_lines(), GoogleVisionOcrBackend, OcrImageInput, Collapse Vision's symbol hierarchy into token-efficient visual lines., Send up to 16 images through one Vision images:annotate RPC. (+3 more)
 
-### Community 29 - "submit_requests.py"
-Cohesion: 0.19
-Nodes (23): ocr_context_for_blob(), _anthropic_custom_id_for_key(), _anthropic_signed_url_expiration(), _anthropic_strict_json_schema(), _build_anthropic_batch_requests(), _build_anthropic_manifest_line(), _build_anthropic_manifest_lines(), _build_request_config() (+15 more)
+### Community 29 - "test_run_layout.py"
+Cohesion: 0.31
+Nodes (7): Shared dataset, parsing, and output helpers., _mk(), test_document_existing_runs_backfills_kind(), test_iter_all_run_dirs(), test_iter_run_dirs_reads_both_layouts(), test_reorganize_runs_dry_run_does_not_move(), test_reorganize_runs_moves_and_fixes_references()
 
-### Community 30 - "ImageAccessService"
-Cohesion: 0.38
-Nodes (4): ImageAccessService, Any, Path, Short-lived image links for dataset inspection and submission previews.
+### Community 30 - "image_name_from_reference"
+Cohesion: 0.23
+Nodes (9): ImageAccessService, Any, Path, Short-lived image links for dataset inspection and submission previews., duplicate_image_names(), image_name_from_path(), image_name_from_reference(), Path (+1 more)
 
 ### Community 31 - "Journal"
 Cohesion: 0.11
 Nodes (19): Accuracy, Address, Age, Bottom, Dataset, Diagnoses, Front Page Images, Hospital Stay (+11 more)
 
 ### Community 32 - ".name"
-Cohesion: 0.18
-Nodes (33): _iter_cloud_validation_rows(), cloud_object_by_image_name(), list_cloud_dataset_choices(), list_cloud_dataset_prefixes(), resolve_local_images_on_cloud(), _list_page_keys(), _blob_extension(), _blob_size() (+25 more)
+Cohesion: 0.30
+Nodes (16): _iter_cloud_validation_rows(), cloud_object_by_image_name(), list_cloud_dataset_choices(), list_cloud_dataset_library(), list_cloud_dataset_prefixes(), resolve_local_images_on_cloud(), _list_page_keys(), build_storage_bucket() (+8 more)
 
 ### Community 33 - "ocr_context.py"
 Cohesion: 0.19
@@ -259,8 +264,8 @@ Cohesion: 0.18
 Nodes (16): OcrAttempt, OcrLine, One OCR line with a compact, normalized axis-aligned bounding box., FakeBucket, FakeOcrBackend, _png_bytes(), _symbol(), test_batch_ocr_preparation_creates_generation_bound_reusable_sidecar() (+8 more)
 
 ### Community 35 - "resolve_batch_run_readiness"
-Cohesion: 0.22
-Nodes (13): aggregate_batch_state(), BatchRunReadiness, _is_failure_state(), _is_success_state(), list_batch_chunks_with_state(), Reduce per-chunk live states into a single job-level status. Returns…, Return the app-facing batch state, including output-file readiness. Some Gemini…, Query the batch API once and aggregate chunk states into a job-level status.… (+5 more)
+Cohesion: 0.18
+Nodes (15): aggregate_batch_state(), BatchRunReadiness, _is_failure_state(), _is_success_state(), list_batch_chunks(), list_batch_chunks_with_state(), Reduce per-chunk live states into a single job-level status. Returns…, Return the app-facing batch state, including output-file readiness. Some Gemini… (+7 more)
 
 ### Community 36 - "preprocess.py"
 Cohesion: 0.15
@@ -279,8 +284,8 @@ Cohesion: 0.40
 Nodes (4): Answer, Outcome, Q: Is OCR done linearly, and why not parallelize all images or call OCR in batches?, Source Nodes
 
 ### Community 40 - "JobRegistry"
-Cohesion: 0.24
-Nodes (10): JobRegistry, list_app_registry_jobs(), list_cloud_batch_jobs(), _primary_request_count_from_payload(), RegisteredJob, _retry_attempt_label(), start_command(), _summary_from_store_record() (+2 more)
+Cohesion: 0.19
+Nodes (8): DuplicateStrategy, build_retrieve_command(), JobRegistry, RegisteredJob, start_command(), CommandSpec, test_job_registry_roundtrip(), test_retrieve_command_supports_selected_chunks_and_strategy()
 
 ### Community 41 - "Q: Provide a clear path for the implementation of the 2 following changes. Explain the exact implementation method. Work through them one at a time. 1. Create a preprocessing step before sending through model, which OCR scans the entire page and provides all detected text with image positional arguments. These positions need to be correct for the actual bytes which are given to the model at the final stage, meaning the processed image. 2. Create a method for which we can implement agents to subdivide the transcription task into subproblems that are solved individually. Consider deeply different implementations of doing such and how we could do this best. https://pydantic.dev/docs/ai/core-concepts/agent/"
 Cohesion: 0.40
@@ -291,8 +296,8 @@ Cohesion: 0.60
 Nodes (10): _add_accuracy_scores(), load_validations(), main(), plot_label_distribution(), plot_nested_accuracy(), plot_overall_accuracy(), plot_top_level_accuracy(), DataFrame (+2 more)
 
 ### Community 44 - "Path"
-Cohesion: 0.24
-Nodes (18): _anthropic_custom_id_for_key(), _download_from_mldev_output(), _extract_batch_names_from_payload(), _find_submit_run_dir(), _flush_rows(), _latest_batch_job_file(), _normalize_key(), _output_destinations_from_submit_run() (+10 more)
+Cohesion: 0.30
+Nodes (15): _anthropic_custom_id_for_key(), _download_from_mldev_output(), _extract_batch_names_from_payload(), _find_submit_run_dir(), _normalize_key(), _output_destinations_from_submit_run(), _provider_from_batch_names(), Client (+7 more)
 
 ### Community 45 - "get_batch_client"
 Cohesion: 0.24
@@ -310,33 +315,33 @@ Nodes (9): Address, Age, Bottom, Diagnoses, Hospital Stay, Journal, Patient, Sec
 Cohesion: 0.24
 Nodes (11): OcrMetadataPreparation, CloudOcrPreparationSummary, main(), _manifest_object_name(), _parse_args(), prepare_cloud_ocr_metadata(), Namespace, Populate GCS OCR sidecars for the configured batch input selection. (+3 more)
 
-### Community 58 - "retrieve.py"
-Cohesion: 0.13
-Nodes (27): add_reproducibility_columns(), add_response_metadata_columns(), _await_completion(), _batch_job_state(), _batch_job_successful(), _build_api_key_generation_config(), _dataset_content_type(), _download_from_anthropic_output() (+19 more)
+### Community 58 - "_recover_missing_pages_via_api_key"
+Cohesion: 0.18
+Nodes (12): _build_api_key_generation_config(), _dataset_content_type(), _download_from_vertex_gcs_output(), _normalize_prefix(), _parse_gcs_uri(), _recover_missing_pages_via_api_key(), _recover_missing_pages_via_api_key_async(), _RecoveryResult (+4 more)
 
 ### Community 59 - "collect_outputs.py"
-Cohesion: 0.14
-Nodes (31): Counter, collect_outputs(), collect_valid_outputs_from_jsonl_sources(), CollectedGeminiOutputs, _counter_to_dict(), _expand_local_output_paths(), _flush_collected_rows(), _iter_blob_lines() (+23 more)
-
-### Community 60 - "read_dataset_preview"
-Cohesion: 0.50
-Nodes (4): Read up to ``limit`` rows from a dataset for a quick on-screen preview. Returns…, read_dataset_preview(), test_read_dataset_preview_csv(), test_read_dataset_preview_jsonl()
-
-### Community 61 - "run_layout.py"
 Cohesion: 0.17
-Nodes (19): category_root(), classify_legacy_dir(), _created_at_from_name(), document_existing_runs(), iter_all_run_dirs(), Path, Central conventions for the runs/ output folder. All job output lives under a…, Write a README documenting the runs/ layout. Returns its path. (+11 more)
+Nodes (26): Counter, collect_outputs(), collect_valid_outputs_from_jsonl_sources(), CollectedGeminiOutputs, _counter_to_dict(), _expand_local_output_paths(), _flush_collected_rows(), _iter_blob_lines() (+18 more)
+
+### Community 60 - "test_batch_submit_inputs.py"
+Cohesion: 0.42
+Nodes (5): FakeBlob, FakeBucket, test_list_input_blobs_raises_when_restriction_matches_nothing(), test_list_input_blobs_scopes_to_restricted_image_names(), test_list_input_blobs_skips_duplicate_image_names_with_audit()
+
+### Community 61 - "_api_key_recovery_failure_reason"
+Cohesion: 0.67
+Nodes (4): _api_key_recovery_failure_reason(), _compact_exception_text(), BaseException, _redact_error_text()
 
 ### Community 64 - "Q: Implement OCR, with the goal of providing additional context for the model. Build while keeping minimization of input token usage in mind."
 Cohesion: 0.40
 Nodes (4): Answer, Outcome, Q: Implement OCR, with the goal of providing additional context for the model. Build while keeping minimization of input token usage in mind., Source Nodes
 
-### Community 65 - "image_name_from_reference"
-Cohesion: 0.20
-Nodes (17): copy_dataset_rows_for_image_names(), copy_dataset_rows_for_keys(), load_dataset_image_coverage(), load_dataset_key_coverage(), normalize_dataset_image_name(), _normalize_output_format(), Path, duplicate_image_names() (+9 more)
+### Community 65 - "dataset_coverage.py"
+Cohesion: 0.27
+Nodes (12): copy_dataset_rows_for_image_names(), copy_dataset_rows_for_keys(), load_dataset_image_coverage(), load_dataset_key_coverage(), normalize_dataset_image_name(), _normalize_output_format(), Path, ensure_row_image_name() (+4 more)
 
-### Community 66 - "recover_dataset_gaps"
-Cohesion: 0.18
-Nodes (12): _api_recovery_error_rows(), _api_recovery_error_summary(), Retrieve a submitted batch in-process and record the result on the submit run.…, Resubmit the requests that did not succeed as a fresh batch. Clears the…, Fill in failed/missing pages with synchronous API calls and record results.…, Recover only the pages genuinely missing from the existing dataset via API.…, recover_dataset_gaps(), recover_failed_via_api() (+4 more)
+### Community 66 - "batch/service.py"
+Cohesion: 0.11
+Nodes (21): CollectOutputsResult, RetrieveBatchResult, BatchChunkPlan, BatchCollectOutputsRequest, BatchResultService, BatchRetrieveRequest, BatchSubmitPlan, BatchSubmitRequest (+13 more)
 
 ### Community 67 - "Q: Implement the OCR method to work with batch jobs by retrieving cloud images and creating durable OCR metadata for each; make batch jobs the main point of usage."
 Cohesion: 0.40
@@ -356,11 +361,11 @@ Nodes (4): Answer, Outcome, Q: Implement the OCR method to work with batch jobs 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `JobStore` connect `JobStore` to `WorkflowService`, `recover_dataset_gaps`, `jobs.py`, `test_app_architecture.py`, `workflows.py`, `ui.py`?**
-  _High betweenness centrality (0.069) - this node is a cross-community bridge._
-- **Why does `PatientJournalsApp` connect `PatientJournalsApp` to `JobRegistry`, `workflows.py`, `ui.py`?**
-  _High betweenness centrality (0.031) - this node is a cross-community bridge._
-- **Why does `AppSettings` connect `ui.py` to `.name`, `JobStore`, `WorkflowService`, `recover_dataset_gaps`, `PatientJournalsApp`, `jobs.py`, `status.py`, `test_app_architecture.py`, `workflows.py`, `ImageAccessService`?**
+- **Why does `JobStore` connect `JobStore` to `WorkflowService`, `jobs.py`, `test_app_architecture.py`, `datasets.py`, `ui.py`, `access.py`?**
+  _High betweenness centrality (0.068) - this node is a cross-community bridge._
+- **Why does `PatientJournalsApp` connect `PatientJournalsApp` to `JobRegistry`, `datasets.py`, `ui.py`?**
+  _High betweenness centrality (0.030) - this node is a cross-community bridge._
+- **Why does `AppSettings` connect `ui.py` to `JobStore`, `WorkflowService`, `PatientJournalsApp`, `jobs.py`, `status.py`, `JobRegistry`, `test_app_architecture.py`, `datasets.py`, `access.py`, `image_name_from_reference`?**
   _High betweenness centrality (0.026) - this node is a cross-community bridge._
 - **Are the 21 inferred relationships involving `JobStore` (e.g. with `finalize_dataset_with_failed_rows()` and `find_dataset_near()`) actually correct?**
   _`JobStore` has 21 INFERRED edges - model-reasoned connections that need verification._
