@@ -110,6 +110,8 @@ class Config:
     batch_input_source: Literal["gcs"] = "gcs"
     batch_ocr_metadata_required: bool = True
     batch_ocr_workers: int = 8
+    batch_ocr_api_batch_size: int = 16
+    batch_ocr_api_batch_max_bytes: int = 8_000_000
     batch_ocr_manifest_object: str = "batch/ocr/metadata_manifest.json"
     batch_input_prefix: str = ""
     batch_input_prefixes: tuple[str, ...] = ()
@@ -342,6 +344,8 @@ def _apply_external_json_config(cfg: Config) -> None:
         "batch_input_prefixes",
         "batch_ocr_metadata_required",
         "batch_ocr_workers",
+        "batch_ocr_api_batch_size",
+        "batch_ocr_api_batch_max_bytes",
         "batch_ocr_manifest_object",
         "target_folder",
         "upload_images_folder",

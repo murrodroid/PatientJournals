@@ -99,6 +99,7 @@ def upload(context, extra: str = "") -> None:
 def prepare_ocr(
     context,
     workers: int | None = None,
+    api_batch_size: int | None = None,
     force: bool = False,
     limit: int | None = None,
     allow_failures: bool = False,
@@ -106,6 +107,7 @@ def prepare_ocr(
 ) -> None:
     args: list[str] = []
     _add_option(args, "--workers", workers)
+    _add_option(args, "--api-batch-size", api_batch_size)
     _add_flag(args, "--force", force)
     _add_option(args, "--limit", limit)
     _add_flag(args, "--allow-failures", allow_failures)

@@ -11,6 +11,7 @@ from patientjournals.config import config
 from patientjournals.shared.ocr import (
     OcrDocument,
     detect_configured_ocr,
+    detect_configured_ocr_batch,
     render_ocr_context,
 )
 
@@ -140,6 +141,14 @@ class OcrMetadataPreparation:
             "ocr_line_count": len(self.document.lines) if self.document else 0,
             "error": self.error,
         }
+
+
+@dataclass(frozen=True)
+class _PendingOcr:
+    blob: object
+    source: CloudBlobIdentity
+    sidecar_name: str
+    image_bytes: bytes
 
 
 def _sidecar_name(image_name: str) -> str:
@@ -276,6 +285,122 @@ def prepare_ocr_metadata_for_blob(
             source=identity,
             error=str(exc),
         )
+
+
+def prepare_ocr_metadata_for_blobs(
+    blobs: Sequence[object],
+    *,
+    force: bool = False,
+) -> tuple[OcrMetadataPreparation, ...]:
+    """Prepare one provider batch while retaining a result for every image."""
+
+    records: list[OcrMetadataPreparation] = []
+    pending: list[_PendingOcr] = []
+    for blob in blobs:
+        try:
+            identity = _reload_identity(blob)
+        except Exception as exc:  # noqa: BLE001 - persisted as an image failure
+            identity = CloudBlobIdentity.from_blob(blob)
+            records.append(
+                OcrMetadataPreparation(
+                    blob_name=identity.name,
+                    sidecar_name=_sidecar_name(identity.name),
+                    status="failed",
+                    source=identity,
+                    error=str(exc),
+                )
+            )
+            continue
+
+        sidecar_name = _sidecar_name(identity.name)
+        if not force:
+            cached = load_ocr_metadata_for_blob(blob)
+            if cached is not None:
+                records.append(
+                    OcrMetadataPreparation(
+                        blob_name=identity.name,
+                        sidecar_name=sidecar_name,
+                        status="cached",
+                        source=identity,
+                        document=cached.document,
+                    )
+                )
+                continue
+        try:
+            image_bytes = _download(blob, generation=identity.generation)
+        except Exception as exc:  # noqa: BLE001 - persisted as an image failure
+            records.append(
+                OcrMetadataPreparation(
+                    blob_name=identity.name,
+                    sidecar_name=sidecar_name,
+                    status="failed",
+                    source=identity,
+                    error=str(exc),
+                )
+            )
+            continue
+        pending.append(
+            _PendingOcr(
+                blob=blob,
+                source=identity,
+                sidecar_name=sidecar_name,
+                image_bytes=image_bytes,
+            )
+        )
+
+    attempts = (
+        detect_configured_ocr_batch([item.image_bytes for item in pending])
+        if pending
+        else ()
+    )
+    for item, attempt in zip(pending, attempts, strict=True):
+        document = attempt.document
+        if document is None:
+            records.append(
+                OcrMetadataPreparation(
+                    blob_name=item.source.name,
+                    sidecar_name=item.sidecar_name,
+                    status="failed",
+                    source=item.source,
+                    error=attempt.error or "OCR returned no document.",
+                )
+            )
+            continue
+        try:
+            metadata = CloudOcrMetadata(
+                source=item.source,
+                document=document,
+                created_at=datetime.now(timezone.utc).isoformat(),
+            )
+            sidecar = _sidecar_blob(item.blob)
+            upload = getattr(sidecar, "upload_from_string", None)
+            if not callable(upload):
+                raise TypeError(
+                    "GCS OCR sidecar does not support upload_from_string()."
+                )
+            upload(metadata.to_json(), content_type="application/json")
+            with _METADATA_CACHE_LOCK:
+                _METADATA_CACHE[_cache_key(item.source)] = metadata
+            records.append(
+                OcrMetadataPreparation(
+                    blob_name=item.source.name,
+                    sidecar_name=item.sidecar_name,
+                    status="prepared",
+                    source=item.source,
+                    document=document,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 - persisted as an image failure
+            records.append(
+                OcrMetadataPreparation(
+                    blob_name=item.source.name,
+                    sidecar_name=item.sidecar_name,
+                    status="failed",
+                    source=item.source,
+                    error=str(exc),
+                )
+            )
+    return tuple(records)
 
 
 def ocr_document_for_blob(blob: object) -> OcrDocument | None:

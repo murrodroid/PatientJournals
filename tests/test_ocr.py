@@ -14,8 +14,10 @@ from patientjournals.batch import submit_requests
 from patientjournals.batch import upload as batch_upload
 from patientjournals.config import config
 from patientjournals.shared.ocr import (
+    GoogleVisionOcrBackend,
     OcrAttempt,
     OcrDocument,
+    OcrImageInput,
     OcrLine,
     extract_google_vision_lines,
     render_ocr_context,
@@ -109,6 +111,45 @@ def test_google_vision_hierarchy_collapses_to_normalized_lines() -> None:
         OcrLine("Journal 1889", (50, 100, 500, 200)),
         OcrLine("Feber", (100, 300, 300, 400)),
     )
+
+
+def test_google_vision_backend_sends_multiple_images_in_one_rpc() -> None:
+    captured_requests = []
+    success = SimpleNamespace(
+        error=SimpleNamespace(message=""),
+        full_text_annotation=SimpleNamespace(pages=()),
+    )
+    failure = SimpleNamespace(
+        error=SimpleNamespace(message="quota"),
+        full_text_annotation=SimpleNamespace(pages=()),
+    )
+
+    class Client:
+        def batch_annotate_images(self, *, requests):
+            captured_requests.extend(requests)
+            return SimpleNamespace(responses=(success, failure))
+
+    inputs = tuple(
+        OcrImageInput(
+            image_bytes=value,
+            width=10,
+            height=20,
+            image_sha256=sha256(value).hexdigest(),
+        )
+        for value in (b"first", b"second")
+    )
+
+    attempts = GoogleVisionOcrBackend(Client()).detect_batch(
+        images=inputs,
+        language_hints=("da",),
+    )
+
+    assert len(captured_requests) == 2
+    assert captured_requests[0].image.content == b"first"
+    assert attempts[0].document is not None
+    assert attempts[0].document.image_sha256 == sha256(b"first").hexdigest()
+    assert attempts[1].document is None
+    assert attempts[1].error == "Google Vision OCR failed: quota"
 
 
 def test_prepare_page_ocr_scans_the_exact_serialized_model_bytes(
@@ -315,19 +356,31 @@ def test_cloud_ocr_prepares_all_images_and_writes_manifest(monkeypatch) -> None:
     for blob in blobs:
         blob.payload = _png_bytes()
 
-    def fake_detect(image_bytes: bytes) -> OcrAttempt:
-        width, height = Image.open(BytesIO(image_bytes)).size
-        return OcrAttempt(
-            OcrDocument(
-                image_sha256=sha256(image_bytes).hexdigest(),
-                width=width,
-                height=height,
-                lines=(OcrLine("journal", (10, 20, 30, 40)),),
-                backend="fake-batch",
-            )
-        )
+    api_batch_sizes: list[int] = []
 
-    monkeypatch.setattr(batch_ocr, "detect_configured_ocr", fake_detect)
+    def fake_detect_batch(image_payloads) -> tuple[OcrAttempt, ...]:
+        api_batch_sizes.append(len(image_payloads))
+        attempts: list[OcrAttempt] = []
+        for image_bytes in image_payloads:
+            width, height = Image.open(BytesIO(image_bytes)).size
+            attempts.append(
+                OcrAttempt(
+                    OcrDocument(
+                        image_sha256=sha256(image_bytes).hexdigest(),
+                        width=width,
+                        height=height,
+                        lines=(OcrLine("journal", (10, 20, 30, 40)),),
+                        backend="fake-batch",
+                    )
+                )
+            )
+        return tuple(attempts)
+
+    monkeypatch.setattr(
+        batch_ocr,
+        "detect_configured_ocr_batch",
+        fake_detect_batch,
+    )
 
     first = cloud_ocr.prepare_cloud_ocr_metadata(
         bucket=bucket,
@@ -344,6 +397,7 @@ def test_cloud_ocr_prepares_all_images_and_writes_manifest(monkeypatch) -> None:
 
     assert (first.selected, first.prepared, first.cached, first.failed) == (2, 2, 0, 0)
     assert (second.selected, second.prepared, second.cached, second.failed) == (2, 0, 2, 0)
+    assert api_batch_sizes == [2]
     assert all(
         blob.download_calls == [{"if_generation_match": 1}] for blob in blobs
     )
@@ -356,6 +410,21 @@ def test_cloud_ocr_prepares_all_images_and_writes_manifest(monkeypatch) -> None:
         "pages/1.png",
         "pages/2.png",
     }
+
+
+def test_cloud_ocr_splits_provider_calls_at_sixteen_images() -> None:
+    bucket = FakeBucket()
+    blobs = [bucket.blob(f"pages/{index}.png") for index in range(34)]
+    for blob in blobs:
+        blob.payload = b"x"
+
+    batches = cloud_ocr._split_vision_batches(
+        blobs,
+        batch_size=16,
+        max_bytes=1_000,
+    )
+
+    assert [len(batch) for batch in batches] == [16, 16, 2]
 
 
 def test_batch_request_appends_ocr_after_the_task_prompt(monkeypatch) -> None:

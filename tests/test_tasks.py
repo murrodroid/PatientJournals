@@ -21,6 +21,7 @@ def test_batch_ocr_task_builds_cloud_preparation_command() -> None:
     prepare_ocr.body(
         Context(),
         workers=4,
+        api_batch_size=8,
         force=True,
         limit=12,
         allow_failures=True,
@@ -28,5 +29,5 @@ def test_batch_ocr_task_builds_cloud_preparation_command() -> None:
 
     assert commands == [
         "python -m patientjournals.batch.prepare_ocr "
-        "--workers 4 --force --limit 12 --allow-failures"
+        "--workers 4 --api-batch-size 8 --force --limit 12 --allow-failures"
     ]

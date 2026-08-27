@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-27T11:02:47.482208+00:00",
+  "generated_at": "2026-08-27T11:11:22.997196+00:00",
   "nodes": {
     "src_patientjournals_app_workflows_workflowservice": {
       "code_fingerprint": "ab423e98308ca0fa88315ecd15ca700381ab9b3b73e6afbabedb4f3f3f188145",
@@ -12,29 +12,34 @@
           "q": "Provide a clear path for the implementation of the 2 following changes. Explain the exact implementation method. Work through them one at a time. 1. Create a preprocessing step before sending through model, which OCR scans the entire page and provides all detected text with image positional arguments. These positions need to be correct for the actual bytes which are given to the model at the final stage, meaning the processed image. 2. Create a method for which we can implement agents to subdivide the transcription task into subproblems that are solved individually. Consider deeply different implementations of doing such and how we could do this best. https://pydantic.dev/docs/ai/core-concepts/agent/"
         }
       ],
-      "score": 0.998432935,
+      "score": 0.998295302,
       "source_file": "src/patientjournals/app/workflows.py",
       "status": "tentative",
       "uses": 1
     },
     "src_patientjournals_batch_ocr_context_cloudblobidentity": {
-      "code_fingerprint": "b1dbc27c96005fad27a75dc44d73390b31ee5619a833c830f7e577b4c976afb3",
+      "code_fingerprint": "ae11a1b87dddce55fd5a5c31b13a43a0f24b20d63682e975488c72a08444f180",
       "label": "CloudBlobIdentity",
-      "last": "2026-08-27T10:58:30.938071+00:00",
+      "last": "2026-08-27T11:09:37.216487+00:00",
       "provenance": [
+        {
+          "date": "2026-08-27T11:09:37.216487+00:00",
+          "outcome": "useful",
+          "q": "Is OCR done linearly, and why not parallelize all images or call OCR in batches?"
+        },
         {
           "date": "2026-08-27T10:58:30.938071+00:00",
           "outcome": "useful",
           "q": "Implement the OCR method to work with batch jobs by retrieving cloud images and creating durable OCR metadata for each; make batch jobs the main point of usage."
         }
       ],
-      "score": 0.999931398,
+      "score": 1.999765272,
       "source_file": "src/patientjournals/batch/ocr_context.py",
-      "status": "tentative",
-      "uses": 1
+      "status": "preferred",
+      "uses": 2
     },
     "src_patientjournals_batch_ocr_context_cloudocrmetadata": {
-      "code_fingerprint": "b1dbc27c96005fad27a75dc44d73390b31ee5619a833c830f7e577b4c976afb3",
+      "code_fingerprint": "ae11a1b87dddce55fd5a5c31b13a43a0f24b20d63682e975488c72a08444f180",
       "label": "CloudOcrMetadata",
       "last": "2026-08-27T10:58:30.938071+00:00",
       "provenance": [
@@ -44,13 +49,29 @@
           "q": "Implement the OCR method to work with batch jobs by retrieving cloud images and creating durable OCR metadata for each; make batch jobs the main point of usage."
         }
       ],
-      "score": 0.999931398,
+      "score": 0.999793559,
+      "source_file": "src/patientjournals/batch/ocr_context.py",
+      "status": "tentative",
+      "uses": 1
+    },
+    "src_patientjournals_batch_ocr_context_ocrmetadatapreparation": {
+      "code_fingerprint": "ae11a1b87dddce55fd5a5c31b13a43a0f24b20d63682e975488c72a08444f180",
+      "label": "OcrMetadataPreparation",
+      "last": "2026-08-27T11:09:37.216487+00:00",
+      "provenance": [
+        {
+          "date": "2026-08-27T11:09:37.216487+00:00",
+          "outcome": "useful",
+          "q": "Is OCR done linearly, and why not parallelize all images or call OCR in batches?"
+        }
+      ],
+      "score": 0.999971713,
       "source_file": "src/patientjournals/batch/ocr_context.py",
       "status": "tentative",
       "uses": 1
     },
     "src_patientjournals_batch_prepare_ocr_cloudocrpreparationsummary": {
-      "code_fingerprint": "017376b307c85c05475b0f57d26d5c29690399e014fc495f21d73fb4ab6dedec",
+      "code_fingerprint": "0b033be0e421f1eb89f4395504c6e13988d313f096d9bb27c310b39610927bec",
       "label": "CloudOcrPreparationSummary",
       "last": "2026-08-27T10:58:30.938071+00:00",
       "provenance": [
@@ -60,7 +81,7 @@
           "q": "Implement the OCR method to work with batch jobs by retrieving cloud images and creating durable OCR metadata for each; make batch jobs the main point of usage."
         }
       ],
-      "score": 0.999931398,
+      "score": 0.999793559,
       "source_file": "src/patientjournals/batch/prepare_ocr.py",
       "status": "tentative",
       "uses": 1
@@ -76,7 +97,7 @@
           "q": "Implement the OCR method to work with batch jobs by retrieving cloud images and creating durable OCR metadata for each; make batch jobs the main point of usage."
         }
       ],
-      "score": 0.999931398,
+      "score": 0.999793559,
       "source_file": "src/patientjournals/batch/submit.py",
       "status": "tentative",
       "uses": 1
@@ -97,13 +118,29 @@
           "q": "Provide a clear path for the implementation of the 2 following changes. Explain the exact implementation method. Work through them one at a time. 1. Create a preprocessing step before sending through model, which OCR scans the entire page and provides all detected text with image positional arguments. These positions need to be correct for the actual bytes which are given to the model at the final stage, meaning the processed image. 2. Create a method for which we can implement agents to subdivide the transcription task into subproblems that are solved individually. Consider deeply different implementations of doing such and how we could do this best. https://pydantic.dev/docs/ai/core-concepts/agent/"
         }
       ],
-      "score": 1.998083926,
+      "score": 1.997808494,
       "source_file": "src/patientjournals/local/model_client.py",
       "status": "preferred",
       "uses": 2
     },
+    "src_patientjournals_shared_ocr_googlevisionocrbackend": {
+      "code_fingerprint": "06c5ad427dc501d4f78c56a96f18e7caaf0ae721015deeb0db6bdf4a8321d7ad",
+      "label": "GoogleVisionOcrBackend",
+      "last": "2026-08-27T11:09:37.216487+00:00",
+      "provenance": [
+        {
+          "date": "2026-08-27T11:09:37.216487+00:00",
+          "outcome": "useful",
+          "q": "Is OCR done linearly, and why not parallelize all images or call OCR in batches?"
+        }
+      ],
+      "score": 0.999971713,
+      "source_file": "src/patientjournals/shared/ocr.py",
+      "status": "tentative",
+      "uses": 1
+    },
     "src_patientjournals_shared_ocr_ocrdocument": {
-      "code_fingerprint": "f017135c8f9e1bc45f4667889ae7ea533f3aff79421ad1cfd9441015ff1ad27c",
+      "code_fingerprint": "06c5ad427dc501d4f78c56a96f18e7caaf0ae721015deeb0db6bdf4a8321d7ad",
       "label": "OcrDocument",
       "last": "2026-08-27T10:41:02.149338+00:00",
       "provenance": [
@@ -113,7 +150,7 @@
           "q": "Implement OCR, with the goal of providing additional context for the model. Build while keeping minimization of input token usage in mind."
         }
       ],
-      "score": 0.999650992,
+      "score": 0.999513191,
       "source_file": "src/patientjournals/shared/ocr.py",
       "status": "tentative",
       "uses": 1
@@ -129,7 +166,7 @@
           "q": "Implement OCR, with the goal of providing additional context for the model. Build while keeping minimization of input token usage in mind."
         }
       ],
-      "score": 0.999650992,
+      "score": 0.999513191,
       "source_file": "src/patientjournals/shared/preprocess.py",
       "status": "tentative",
       "uses": 1

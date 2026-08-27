@@ -103,6 +103,14 @@ class OcrAttempt:
     error: str | None = None
 
 
+@dataclass(frozen=True)
+class OcrImageInput:
+    image_bytes: bytes
+    width: int
+    height: int
+    image_sha256: str
+
+
 class OcrBackend(Protocol):
     name: str
 
@@ -283,6 +291,74 @@ class GoogleVisionOcrBackend:
             backend=self.name,
         )
 
+    def detect_batch(
+        self,
+        *,
+        images: Sequence[OcrImageInput],
+        language_hints: Sequence[str],
+    ) -> tuple[OcrAttempt, ...]:
+        """Send up to 16 images through one Vision images:annotate RPC."""
+
+        from google.cloud import vision
+
+        if not images:
+            return ()
+        if len(images) > 16:
+            raise ValueError("Google Vision accepts at most 16 images per batch RPC.")
+
+        image_context = (
+            vision.ImageContext(language_hints=list(language_hints))
+            if language_hints
+            else None
+        )
+        feature = vision.Feature(
+            type_=vision.Feature.Type.DOCUMENT_TEXT_DETECTION
+        )
+        requests = [
+            vision.AnnotateImageRequest(
+                image=vision.Image(content=item.image_bytes),
+                features=[feature],
+                image_context=image_context,
+            )
+            for item in images
+        ]
+        batch_response = self.client.batch_annotate_images(requests=requests)
+        responses = tuple(getattr(batch_response, "responses", ()) or ())
+        if len(responses) != len(images):
+            raise RuntimeError(
+                "Google Vision returned "
+                f"{len(responses)} response(s) for {len(images)} image(s)."
+            )
+
+        attempts: list[OcrAttempt] = []
+        for item, response in zip(images, responses, strict=True):
+            error = getattr(response, "error", None)
+            error_message = str(getattr(error, "message", "") or "").strip()
+            if error_message:
+                attempts.append(
+                    OcrAttempt(
+                        document=None,
+                        error=f"Google Vision OCR failed: {error_message}",
+                    )
+                )
+                continue
+            attempts.append(
+                OcrAttempt(
+                    document=OcrDocument(
+                        image_sha256=item.image_sha256,
+                        width=item.width,
+                        height=item.height,
+                        lines=extract_google_vision_lines(
+                            response,
+                            width=item.width,
+                            height=item.height,
+                        ),
+                        backend=self.name,
+                    )
+                )
+            )
+        return tuple(attempts)
+
 
 class _UnavailableOcrBackend:
     name = "unavailable"
@@ -395,6 +471,86 @@ def detect_configured_ocr(
         if bool(config.ocr_required):
             raise RuntimeError(f"OCR is required but failed: {exc}") from exc
         return OcrAttempt(document=None, error=str(exc))
+
+
+def detect_configured_ocr_batch(
+    image_payloads: Sequence[bytes],
+    *,
+    backend: OcrBackend | None = None,
+) -> tuple[OcrAttempt, ...]:
+    """OCR multiple images with one backend RPC when the backend supports it."""
+
+    from patientjournals.config import config
+
+    if not image_payloads:
+        return ()
+    if not bool(config.ocr_enabled):
+        return tuple(OcrAttempt(document=None) for _ in image_payloads)
+
+    active_backend = backend or _configured_backend(
+        str(config.ocr_backend or "google_vision").strip().lower(),
+        str(config.gcp_auth_mode or "adc").strip().lower(),
+        str(config.service_account_file or ""),
+    )
+    language_hints = tuple(config.ocr_language_hints or ())
+    inputs = tuple(
+        OcrImageInput(
+            image_bytes=image_bytes,
+            width=identity[0],
+            height=identity[1],
+            image_sha256=identity[2],
+        )
+        for image_bytes in image_payloads
+        for identity in (image_identity(image_bytes),)
+    )
+
+    try:
+        batch_detect = getattr(active_backend, "detect_batch", None)
+        if callable(batch_detect):
+            attempts = tuple(
+                batch_detect(images=inputs, language_hints=language_hints)
+            )
+        else:
+            attempts = tuple(
+                OcrAttempt(
+                    document=active_backend.detect(
+                        image_bytes=item.image_bytes,
+                        width=item.width,
+                        height=item.height,
+                        image_sha256=item.image_sha256,
+                        language_hints=language_hints,
+                    )
+                )
+                for item in inputs
+            )
+        if len(attempts) != len(inputs):
+            raise RuntimeError(
+                f"OCR backend returned {len(attempts)} result(s) for "
+                f"{len(inputs)} image(s)."
+            )
+
+        validated: list[OcrAttempt] = []
+        for item, attempt in zip(inputs, attempts, strict=True):
+            document = attempt.document
+            if document is not None and (
+                document.image_sha256 != item.image_sha256
+                or (document.width, document.height) != (item.width, item.height)
+            ):
+                validated.append(
+                    OcrAttempt(
+                        document=None,
+                        error="OCR backend returned metadata for different image bytes.",
+                    )
+                )
+            else:
+                validated.append(attempt)
+        return tuple(validated)
+    except Exception as exc:  # noqa: BLE001 - record one RPC failure per image
+        if bool(config.ocr_required):
+            raise RuntimeError(f"OCR batch is required but failed: {exc}") from exc
+        return tuple(
+            OcrAttempt(document=None, error=str(exc)) for _ in image_payloads
+        )
 
 
 def render_ocr_context(document: OcrDocument | None) -> str:

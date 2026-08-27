@@ -12,6 +12,7 @@ Rules:
 - A feature is not complete if it only works through `patientjournals.local`. Local generation is a secondary development and recovery path.
 - Durable preprocessing output needed by a batch request must live in cloud storage. Batch request construction should retrieve prepared artifacts; it must not perform expensive preprocessing, OCR, or full image downloads.
 - OCR must be prepared before submission with `batch.ocr`. Sidecars must be bound to the exact GCS object generation, and missing or stale metadata must block batch submission by default.
+- Cloud preprocessing should use bounded provider-native batches and parallelism rather than one remote call per input. Keep batch sizes and concurrency configurable so production runs can stay within provider quotas.
 - New operational commands and tests should preserve the sequence upload -> cloud preprocessing -> submit -> retrieve.
 - Prefer provider-independent request preparation before the provider-specific Gemini or Anthropic batch adapters.
 
