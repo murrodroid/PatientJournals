@@ -25,12 +25,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import numpy as np
 from PIL import Image
 
 from andenside.bogryg import MIN_STIGNING, smooth, soegevindue
 from andenside.masterlist import Side
 
-ANTAL_BAAND = 10
+ANTAL_BAAND = 24       # antal maalepunkter ned gennem siden
+OVERLAP = 2.5          # hvert vindues hoejde, malt i skridt mellem punkterne
 MARGEN = 0.03          # top og bund udelades -- affotograferingens skygge
 BUFFER_ANDEL = 0.02    # flyttes vaek fra vores egen tekst
 # 2%, ikke 1%: maalt paa 273104_001639, hvor skriften loeber ud i papirets
@@ -57,20 +59,18 @@ class SkraaBeskaering:
         return self.baand_med_kant * 2 >= self.baand_i_alt
 
 
-def _profil_i_baand(img: Image.Image, y0: int, y1: int, *, step: int = 3,
+def _graatoner(img: Image.Image) -> "np.ndarray":
+    """Billedet som graatone-array.
+
+    Konverteringen koster ~13 ms pr. kald, saa den laves ÉN gang pr. side og
+    sendes videre -- ikke én gang pr. baand.
+    """
+    return np.asarray(img.convert("L"))
+
+
+def _profil_i_baand(graa: "np.ndarray", y0: int, y1: int, *, step: int = 3,
                     taerskel: int = 180) -> list[float]:
-    graa = img.convert("L")
-    px = graa.load()
-    bredde = graa.size[0]
-    ud = []
-    for x in range(bredde):
-        moerke = total = 0
-        for y in range(y0, y1, step):
-            total += 1
-            if px[x, y] < taerskel:
-                moerke += 1
-        ud.append(moerke / total)
-    return smooth(ud)
+    return smooth((graa[y0:y1:step, :] < taerskel).mean(axis=0).tolist())
 
 
 def _kant_i_profil(profil: list[float], vindue) -> int | None:
@@ -90,29 +90,43 @@ def _kant_i_profil(profil: list[float], vindue) -> int | None:
 
 
 def baandkanter(
-    img: Image.Image, side: Side, *, antal: int = ANTAL_BAAND
+    img: Image.Image, side: Side, *, antal: int = ANTAL_BAAND,
+    overlap: float = OVERLAP,
 ) -> list[tuple[int, int | None]]:
-    """Falsens kant i hvert vandret baand: `(baandets midte i y, kantens x)`.
+    """Falsens kant maalt i et GLIDENDE vindue ned gennem siden.
 
-    `None` betyder, at baandet ikke rummede en troevaerdig fals -- fx fordi
-    der ikke er skrevet noget i den hoejde.
+    Returnerer `(vinduets midte i y, kantens x)`. `None` betyder, at vinduet
+    ikke rummede en troevaerdig fals -- fx fordi der ikke er skrevet noget i
+    den hoejde.
+
+    Vinduerne OVERLAPPER (hvert er `overlap` gange saa hoejt som skridtet
+    mellem dem). To ting vindes ved det: hver enkelt maaling bygger paa flere
+    raekker og bliver derfor mindre foelsom over for et stykke uden blaek, og
+    graensen bliver glat i stedet for at faa et knaek ved hver baandgraense.
+    Med adskilte baand kunne snitkanten ses "trappe" paa sider med skaev fals.
     """
     vindue = soegevindue(side, img.width)   # rejser ValueError ved ukendt r/v
+    graa = _graatoner(img)
     y0, y1 = int(img.height * MARGEN), int(img.height * (1 - MARGEN))
-    hoejde = max(1, (y1 - y0) // antal)
+    skridt = max(1, (y1 - y0) // antal)
+    halv = max(1, int(skridt * overlap / 2))
 
     ud = []
     for i in range(antal):
-        ya = y0 + i * hoejde
-        yb = y1 if i == antal - 1 else ya + hoejde
-        kant = _kant_i_profil(_profil_i_baand(img, ya, yb), vindue)
-        ud.append(((ya + yb) // 2, kant))
+        midte = y0 + skridt * i + skridt // 2
+        ya = max(y0, midte - halv)
+        yb = min(y1, midte + halv)
+        if yb - ya < 2:
+            ud.append((midte, None))
+            continue
+        ud.append((midte, _kant_i_profil(_profil_i_baand(graa, ya, yb), vindue)))
     return ud
 
 
 def fals_graense(
     img: Image.Image, side: Side, *, antal: int = ANTAL_BAAND,
     buffer_andel: float = BUFFER_ANDEL,
+    kanter: list[tuple[int, int | None]] | None = None,
 ) -> list[int]:
     """Falsens x for HVER raekke i billedet, interpoleret mellem baandene.
 
@@ -122,24 +136,22 @@ def fals_graense(
     # Kun baand med en troevaerdig fals bruges. Huller behoever ingen
     # saerbehandling: interpolationen nedenfor spaender hen over dem, og
     # raekker uden for yderste kendte baand faar dets vaerdi.
-    kanter = [(y, x) for y, x in baandkanter(img, side, antal=antal) if x is not None]
+    raa = baandkanter(img, side, antal=antal) if kanter is None else kanter
+    kanter = [(y, x) for y, x in raa if x is not None]
     if not kanter:
         return []
 
     buffer_px = max(1, int(img.width * buffer_andel))
     retning = 1 if vindue.retning == "fra_hoejre" else -1
 
-    graense = []
-    for y in range(img.height):
-        foer = [k for k in kanter if k[0] <= y]
-        efter = [k for k in kanter if k[0] > y]
-        if foer and efter:
-            (y0, x0), (y1, x1) = foer[-1], efter[0]
-            x = x0 + (x1 - x0) * (y - y0) / (y1 - y0)
-        else:
-            x = (foer or efter)[-1 if foer else 0][1]
-        graense.append(int(round(x)) + retning * buffer_px)
-    return graense
+    # Lineaer interpolation mellem baandenes midter. `np.interp` holder
+    # yderste kendte vaerdi uden for spaendet, praecis som en raekke uden et
+    # baand paa begge sider skal have.
+    ys = np.array([y for y, _ in kanter], dtype=float)
+    xs = np.array([x for _, x in kanter], dtype=float)
+    alle = np.arange(img.height, dtype=float)
+    x = np.interp(alle, ys, xs)
+    return (np.rint(x).astype(int) + retning * buffer_px).tolist()
 
 
 def beskaer_langs_fals(
@@ -152,9 +164,13 @@ def beskaer_langs_fals(
     til det yderste, der er beholdt. Resultatet er et almindeligt rektangel.
     """
     vindue = soegevindue(side, img.width)
+    # Baandkanterne beregnes ÉN gang og genbruges. Tidligere kaldte denne
+    # funktion baade baandkanter og fals_graense, og sidstnaevnte beregnede
+    # dem forfra -- altsaa tre gange det samme arbejde pr. side.
     kanter = baandkanter(img, side, antal=antal)
     med_kant = sum(1 for _, x in kanter if x is not None)
-    graense = fals_graense(img, side, antal=antal, buffer_andel=buffer_andel)
+    graense = fals_graense(img, side, antal=antal, buffer_andel=buffer_andel,
+                           kanter=kanter)
 
     if not graense:
         maaling = SkraaBeskaering(
@@ -166,19 +182,22 @@ def beskaer_langs_fals(
 
     # Billedets egen farvetilstand bevares -- en graa udgave ville vaere en
     # skjult aendring af det, modellen faar at se.
-    arbejde = img.copy()
-    tegn = arbejde.load()
-    hvid = 255 if arbejde.mode == "L" else (255,) * len(arbejde.getbands())
+    #
+    # Udhvidningen laves som én maske i stedet for pixel for pixel: for hver
+    # raekke sammenlignes kolonneindekset med raekkens egen graense.
+    data = np.asarray(img).copy()
+    kol = np.arange(img.width)[None, :]
+    g = np.asarray(graense)[:, None]
+    udenfor = kol >= g if vindue.retning == "fra_hoejre" else kol < g
+    if data.ndim == 3:
+        udenfor = udenfor[:, :, None]
+    data = np.where(udenfor, 255, data).astype(np.uint8)
+    arbejde = Image.fromarray(data, mode=img.mode)
+
     if vindue.retning == "fra_hoejre":
-        for y in range(img.height):
-            for x in range(max(0, graense[y]), img.width):
-                tegn[x, y] = hvid
         yderste = min(img.width, max(graense))
         beskaaret = arbejde.crop((0, 0, yderste, img.height))
     else:
-        for y in range(img.height):
-            for x in range(0, min(img.width, graense[y])):
-                tegn[x, y] = hvid
         yderste = max(0, min(graense))
         beskaaret = arbejde.crop((yderste, 0, img.width, img.height))
 

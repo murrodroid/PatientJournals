@@ -21,3 +21,6 @@ api_keys.py
 .env
 *credentials*.json
 .claude/
+
+# Lokale Claude-artefakter hoerer ikke i repoet
+.claude/

@@ -215,3 +215,29 @@ def test_manglende_kant_i_TOPBAANDET_giver_ikke_et_spring():
     )
     for y in range(1, img.height):
         assert abs(graense[y] - graense[y - 1]) < 20
+
+
+def test_graensen_FOELGER_siden_ned_og_er_ikke_konstant():
+    """Graensen skal aendre sig med hoejden -- det er hele pointen.
+
+    Uden dette kunne interpolationen erstattes af én fast vaerdi, og
+    beskaeringen ville i praksis vaere lodret igen, mens alle oevrige tests
+    stadig gik igennem.
+    """
+    img = _skraa_fals(top_x=880, bund_x=800)
+    graense = fals_graense(img, _side(1))
+    assert len(graense) == img.height
+    spaend = max(graense) - min(graense)
+    assert spaend > 50, f"graensen er praktisk talt konstant (spaend {spaend} px)"
+    # Og den skal foelge falsens retning: hoejt oppe laengst til hoejre.
+    assert graense[10] > graense[-10] + 40
+
+
+def test_en_LODRET_fals_giver_en_naesten_konstant_graense():
+    """Modstykket: variationen maa ikke vaere stoej.
+
+    Er falsen lodret, skal graensen ogsaa vaere det -- ellers foelger den
+    noget andet end falsen.
+    """
+    graense = fals_graense(_skraa_fals(top_x=850, bund_x=850), _side(1))
+    assert max(graense) - min(graense) <= 12

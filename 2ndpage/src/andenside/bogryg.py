@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import numpy as np
 from PIL import Image
 
 from andenside.masterlist import Side
@@ -58,30 +59,28 @@ def column_ink_profile(
     273098_001496/1497 og 273099_001360/1361.
     """
     gray = img.convert("L")
-    width, height = gray.size
-    pixels = gray.load()
+    _, height = gray.size
     y_start = int(height * top_bottom_margin)
     y_end = height - y_start
-    profile = []
-    for x in range(width):
-        dark = 0
-        total = 0
-        for y in range(y_start, y_end, step):
-            total += 1
-            if pixels[x, y] < dark_threshold:
-                dark += 1
-        profile.append(dark / total)
-    return profile
+    # Vektoriseret: samme regnestykke som en dobbeltloekke over pixels, men
+    # udfoert af numpy. Baandet klippes ud, taerskles, og de moerke taelles
+    # kolonnevis. Raekkefoelgen af summeringen er den samme, saa tallene er
+    # identiske med den tidligere loekke.
+    baand = np.asarray(gray)[y_start:y_end:step, :]
+    return (baand < dark_threshold).mean(axis=0).tolist()
 
 
 def smooth(values: list[float], window: int = 9) -> list[float]:
     half = window // 2
-    out = []
-    for i in range(len(values)):
-        lo = max(0, i - half)
-        hi = min(len(values), i + half + 1)
-        out.append(sum(values[lo:hi]) / (hi - lo))
-    return out
+    v = np.asarray(values, dtype=float)
+    # Kantene skal midles over faerre elementer, praecis som den tidligere
+    # loekke gjorde -- derfor divideres der med et loebende antal, ikke med
+    # den faste vinduesbredde.
+    kum = np.concatenate(([0.0], np.cumsum(v)))
+    i = np.arange(len(v))
+    lo = np.maximum(0, i - half)
+    hi = np.minimum(len(v), i + half + 1)
+    return ((kum[hi] - kum[lo]) / (hi - lo)).tolist()
 
 
 @dataclass(frozen=True)
