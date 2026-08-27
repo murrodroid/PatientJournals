@@ -271,6 +271,16 @@ selve læse-implementeringen, samme princip som resten af planen)*
 ## Stage 06 — Prompt og model
 
 - [ ] Én akse ad gangen: model, prompt, opløsning, linjedetektion (baselines)
+- [ ] **Baseline-aksen** (udskrevet i stage 06's CONTEXT 2026-08-27):
+  - [ ] Afklar først, om fuldside-linjedetektion overhovedet kan køre her —
+        magresprots kopi kræver givne regioner og en sti-dependency, vi ikke har.
+        Kan den ikke, noteres aksen som uafprøvet og lukkes.
+  - [ ] Variant 1: baselines som oplysning i prompten (billig, ingen ny pipeline)
+  - [ ] Variant 2: udklip pr. linje — kun hvis variant 1 peger den vej; flyttes
+        i så fald ud i sin egen stage
+  - [ ] Gevinstkrav: fuldside-kontrollen må ikke falde, uparrede linjer skal ned,
+        og det skal holde på mere end én bog
+- [ ] Transkribus gennem samme måleapparat som reel sammenligning (proces-punkt 1a)
 - [ ] Test om prompt kan løse resterende beskæringsufuldkommenheder
 - [ ] **Er de ulæselige steder ulæselige, eller bare dårligt fotograferet?**
       20-30 tætte udklip i højeste opløsning, forelagt lead. Kræver
