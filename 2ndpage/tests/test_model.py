@@ -15,6 +15,7 @@ det, er de to stykker plumbing omkring kaldet:
 import pytest
 
 from andenside.model import (
+    hent_noegle,
     NoegleFejl,
     find_noegle,
     tekst_af_sider,
@@ -106,3 +107,43 @@ def test_et_tomt_svar_er_en_fejl():
     """
     with pytest.raises(ValueError, match="tomt"):
         tekst_af_sider([])
+
+
+# ----------------------------------------- projektet har sin egen noegle
+
+def test_projektets_noegle_er_IKKE_den_private(monkeypatch, tmp_path):
+    """Projektet bruger sin egen noeglefil og ingen anden.
+
+    Skellet skal haandhaeves, ikke blot beskrives: falder koden tilbage til
+    en anden noeglefil paa maskinen den dag projektets egen mangler, sker det
+    lydloest. Derfor maa ingen anden noeglesti optraede i modulet, og en
+    manglende noeglefil skal FEJLE frem for at lede videre.
+    """
+    import andenside.model as m
+    from pathlib import Path
+
+    kilde = Path(m.__file__).read_text(encoding="utf-8")
+    assert "api_keys.json" not in kilde, (
+        "modulet peger paa en anden noeglefil end projektets egen"
+    )
+
+    mangler = tmp_path / "findes-ikke.json"
+    with pytest.raises(NoegleFejl) as fejl:
+        hent_noegle(mangler)
+    # Beskeden skal pege paa projektets egen fil, saa ingen 'loeser' det ved
+    # at kopiere en anden ind.
+    assert str(mangler) in str(fejl.value)
+
+
+def test_noeglefilens_placering_kan_saettes_med_en_miljoevariabel(monkeypatch):
+    """Så maskinen kan bestemme stien uden at koden skal aendres."""
+    import importlib
+    import andenside.model as m
+
+    monkeypatch.setenv("ANDENSIDE_NOEGLEFIL", r"D:\et\andet\sted.json")
+    genindlaest = importlib.reload(m)
+    try:
+        assert str(genindlaest.NOEGLEFIL) == r"D:\et\andet\sted.json"
+    finally:
+        monkeypatch.delenv("ANDENSIDE_NOEGLEFIL", raising=False)
+        importlib.reload(m)

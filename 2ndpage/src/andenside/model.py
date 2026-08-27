@@ -4,8 +4,12 @@ Projektet afleverer en prompt og et skema til kollegaens app -- ikke
 koerselskode. Det her er derfor med vilje tyndt: nok til at maale, om prompten
 virker, og ikke mere.
 
-**Noeglen.** Den ligger i `C:\\Work\\api_keys.json` og laeses af koden ved
-koersel. Vi kender ikke feltnavnet indeni, og filen skal ikke aabnes af et
+**Noeglen har sit EGET sted for dette projekt** -- se `NOEGLEFIL` nedenfor.
+Modulet kender med vilje ingen anden noeglefil: mangler projektets egen,
+fejler koerslen i stedet for at lede videre til en tilfaeldig noegle, der
+maatte ligge paa maskinen.
+
+Filen laeses ved koersel. Vi kender ikke feltnavnet indeni, og den skal ikke aabnes af et
 menneske eller en agent for at finde ud af det -- opslaget finder selv et felt,
 der ligner en Gemini-noegle, og fejler tydeligt med en liste over de feltnavne,
 der ER i filen, hvis der ikke er et. Selve vaerdien staar aldrig i en fejl,
@@ -24,12 +28,18 @@ intet at rense -- og dermed intet at skulle notere i bogholderiet.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel
 
-NOEGLEFIL = Path(r"C:\Work\api_keys.json")
+# Projektets EGEN noeglefil, bevidst adskilt fra andre noeglefiler paa
+# maskinen. Ligger uden for repoet, saa et uagtsomt `git add -A` ikke kan
+# publicere den.
+NOEGLEFIL = Path(
+    os.environ.get("ANDENSIDE_NOEGLEFIL", r"C:\Work\2ndpage_keys.json")
+)
 
 # Feltnavne, der peger paa en Gemini-noegle. Roert i den raekkefoelge, saa en
 # fil med flere udbydere ikke giver os OpenAI's noegle ved et uheld.
@@ -115,7 +125,11 @@ def hent_noegle(sti: Path = NOEGLEFIL) -> str:
     vises ikke.
     """
     if not sti.exists():
-        raise NoegleFejl(f"noeglefilen findes ikke: {sti}")
+        raise NoegleFejl(
+            f"projektets noeglefil findes ikke: {sti}. "
+            f"Opret den med et felt, hvis navn rummer 'gemini', 'genai' eller "
+            f"'google'. Stien kan flyttes med ANDENSIDE_NOEGLEFIL."
+        )
     try:
         data = json.loads(sti.read_text(encoding="utf-8"))
     except json.JSONDecodeError as fejl:
