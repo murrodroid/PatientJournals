@@ -31,6 +31,7 @@ from patientjournals.shared.dataset_coverage import (
 )
 from patientjournals.shared import run_layout
 from patientjournals.shared.identity import image_name_from_gcs_object
+from patientjournals.shared.subagents import schema_specialists
 from patientjournals.shared.tools import create_subfolder, get_run_logger
 
 
@@ -659,6 +660,16 @@ def _write_batch_job_meta(
     total_request_bytes = sum(int(item.get("request_bytes") or 0) for item in jobs)
 
     first = jobs[0]
+    specialist_names = (
+        [item.name for item in schema_specialists(config.output_schema)]
+        if bool(config.subagents)
+        else []
+    )
+    page_count = (
+        total_request_count // len(specialist_names)
+        if specialist_names
+        else total_request_count
+    )
     meta = {
         "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "job_group_id": run_dir.name,
@@ -669,6 +680,7 @@ def _write_batch_job_meta(
         ],
         "batch_jobs": jobs,
         "request_count": total_request_count,
+        "page_count": page_count,
         "request_bytes": total_request_bytes,
         "input_file": first.get("input_file"),
         "input_source": first.get("input_source"),
@@ -683,6 +695,8 @@ def _write_batch_job_meta(
         "vertex_location": vertex_location,
         "num_batches_requested": int(num_batches_requested),
         "num_batches_submitted": len(jobs),
+        "subagents": bool(config.subagents),
+        "specialist_fields": specialist_names,
     }
     (run_dir / "batch_job.json").write_text(
         json.dumps(meta, indent=2, ensure_ascii=False),

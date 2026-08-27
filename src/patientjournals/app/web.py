@@ -1005,7 +1005,7 @@ async function submit() {
       <div class="toolbar"><button class="btn secondary" onclick="previewSubmission()">Preview random pages</button></div><div id="submitPreview"></div>
       <label>Schema version</label><select id="schema">${(opts.schemas || []).map(s=>`<option value="${esc(s.version_id)}" data-name="${esc(s.name)}" ${s.is_active ? 'selected' : ''}>${esc(s.name)} v${esc(s.version_number)}${s.is_active ? ' - Active' : ''}</option>`).join('')}</select>
       <label>Model</label><select id="model">${(opts.models || []).map(m=>`<option>${esc(m.name)}</option>`).join('')}</select>
-      <details><summary>Advanced</summary><label>Batch chunks</label><input id="chunks" type="number" min="1" placeholder="optional"></details>
+      <details><summary>Advanced</summary><label>Batch chunks</label><input id="chunks" type="number" min="1" placeholder="optional"><label class="inline-control"><input id="subagentUsage" type="checkbox"> Sub Agent Usage</label><div class="small-note">Runs one parallel request per top-level schema field, then joins and validates the page before dataset insertion.</div></details>
       <div class="toolbar"><button class="btn" onclick="submitRun()">Submit</button><button class="btn secondary" onclick="submit()">Refresh choices</button></div>
     </section>`;
     renderInputChoices();
@@ -1131,7 +1131,8 @@ async function submitRun() {
     schema_version_id: schemaSelect?.value || '',
     model_name: $('#model').value,
     output_format: 'jsonl',
-    num_batches: $('#chunks')?.value ? Number($('#chunks').value) : null
+    num_batches: $('#chunks')?.value ? Number($('#chunks').value) : null,
+    subagents: Boolean($('#subagentUsage')?.checked)
   };
   try {
     const task = await api('/api/submit', { method:'POST', body: JSON.stringify(body), headers:{'Content-Type':'application/json'} });
@@ -1399,6 +1400,7 @@ class AppHandler(BaseHTTPRequestHandler):
                     cloud_prefixes=tuple(str(item) for item in raw_prefixes if item),
                     continue_dataset=str(payload.get("continue_dataset") or ""),
                     num_batches=int(num_batches) if num_batches not in {None, ""} else None,
+                    subagents=bool(payload.get("subagents", False)),
                 )
                 self._task("submit", lambda: self.service.submit_batch(draft), payload)
             elif parsed.path == "/api/cloud/settings":

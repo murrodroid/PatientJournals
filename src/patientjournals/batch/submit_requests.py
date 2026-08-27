@@ -18,6 +18,14 @@ from patientjournals.config import config
 from patientjournals.shared.generation_spec import (
     build_batch_generation_config,
     prompt_text,
+    prompt_text_for,
+)
+from patientjournals.shared.subagents import (
+    SchemaSpecialist,
+    decode_specialist_request_key,
+    encode_specialist_request_key,
+    schema_specialists,
+    specialist_prompt,
 )
 
 
@@ -105,10 +113,17 @@ def _vertex_compatible_schema(raw_schema: object) -> object:
     return _inline_json_refs(raw_schema, raw_schema)
 
 
-def _build_request_config(*, for_vertex: bool) -> dict:
-    schema_payload: object = config.output_schema
+_OCR_CONTEXT_UNSET = object()
+
+
+def _build_request_config(
+    *,
+    for_vertex: bool,
+    schema_payload: object | None = None,
+) -> dict:
+    schema_payload = config.output_schema if schema_payload is None else schema_payload
     if for_vertex:
-        schema_payload = _vertex_compatible_schema(config.output_schema)
+        schema_payload = _vertex_compatible_schema(schema_payload)
 
     return build_batch_generation_config(
         for_vertex=for_vertex,
@@ -124,6 +139,10 @@ def _build_request_line(
     bucket_name: str,
     *,
     for_vertex: bool,
+    request_key: str | None = None,
+    prompt_override: str | None = None,
+    schema_payload: object | None = None,
+    ocr_context: object = _OCR_CONTEXT_UNSET,
 ) -> dict:
     mime_type = _guess_mime_type(blob)
     media_part = {
@@ -134,12 +153,18 @@ def _build_request_line(
     }
 
     parts = [media_part]
-    prompt = prompt_text(ocr_context_for_blob(blob))
+    if ocr_context is _OCR_CONTEXT_UNSET:
+        ocr_context = ocr_context_for_blob(blob)
+    prompt = (
+        prompt_text(ocr_context)
+        if prompt_override is None
+        else prompt_text_for(prompt_override, ocr_context)
+    )
     if prompt:
         parts.append({"text": prompt})
 
     return {
-        "key": blob.name,
+        "key": request_key or blob.name,
         "request": {
             "contents": [
                 {
@@ -147,18 +172,72 @@ def _build_request_line(
                     "parts": parts,
                 }
             ],
-            "generationConfig": _build_request_config(for_vertex=for_vertex),
+            "generationConfig": _build_request_config(
+                for_vertex=for_vertex,
+                schema_payload=schema_payload,
+            ),
         },
     }
 
 
-def _build_anthropic_manifest_line(blob: storage.Blob) -> dict[str, str]:
-    key = blob.name
+def _build_request_lines(
+    blob: storage.Blob,
+    bucket_name: str,
+    *,
+    for_vertex: bool,
+    specialists: tuple[SchemaSpecialist, ...] | None = None,
+) -> list[dict]:
+    if not bool(config.subagents):
+        return [_build_request_line(blob, bucket_name, for_vertex=for_vertex)]
+
+    specialists = specialists or schema_specialists(config.output_schema)
+    ocr_context = ocr_context_for_blob(blob)
+    return [
+        _build_request_line(
+            blob,
+            bucket_name,
+            for_vertex=for_vertex,
+            request_key=encode_specialist_request_key(blob.name, specialist.name),
+            prompt_override=specialist_prompt(
+                config.input_prompt,
+                specialist,
+                specialist_count=len(specialists),
+            ),
+            schema_payload=specialist.schema,
+            ocr_context=ocr_context,
+        )
+        for specialist in specialists
+    ]
+
+
+def _build_anthropic_manifest_line(
+    blob: storage.Blob,
+    *,
+    request_key: str | None = None,
+) -> dict[str, str]:
+    key = request_key or blob.name
     return {
         "key": key,
         "mime_type": _guess_mime_type(blob),
         "custom_id": _anthropic_custom_id_for_key(key),
     }
+
+
+def _build_anthropic_manifest_lines(
+    blob: storage.Blob,
+    *,
+    specialists: tuple[SchemaSpecialist, ...] | None = None,
+) -> list[dict[str, str]]:
+    if not bool(config.subagents):
+        return [_build_anthropic_manifest_line(blob)]
+    specialists = specialists or schema_specialists(config.output_schema)
+    return [
+        _build_anthropic_manifest_line(
+            blob,
+            request_key=encode_specialist_request_key(blob.name, specialist.name),
+        )
+        for specialist in schema_specialists(config.output_schema)
+    ]
 
 
 def _iter_anthropic_manifest_entries(path: Path) -> list[dict[str, str]]:
@@ -248,14 +327,22 @@ def _build_anthropic_batch_requests(
     include_schema = bool(config.batch_include_response_schema)
     max_tokens = max(1, int(config.model_max_output_tokens))
     expiration = _anthropic_signed_url_expiration()
-    schema_payload = (
-        _anthropic_strict_json_schema(config.output_schema) if include_schema else None
-    )
-
     requests: list[dict[str, Any]] = []
     seen_custom_ids: set[str] = set()
+    ocr_context_by_page: dict[str, object] = {}
+    specialists = schema_specialists(config.output_schema) if config.subagents else ()
+    specialists_by_name = {item.name: item for item in specialists}
     for row in manifest:
-        key = row["key"]
+        request_key = row["key"]
+        decoded = decode_specialist_request_key(request_key)
+        page_key = decoded[0] if decoded is not None else request_key
+        specialist = (
+            specialists_by_name.get(decoded[1])
+            if decoded is not None
+            else None
+        )
+        if decoded is not None and specialist is None:
+            raise ValueError(f"Unknown schema specialist '{decoded[1]}'.")
         custom_id = row["custom_id"]
         if custom_id in seen_custom_ids:
             raise ValueError(
@@ -263,13 +350,27 @@ def _build_anthropic_batch_requests(
                 f"{custom_id}"
             )
         seen_custom_ids.add(custom_id)
-        image_blob = bucket.blob(key)
+        image_blob = bucket.blob(page_key)
         signed_url = image_blob.generate_signed_url(
             version="v4",
             method="GET",
             expiration=expiration,
         )
-        prompt = prompt_text(ocr_context_for_blob(image_blob))
+        if page_key not in ocr_context_by_page:
+            ocr_context_by_page[page_key] = ocr_context_for_blob(image_blob)
+        if specialist is None:
+            prompt = prompt_text(ocr_context_by_page[page_key])
+            response_schema = config.output_schema
+        else:
+            prompt = prompt_text_for(
+                specialist_prompt(
+                    config.input_prompt,
+                    specialist,
+                    specialist_count=len(specialists),
+                ),
+                ocr_context_by_page[page_key],
+            )
+            response_schema = specialist.schema
         content: list[dict[str, Any]] = [
             {
                 "type": "image",
@@ -296,7 +397,7 @@ def _build_anthropic_batch_requests(
             params["output_config"] = {
                 "format": {
                     "type": "json_schema",
-                    "schema": schema_payload,
+                    "schema": _anthropic_strict_json_schema(response_schema),
                 }
             }
         requests.append(
@@ -348,33 +449,45 @@ def _write_requests_file(
     max_bytes = int(config.batch_input_max_bytes or 0)
     total_bytes = 0
     count = 0
+    specialists = schema_specialists(config.output_schema) if config.subagents else ()
 
     with open(output_path, "w", encoding="utf-8") as handle:
         for blob in tqdm(blobs, desc="Building batch JSONL", unit="img"):
             if provider == "anthropic":
-                line_obj = _build_anthropic_manifest_line(blob)
+                line_objects: list[dict[str, object]] = list(
+                    _build_anthropic_manifest_lines(blob, specialists=specialists)
+                )
             else:
-                line_obj = _build_request_line(
+                line_objects = _build_request_lines(
                     blob,
                     bucket_name,
                     for_vertex=for_vertex,
+                    specialists=specialists,
                 )
-            line = json.dumps(line_obj, ensure_ascii=False)
-            handle.write(line)
-            handle.write("\n")
-            count += 1
+            for line_obj in line_objects:
+                line = json.dumps(line_obj, ensure_ascii=False)
+                handle.write(line)
+                handle.write("\n")
+                count += 1
 
-            total_bytes += len(line.encode("utf-8")) + 1
-            if max_bytes and total_bytes > max_bytes:
-                raise ValueError(
-                    "Batch request file exceeded batch_input_max_bytes. "
-                    "Reduce inputs or split into multiple batch jobs."
-                )
+                total_bytes += len(line.encode("utf-8")) + 1
+                if max_bytes and total_bytes > max_bytes:
+                    raise ValueError(
+                        "Batch request file exceeded batch_input_max_bytes. "
+                        "Reduce inputs or split into multiple batch jobs."
+                    )
 
     log(
         f"Wrote {count} requests to {output_path.name} "
         f"({total_bytes} bytes, source=gcs)."
     )
+    if bool(config.subagents):
+        specialist_names = [item.name for item in specialists]
+        log(
+            "Sub-agent mode enabled: each page fans out to "
+            f"{len(specialist_names)} schema specialist request(s): "
+            + ", ".join(specialist_names)
+        )
     if provider == "anthropic":
         log(
             "Anthropic request file stores key/mime manifest only; "

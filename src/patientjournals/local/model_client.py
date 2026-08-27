@@ -10,6 +10,7 @@ from patientjournals.shared.generation_spec import (
     build_live_generation_config,
     build_live_request_contents,
     prompt_text,
+    prompt_text_for,
 )
 from patientjournals.config.models import ModelSpec, ProviderName, resolve_model_spec
 from patientjournals.shared.response_parsing import extract_response_metadata
@@ -155,24 +156,32 @@ class LocalModelClient:
         image_bytes: bytes,
         mime_type: str,
         ocr_context: str = "",
+        prompt_override: str | None = None,
+        schema_override: dict[str, Any] | None = None,
     ) -> LocalGenerationResult:
         if self.provider == "gemini":
             return await self._generate_with_gemini(
                 image_bytes=image_bytes,
                 mime_type=mime_type,
                 ocr_context=ocr_context,
+                prompt_override=prompt_override,
+                schema_override=schema_override,
             )
         if self.provider == "openai":
             return await self._generate_with_openai(
                 image_bytes=image_bytes,
                 mime_type=mime_type,
                 ocr_context=ocr_context,
+                prompt_override=prompt_override,
+                schema_override=schema_override,
             )
         if self.provider == "anthropic":
             return await self._generate_with_anthropic(
                 image_bytes=image_bytes,
                 mime_type=mime_type,
                 ocr_context=ocr_context,
+                prompt_override=prompt_override,
+                schema_override=schema_override,
             )
         raise ValueError(f"Unsupported provider '{self.provider}'.")
 
@@ -182,6 +191,8 @@ class LocalModelClient:
         image_bytes: bytes,
         mime_type: str,
         ocr_context: str,
+        prompt_override: str | None,
+        schema_override: dict[str, Any] | None,
     ) -> LocalGenerationResult:
         output = await self.client.aio.models.generate_content(
             model=self.model_name,
@@ -189,11 +200,13 @@ class LocalModelClient:
                 image_bytes=image_bytes,
                 mime_type=mime_type,
                 ocr_context=ocr_context,
+                prompt_override=prompt_override,
             ),
             config=build_live_generation_config(
                 include_schema=True,
                 include_temperature=True,
                 include_thinking_level=True,
+                schema_payload=schema_override,
             ),
         )
         metadata = extract_response_metadata(output)
@@ -212,6 +225,8 @@ class LocalModelClient:
         image_bytes: bytes,
         mime_type: str,
         ocr_context: str,
+        prompt_override: str | None,
+        schema_override: dict[str, Any] | None,
     ) -> LocalGenerationResult:
         image_data = base64.b64encode(image_bytes).decode("ascii")
         response = await self.client.responses.create(
@@ -220,7 +235,14 @@ class LocalModelClient:
                 {
                     "role": "user",
                     "content": [
-                        {"type": "input_text", "text": prompt_text(ocr_context)},
+                        {
+                            "type": "input_text",
+                            "text": (
+                                prompt_text(ocr_context)
+                                if prompt_override is None
+                                else prompt_text_for(prompt_override, ocr_context)
+                            ),
+                        },
                         {
                             "type": "input_image",
                             "image_url": f"data:{mime_type};base64,{image_data}",
@@ -232,7 +254,7 @@ class LocalModelClient:
                 "format": {
                     "type": "json_schema",
                     "name": "journal_output",
-                    "schema": config.output_schema,
+                    "schema": schema_override or config.output_schema,
                     "strict": True,
                 }
             },
@@ -254,6 +276,8 @@ class LocalModelClient:
         image_bytes: bytes,
         mime_type: str,
         ocr_context: str,
+        prompt_override: str | None,
+        schema_override: dict[str, Any] | None,
     ) -> LocalGenerationResult:
         image_data = base64.b64encode(image_bytes).decode("ascii")
         response = await self.client.messages.create(
@@ -272,14 +296,21 @@ class LocalModelClient:
                                 "data": image_data,
                             },
                         },
-                        {"type": "text", "text": prompt_text(ocr_context)},
+                        {
+                            "type": "text",
+                            "text": (
+                                prompt_text(ocr_context)
+                                if prompt_override is None
+                                else prompt_text_for(prompt_override, ocr_context)
+                            ),
+                        },
                     ],
                 }
             ],
             output_config={
                 "format": {
                     "type": "json_schema",
-                    "schema": config.output_schema,
+                    "schema": schema_override or config.output_schema,
                 }
             },
         )

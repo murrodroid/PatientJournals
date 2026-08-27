@@ -17,6 +17,15 @@ from patientjournals.config import config
 from patientjournals.shared.generation_spec import (
     build_batch_generation_config,
     prompt_text,
+    prompt_text_for,
+)
+from patientjournals.shared.subagents import (
+    decode_specialist_request_key,
+    encode_specialist_request_key,
+    page_key_from_request_key,
+    schema_specialists,
+    specialist_by_name,
+    specialist_prompt,
 )
 from patientjournals.shared.tools import create_subfolder, get_run_logger
 
@@ -147,10 +156,14 @@ def _vertex_compatible_schema(raw_schema: object) -> object:
     return _inline_json_refs(raw_schema, raw_schema)
 
 
-def _build_retry_batch_generation_config(*, for_vertex: bool) -> dict:
-    schema_payload: object = config.output_schema
+def _build_retry_batch_generation_config(
+    *,
+    for_vertex: bool,
+    schema_payload: object | None = None,
+) -> dict:
+    schema_payload = config.output_schema if schema_payload is None else schema_payload
     if for_vertex:
-        schema_payload = _vertex_compatible_schema(config.output_schema)
+        schema_payload = _vertex_compatible_schema(schema_payload)
 
     return build_batch_generation_config(
         for_vertex=for_vertex,
@@ -189,10 +202,17 @@ def _build_retry_gemini_request_line(
     for_vertex: bool,
     bucket: storage.Bucket | None = None,
 ) -> dict[str, object]:
+    decoded = decode_specialist_request_key(key)
+    page_key = decoded[0] if decoded is not None else key
+    specialist = (
+        specialist_by_name(config.output_schema, decoded[1])
+        if decoded is not None
+        else None
+    )
     media_part = {
         "fileData": {
-            "fileUri": f"gs://{bucket_name}/{key}",
-            "mimeType": _guess_key_mime_type(key),
+            "fileUri": f"gs://{bucket_name}/{page_key}",
+            "mimeType": _guess_key_mime_type(page_key),
         }
     }
     parts: list[dict[str, object]] = [media_part]
@@ -205,8 +225,22 @@ def _build_retry_gemini_request_line(
             "Cloud OCR metadata is required for batch retries, but GCS access "
             "is unavailable. Run `uv run invoke batch.ocr` and retry."
         )
-    ocr_context = ocr_context_for_blob(bucket.blob(key)) if bucket is not None else ""
-    prompt = prompt_text(ocr_context)
+    ocr_context = (
+        ocr_context_for_blob(bucket.blob(page_key)) if bucket is not None else ""
+    )
+    if specialist is None:
+        prompt = prompt_text(ocr_context)
+        schema_payload = config.output_schema
+    else:
+        prompt = prompt_text_for(
+            specialist_prompt(
+                config.input_prompt,
+                specialist,
+                specialist_count=len(schema_specialists(config.output_schema)),
+            ),
+            ocr_context,
+        )
+        schema_payload = specialist.schema
     if prompt:
         parts.append({"text": prompt})
 
@@ -220,16 +254,18 @@ def _build_retry_gemini_request_line(
                 }
             ],
             "generationConfig": _build_retry_batch_generation_config(
-                for_vertex=for_vertex
+                for_vertex=for_vertex,
+                schema_payload=schema_payload,
             ),
         },
     }
 
 
 def _build_retry_anthropic_manifest_line(key: str) -> dict[str, str]:
+    page_key = page_key_from_request_key(key) or key
     return {
         "key": key,
-        "mime_type": _guess_key_mime_type(key),
+        "mime_type": _guess_key_mime_type(page_key),
         "custom_id": _anthropic_custom_id_for_key(key),
     }
 
@@ -245,17 +281,29 @@ def _write_retry_requests_file(
 ) -> None:
     with open(output_path, "w", encoding="utf-8") as handle:
         for key in keys:
-            if provider == "anthropic":
-                payload: dict[str, object] = _build_retry_anthropic_manifest_line(key)
-            else:
-                payload = _build_retry_gemini_request_line(
-                    key,
-                    bucket_name=bucket_name,
-                    for_vertex=for_vertex,
-                    bucket=bucket,
-                )
-            handle.write(json.dumps(payload, ensure_ascii=False))
-            handle.write("\n")
+            request_keys = (
+                [
+                    encode_specialist_request_key(key, specialist.name)
+                    for specialist in schema_specialists(config.output_schema)
+                ]
+                if bool(config.subagents)
+                and decode_specialist_request_key(key) is None
+                else [key]
+            )
+            for request_key in request_keys:
+                if provider == "anthropic":
+                    payload: dict[str, object] = (
+                        _build_retry_anthropic_manifest_line(request_key)
+                    )
+                else:
+                    payload = _build_retry_gemini_request_line(
+                        request_key,
+                        bucket_name=bucket_name,
+                        for_vertex=for_vertex,
+                        bucket=bucket,
+                    )
+                handle.write(json.dumps(payload, ensure_ascii=False))
+                handle.write("\n")
 
 
 def _iter_anthropic_manifest_entries(path: Path) -> list[dict[str, str]]:
@@ -338,14 +386,18 @@ def _build_anthropic_batch_requests_for_retry(
     include_schema = bool(config.batch_include_response_schema)
     max_tokens = max(1, int(config.model_max_output_tokens))
     expiration = _anthropic_signed_url_expiration()
-    schema_payload = (
-        _anthropic_strict_json_schema(config.output_schema) if include_schema else None
-    )
-
     requests: list[dict[str, Any]] = []
     seen_custom_ids: set[str] = set()
+    ocr_context_by_page: dict[str, object] = {}
     for row in manifest:
-        key = row["key"]
+        request_key = row["key"]
+        decoded = decode_specialist_request_key(request_key)
+        page_key = decoded[0] if decoded is not None else request_key
+        specialist = (
+            specialist_by_name(config.output_schema, decoded[1])
+            if decoded is not None
+            else None
+        )
         custom_id = row["custom_id"]
         if custom_id in seen_custom_ids:
             raise ValueError(
@@ -354,13 +406,27 @@ def _build_anthropic_batch_requests_for_retry(
             )
         seen_custom_ids.add(custom_id)
 
-        image_blob = bucket.blob(key)
+        image_blob = bucket.blob(page_key)
         signed_url = image_blob.generate_signed_url(
             version="v4",
             method="GET",
             expiration=expiration,
         )
-        prompt = prompt_text(ocr_context_for_blob(image_blob))
+        if page_key not in ocr_context_by_page:
+            ocr_context_by_page[page_key] = ocr_context_for_blob(image_blob)
+        if specialist is None:
+            prompt = prompt_text(ocr_context_by_page[page_key])
+            response_schema = config.output_schema
+        else:
+            prompt = prompt_text_for(
+                specialist_prompt(
+                    config.input_prompt,
+                    specialist,
+                    specialist_count=len(schema_specialists(config.output_schema)),
+                ),
+                ocr_context_by_page[page_key],
+            )
+            response_schema = specialist.schema
         content: list[dict[str, Any]] = [
             {
                 "type": "image",
@@ -387,7 +453,7 @@ def _build_anthropic_batch_requests_for_retry(
             params["output_config"] = {
                 "format": {
                     "type": "json_schema",
-                    "schema": schema_payload,
+                    "schema": _anthropic_strict_json_schema(response_schema),
                 }
             }
         requests.append(

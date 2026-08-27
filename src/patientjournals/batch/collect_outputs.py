@@ -18,6 +18,10 @@ from patientjournals.batch.output_records import (
     iter_gemini_jsonl_results,
 )
 from patientjournals.batch.results import CollectOutputsResult
+from patientjournals.batch.subagent_outputs import (
+    combine_subagent_jsonl_sources,
+    write_combined_subagent_outputs,
+)
 from patientjournals.config import config
 from patientjournals.data.bucket import (
     build_storage_bucket,
@@ -371,6 +375,26 @@ def collect_outputs(args: argparse.Namespace | None = None) -> CollectOutputsRes
 
     if not sources:
         raise RuntimeError("No prediction JSONL files found to collect.")
+
+    if bool(config.subagents):
+        combined = combine_subagent_jsonl_sources(sources, provider="gemini")
+        for _, lines in sources:
+            close = getattr(lines, "close", None)
+            if callable(close):
+                close()
+        combined_path = run_dir / "subagent_combined.jsonl"
+        failures_path = run_dir / "subagent_failures.jsonl"
+        write_combined_subagent_outputs(
+            combined,
+            output_path=combined_path,
+            failures_path=failures_path,
+        )
+        sources = [(str(combined_path), combined_path.open("r", encoding="utf-8"))]
+        log(
+            "Joined schema-specialist outputs before dataset collection: "
+            f"complete_pages={combined.stats.get('complete_pages', 0)}, "
+            f"incomplete_pages={combined.stats.get('incomplete_pages', 0)}."
+        )
 
     collected = collect_valid_outputs_from_jsonl_sources(
         tqdm(sources, desc="Parsing prediction files", unit="file")

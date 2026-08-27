@@ -79,6 +79,9 @@ class Config:
     include_thoughts: bool = False
     include_confidence_scores: bool = False
     include_response_avg_logprobs: bool = True
+    # Fan one page out into one model request per top-level schema field, then
+    # validate and join the specialist outputs before dataset conversion.
+    subagents: bool = False
     ocr_enabled: bool = True
     ocr_required: bool = False
     ocr_backend: Literal["google_vision"] = "google_vision"
@@ -355,6 +358,7 @@ def _apply_external_json_config(cfg: Config) -> None:
         "output_schema_name",
         "output_schema_version_id",
         "output_schema_override",
+        "subagents",
         "ocr_enabled",
         "ocr_required",
         "ocr_backend",

@@ -120,6 +120,7 @@ def build_submit_command(
         local_path=draft.local_path,
         cloud_prefix=draft.cloud_prefix,
         cloud_prefixes=draft.cloud_prefixes,
+        subagents=draft.subagents,
     )
 
     if draft.run_mode == "local_api":
@@ -179,6 +180,7 @@ def _apply_runtime_overrides(payload: dict[str, object]) -> dict[str, object]:
         "batch_duplicate_strategy",
         "batch_restrict_image_names",
         "api_recovery_enabled",
+        "subagents",
     }
     previous = {key: getattr(config, key) for key in keys if hasattr(config, key)}
     aliases = {
@@ -239,6 +241,7 @@ async def run_local_draft_direct(
         local_path=draft.local_path,
         cloud_prefix=draft.cloud_prefix,
         cloud_prefixes=draft.cloud_prefixes,
+        subagents=draft.subagents,
     )
     previous = _apply_runtime_overrides(overrides)
     try:
@@ -349,6 +352,7 @@ def run_batch_draft_direct(
         local_path=draft.local_path,
         cloud_prefix=draft.cloud_prefix,
         cloud_prefixes=draft.cloud_prefixes,
+        subagents=draft.subagents,
     )
     # Scope a local-folder batch to exactly the images in that folder so it can
     # never expand to every object under the bucket prefix.
@@ -1545,6 +1549,9 @@ def command_overrides_for_run(
         schema_version_id=schema_version_id,
         schema_payload=schema_payload,
         duplicate_strategy=duplicate_strategy,
+        subagents=bool(
+            batch_meta.get("subagents", config_values.get("subagents", False))
+        ),
     )
 
 
@@ -1841,6 +1848,9 @@ def _batch_chunk_summaries_from_payload(payload: dict) -> list[BatchChunkSummary
 
 
 def _primary_request_count_from_payload(payload: dict) -> int:
+    page_count = int(payload.get("page_count") or 0)
+    if page_count:
+        return page_count
     jobs = payload.get("batch_jobs")
     if isinstance(jobs, list):
         count = sum(

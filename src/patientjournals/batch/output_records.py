@@ -98,6 +98,9 @@ def parse_gemini_output_record(
         )
 
     metadata = extract_response_metadata(response)
+    stored_metadata = record.get("_patientjournals_metadata")
+    if isinstance(stored_metadata, dict):
+        metadata.update(stored_metadata)
     text_payload = metadata.get("text")
     if not isinstance(text_payload, str) or not text_payload.strip():
         return GeminiOutputParseResult(

@@ -15,6 +15,13 @@ from patientjournals.shared.api_retry import (
 from patientjournals.shared.processing_metrics import base_image_record, utc_now_iso
 from patientjournals.shared.tools import data_to_rows
 from patientjournals.batch.output_records import add_reproducibility_columns
+from patientjournals.shared.subagents import (
+    merge_specialist_metadata,
+    merge_specialist_payloads,
+    schema_specialists,
+    specialist_prompt,
+    validate_specialist_json,
+)
 
 
 @dataclass(frozen=True)
@@ -37,23 +44,64 @@ async def generate_data(
     )
 
     start_time = time.perf_counter()
-    output = await model_client.generate_json(
-        image_bytes=prepared_page.image_bytes,
-        mime_type=prepared_page.mime_type,
-        ocr_context=prepared_page.ocr_context,
-    )
+    if not bool(config.subagents):
+        output = await model_client.generate_json(
+            image_bytes=prepared_page.image_bytes,
+            mime_type=prepared_page.mime_type,
+            ocr_context=prepared_page.ocr_context,
+        )
+        parsed_model = config.output_model.model_validate_json(output.text)
+        metadata = {
+            "text": output.text,
+            "thoughts": output.thoughts,
+            "field_confidence_by_pointer": output.field_confidence_by_pointer or {},
+        }
+    else:
+        specialists = schema_specialists(config.output_schema)
+        specialist_outputs = await asyncio.gather(
+            *(
+                model_client.generate_json(
+                    image_bytes=prepared_page.image_bytes,
+                    mime_type=prepared_page.mime_type,
+                    ocr_context=prepared_page.ocr_context,
+                    prompt_override=specialist_prompt(
+                        config.input_prompt,
+                        specialist,
+                        specialist_count=len(specialists),
+                    ),
+                    schema_override=specialist.schema,
+                )
+                for specialist in specialists
+            )
+        )
+        partials: dict[str, dict[str, Any]] = {}
+        metadata_by_specialist: dict[str, dict[str, object]] = {}
+        for specialist, output in zip(specialists, specialist_outputs):
+            partials[specialist.name] = validate_specialist_json(
+                specialist,
+                output.text,
+                parent_name=config.output_schema_name or "Page",
+            )
+            metadata_by_specialist[specialist.name] = {
+                "thoughts": output.thoughts,
+                "field_confidence_by_pointer": (
+                    output.field_confidence_by_pointer or {}
+                ),
+            }
+        parsed_model = merge_specialist_payloads(
+            full_model=config.output_model,
+            specialists=specialists,
+            payloads=partials,
+        )
+        metadata = merge_specialist_metadata(metadata_by_specialist)
+        metadata["text"] = parsed_model.model_dump_json()
     end_time = time.perf_counter()
     duration = end_time - start_time
-    metadata = {
-        "text": output.text,
-        "thoughts": output.thoughts,
-        "field_confidence_by_pointer": output.field_confidence_by_pointer or {},
-    }
     payload_text = metadata.get("text")
     if not isinstance(payload_text, str) or not payload_text.strip():
         raise ValueError("Empty response text from API.")
     return (
-        config.output_model.model_validate_json(payload_text),
+        parsed_model,
         duration,
         metadata,
         prepared_page.preprocessing,

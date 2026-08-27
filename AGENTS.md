@@ -15,6 +15,13 @@ Rules:
 - Cloud preprocessing should use bounded provider-native batches and parallelism rather than one remote call per input. Keep batch sizes and concurrency configurable so production runs can stay within provider quotas.
 - New operational commands and tests should preserve the sequence upload -> cloud preprocessing -> submit -> retrieve.
 - Prefer provider-independent request preparation before the provider-specific Gemini or Anthropic batch adapters.
+- Agent-based transcription is also batch-first. `subagents=False` must preserve the
+  single-request-per-page pipeline. `subagents=True` fans each page out into one
+  request per top-level schema field; retrieval must validate every specialist,
+  join a complete page, validate the full schema, and only then use the existing
+  dataset conversion path. The request JSONL and joined/failure JSONL files are
+  durable run artifacts; do not require an in-process agent coordinator for cloud
+  batch execution.
 
 ## graphify
 

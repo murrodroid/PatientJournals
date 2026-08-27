@@ -29,6 +29,10 @@ from patientjournals.batch.retry import (
     _collect_failed_retry_keys,
     _submit_failed_pages_as_batch,
 )
+from patientjournals.batch.subagent_outputs import (
+    combine_subagent_jsonl_sources,
+    write_combined_subagent_outputs,
+)
 from patientjournals.config import config
 from patientjournals.shared.generation_spec import (
     build_live_generation_config,
@@ -50,6 +54,7 @@ from patientjournals.shared.processing_metrics import (
 from patientjournals.shared.response_parsing import extract_response_metadata
 from patientjournals.shared import run_layout
 from patientjournals.shared.identity import identity_columns
+from patientjournals.shared.subagents import page_key_from_request_key
 from patientjournals.shared.tools import create_subfolder, flush_rows, get_run_logger
 
 
@@ -803,7 +808,9 @@ def _read_request_keys_from_file(path: Path) -> set[str]:
                 continue
             key = _normalize_key(payload.get("key"))
             if key:
-                keys.add(key)
+                page_key = page_key_from_request_key(key)
+                if page_key:
+                    keys.add(page_key)
     return keys
 
 
@@ -1500,6 +1507,17 @@ def retrieve_batch(args: argparse.Namespace | None = None) -> RetrieveBatchResul
     run_dir = _resolve_retrieve_run_dir(args, submit_run_dir=submit_run_dir)
     log = get_run_logger(run_dir)
 
+    if submit_run_dir is not None:
+        submit_metadata = _read_batch_job_payload(submit_run_dir / "batch_job.json")
+        if submit_metadata is not None and "subagents" in submit_metadata:
+            recorded_subagents = bool(submit_metadata.get("subagents"))
+            if recorded_subagents != bool(config.subagents):
+                log(
+                    "Restoring Sub Agent Usage from submit metadata: "
+                    f"subagents={recorded_subagents}."
+                )
+            config.subagents = recorded_subagents
+
     provider = _provider_from_batch_names(
         batch_names,
         submit_run_dir=submit_run_dir,
@@ -1735,6 +1753,7 @@ def retrieve_batch(args: argparse.Namespace | None = None) -> RetrieveBatchResul
     if not raw_outputs and not (recover_missing_with_api and provider == "gemini"):
         raise RuntimeError("No output JSONL files were downloaded.")
 
+    retrieved_batch_names = [name for name, _ in raw_outputs]
     anthropic_custom_id_to_key: dict[str, str] = {}
     if provider == "anthropic":
         anthropic_custom_id_to_key = _resolve_anthropic_custom_id_to_key(
@@ -1742,6 +1761,41 @@ def retrieve_batch(args: argparse.Namespace | None = None) -> RetrieveBatchResul
             batch_names=batch_names,
             selected_batch_names=[name for name, _ in raw_outputs],
             log=log,
+        )
+
+    outputs_are_joined_subagents = False
+    if bool(config.subagents) and raw_outputs:
+        source_handles: list[tuple[str, object]] = []
+        try:
+            for batch_name, raw_path in raw_outputs:
+                source_handles.append(
+                    (batch_name, open(raw_path, "r", encoding="utf-8"))
+                )
+            combined = combine_subagent_jsonl_sources(
+                source_handles,
+                provider=provider,
+                anthropic_custom_id_to_key=anthropic_custom_id_to_key,
+            )
+        finally:
+            for _source, handle in source_handles:
+                close = getattr(handle, "close", None)
+                if callable(close):
+                    close()
+        combined_path = run_dir / "subagent_combined.jsonl"
+        subagent_failures_path = run_dir / "subagent_failures.jsonl"
+        write_combined_subagent_outputs(
+            combined,
+            output_path=combined_path,
+            failures_path=subagent_failures_path,
+        )
+        raw_outputs = [("subagent-join", combined_path)]
+        outputs_are_joined_subagents = True
+        log(
+            "Joined schema-specialist batch outputs: "
+            f"complete_pages={combined.stats.get('complete_pages', 0)}, "
+            f"incomplete_pages={combined.stats.get('incomplete_pages', 0)}, "
+            f"rejected_specialist_rows={combined.stats.get('rejected', 0)}. "
+            f"Artifacts: {combined_path.name}, {subagent_failures_path.name}."
         )
 
     out_name = config.dataset_file_name
@@ -1816,7 +1870,7 @@ def retrieve_batch(args: argparse.Namespace | None = None) -> RetrieveBatchResul
                 key: str | None = None
                 metadata: dict[str, object] = {}
                 parsed_model = None
-                if provider == "anthropic":
+                if provider == "anthropic" and not outputs_are_joined_subagents:
                     custom_id = (
                         _normalize_key(record.get("custom_id"))
                         if isinstance(record, dict)
@@ -2173,7 +2227,7 @@ def retrieve_batch(args: argparse.Namespace | None = None) -> RetrieveBatchResul
     expected_batch_names = (
         batch_names
         if recover_missing_with_api
-        else [name for name, _ in raw_outputs]
+        else retrieved_batch_names
     )
     expected_keys = _resolve_expected_request_keys(
         submit_run_dir=submit_run_dir,

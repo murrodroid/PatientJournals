@@ -1460,6 +1460,7 @@ class PatientJournalsApp:
         output_format_var = tk.StringVar(value="jsonl")
         continue_var = tk.StringVar(value="")
         num_batches_var = tk.StringVar(value="")
+        subagents_var = tk.BooleanVar(value=False)
         status_var = tk.StringVar(value="")
         command_var = tk.StringVar(value="")
 
@@ -1687,9 +1688,20 @@ class PatientJournalsApp:
         ).grid(row=0, column=1, sticky="w", pady=8, padx=(14, 0))
         self._field(advanced, "Continue dataset", continue_var, 1)
         self._field(advanced, "Batch chunks", num_batches_var, 2)
+        ttk.Checkbutton(
+            advanced,
+            text="Sub Agent Usage",
+            variable=subagents_var,
+        ).grid(row=3, column=0, columnspan=2, sticky="w", pady=8)
+        self._grid_help(
+            advanced,
+            3,
+            2,
+            "Runs one parallel model request per top-level schema field, then joins and validates the page before writing the dataset.",
+        )
 
         preview = ttk.Label(advanced, textvariable=command_var, wraplength=850, style="Muted.TLabel")
-        preview.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(12, 0))
+        preview.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(12, 0))
         ttk.Label(page, textvariable=status_var, style="Muted.TLabel").pack(anchor="w", pady=(8, 0))
 
         def draft() -> SubmitJobDraft:
@@ -1713,6 +1725,7 @@ class PatientJournalsApp:
                 cloud_prefixes=cloud_prefixes,
                 continue_dataset=continue_var.get(),
                 num_batches=num_batches,
+                subagents=subagents_var.get(),
             )
 
         def preview_command() -> None:

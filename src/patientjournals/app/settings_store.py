@@ -55,6 +55,7 @@ def command_override_payload(
     cloud_prefix: str = "",
     cloud_prefixes: tuple[str, ...] = (),
     duplicate_strategy: str = "",
+    subagents: bool | None = None,
 ) -> dict[str, object]:
     payload = settings.to_json_dict()
     if model_name:
@@ -82,6 +83,8 @@ def command_override_payload(
         payload["batch_input_prefixes"] = (cloud_prefix,)
     if duplicate_strategy:
         payload["batch_duplicate_strategy"] = duplicate_strategy
+    if subagents is not None:
+        payload["subagents"] = bool(subagents)
     return payload
 
 

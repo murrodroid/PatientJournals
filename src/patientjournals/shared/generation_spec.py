@@ -6,14 +6,21 @@ from patientjournals.config import config
 from patientjournals.shared.ocr import OcrDocument, render_ocr_context
 
 
-def prompt_text(ocr_context: OcrDocument | str | None = None) -> str:
+def prompt_text_for(
+    base_prompt: str,
+    ocr_context: OcrDocument | str | None = None,
+) -> str:
     if isinstance(ocr_context, OcrDocument):
         rendered = render_ocr_context(ocr_context)
     else:
         rendered = str(ocr_context or "").strip()
     if not rendered:
-        return config.input_prompt
-    return f"{config.input_prompt.rstrip()}\n\n{rendered}"
+        return base_prompt
+    return f"{base_prompt.rstrip()}\n\n{rendered}"
+
+
+def prompt_text(ocr_context: OcrDocument | str | None = None) -> str:
+    return prompt_text_for(config.input_prompt, ocr_context)
 
 
 def _thinking_level() -> str | None:
@@ -47,10 +54,15 @@ def build_live_request_contents(
     image_bytes: bytes,
     mime_type: str,
     ocr_context: OcrDocument | str | None = None,
+    *,
+    prompt_override: str | None = None,
 ) -> list[object]:
     return [
         types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
-        prompt_text(ocr_context),
+        prompt_text_for(
+            config.input_prompt if prompt_override is None else prompt_override,
+            ocr_context,
+        ),
     ]
 
 

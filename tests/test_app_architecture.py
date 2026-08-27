@@ -90,6 +90,7 @@ def test_submit_command_carries_selected_cloud_prefixes() -> None:
         cloud_prefix="pages/folder-a",
         cloud_prefixes=("pages/folder-a", "pages/folder-b"),
         num_batches=2,
+        subagents=True,
     )
 
     command = build_submit_command(draft, settings)
@@ -101,6 +102,7 @@ def test_submit_command_carries_selected_cloud_prefixes() -> None:
         "pages/folder-a",
         "pages/folder-b",
     )
+    assert command.config_overrides["subagents"] is True
 
 
 def test_cloud_dataset_choices_are_newest_first(monkeypatch) -> None:

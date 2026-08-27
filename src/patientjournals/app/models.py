@@ -173,6 +173,7 @@ class SubmitJobDraft:
     cloud_prefixes: tuple[str, ...] = ()
     continue_dataset: str = ""
     num_batches: int | None = None
+    subagents: bool = False
 
 
 @dataclass(frozen=True)
