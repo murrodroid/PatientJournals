@@ -47,7 +47,13 @@ CV-gætteri**: det kan udledes direkte af `patient_page_counter`s paritet.
    forkerte problem (at finde en midterrygl); de kan genbruges som
    udgangspunkt for at finde selve overgangen inden for den nu kendte kant.
 3. Find naboblade, der stikker ind i rammen ud over den forventede strimmel,
-   og beskær dem væk.
+   og beskær dem væk. **Løst 2026-08-28** (`src/andenside/yderkant.py`):
+   problemet viste sig at ligge i den MODSATTE kant af falsen — blade
+   længere inde i bindet falder fladt ud og fotograferes med, så der står
+   fremmed håndskrift langs sidens yderkant. Samme båndvise metode som
+   falsen, men målt på papirets grundlyshed frem for blækmængde, og med et
+   krav om at båndene ligger på én ret linje: en sidekant er ret, og uden
+   det krav sprang snittet mellem vores egen kant og bladets.
 4. Detektér blanke halvsider (typisk kun relevant for forsideopslag, som
    IKKE er i scope her, men kan påvirke nabosidens strimmel).
 5. Lav en visuel gennemgang: et kontaktark med indtegnet snitlinje for et
@@ -63,6 +69,11 @@ CV-gætteri**: det kan udledes direkte af `patient_page_counter`s paritet.
 | `output/snit.csv` | Én række pr. opslag: kant (afledt af paritet), fundet snitpunkt, sikkerhed, beskæringsfelt, mærkning |
 | `output/kontaktark/` | Billeder med indtegnet snit og beskæring til visuel gennemgang |
 | `output/usikre.md` | Opslag hvor snittet ikke kunne fastlægges sikkert, med begrundelse |
+| `output/yderkant_facit.csv` | Hvad der ligger uden for hver sides yderkant: bogsnit, blad, eller fremmed tekst (visuelt facit) |
+| `output/yderkant_maal.csv` | Detektionens tal pr. side, holdt op mod facit |
+| `output/yderkant_eval.md` | Evaluering af forsøg A og B, med det der ikke virkede |
+| `output/yderkant_ark/` | Kontaktark over de 118 yderkanter — til at klassificere efter |
+| `output/yderkant_snit_ark/` | Samme strimler med det bortskårne tonet — til at bedømme snittet efter |
 
 ## Test Contract
 

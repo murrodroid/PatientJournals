@@ -1286,3 +1286,76 @@ der kræver modelkald — og som ikke startes uden leads udtrykkelige go.
 `pyproject.toml` erklærede kommandoen `andenside = "andenside.cli:main"`, men
 `src/andenside/cli.py` findes ikke. Linjen er fjernet efter leads valg. Kan
 sættes ind igen, den dag der faktisk er en kommandolinje-indgang.
+
+## 2026-08-28 — Yderkanten: udragende blade
+
+### Hvad problemet var
+
+Den båndvise falsbeskæring renser kun den ene kant. På den modsatte —
+sidens yderkant — ligger enten **bogsnittet** (bogblokkens sammenpressede
+sidekanter set fra siden, brunt og uden læsbar tekst) eller et **blad
+længere inde i bindet**, som er faldet fladt ud og er blevet fotograferet
+med. I sidste tilfælde står der fremmed håndskrift langs kanten.
+
+Facit for alle 118 øvesider blev lavet visuelt: **7 sider har fremmed
+tekst** dér, 110 er rene, 1 kan ikke afgøres. I bind 37554 er det det
+samme blad, der rager ud på tre sider i træk.
+
+### Beslutning 45: kanten findes som den inderste RETTE linje
+
+Målingen er papirets grundlyshed pr. kolonne (85-percentil), ikke
+blækmængden — blækket drukner kanten i et gennemsnit. Målt bånd for bånd
+som falsen, fordi bladene ligger skævt.
+
+Hvert bånd melder flere kandidater: vores egen kant, hvert blads kant,
+til sidst baggrunden. **Rækkefølgen af valget er hele pointen:** først
+vælges den inderste kant (et blad ligger altid uden for vores side, aldrig
+inden i), derefter den bedst støttede linje langs netop den kant.
+
+Den omvendte rækkefølge — "flest bånd vinder" — blev prøvet og forkastet
+med tal: på `37554_001496` bekræfter kun 9 af 24 bånd vores egen kant,
+mens alle 24 ser bladets. Uden reglen valgte detektionen bladets kant og
+lod den fremmede tekst blive stående.
+
+### Beslutning 46: snittet lægges på kantens YDRE side
+
+Lead så på første gennemgang, at snittet stedvis tog "tre-fire bogstaver"
+af ordenderne. Kanten meldes derfor nu i faldets bund frem for ved dets
+begyndelse, og bufferen er hævet fra 0,5 % til 1,2 % af bredden. Snittet
+flyttede 22 px udad i median.
+
+**Afvejningen er bevidst usymmetrisk:** et tabt bogstav er en fejl i
+transskriptionen, mens en tilbageblevet flig af naboen kun er støj, som
+prompten kan bede modellen se bort fra. De fremmede strimler er 78-130 px
+brede, så de 22 px koster ikke deres frasortering.
+
+### Kontaktark må ikke male hen over det, de skal vise
+
+Den første udgave tegnede snittet som en rød streg oven på billedet.
+Stregen dækker netop de bogstaver, der står tættest på snittet, og efter
+nedskaleringen ser de ud til at være klippet af. Både lead og jeg blev
+ført bag lyset: `273101_001164` blev noteret som "skærer gennem teksten",
+men er ved fuld opløsning helt korrekt. Arket toner nu i stedet det
+bortskårne, så intet males over.
+
+**Regel fremover:** et nedskaleret ark kan udpege mistanker, ikke afgøre
+dem. Hver mistanke efterprøves i fuld opløsning, før den skrives ned.
+
+### To mål, der ikke virkede — begge fjernet, ikke trimmet
+
+1. *"Står der blæk på begge sider af snittet?"* Bestod ikke sin egen
+   prøve: `273108_001555`, hvor snittet beviseligt går gennem skriften,
+   scorede LAVERE end sider, hvor snittet sidder rigtigt. Bogsnittets
+   mørke striber tæller som blæk uanset tærskel.
+2. *"Hvor mange rækker har blæk lige inden for snittet?"* Udpegede to
+   sider som de værste; begge er ved fuld opløsning helt rene. Målet
+   talte papirkantens egen skygge mod den sorte baggrund.
+
+Begge blev fjernet frem for justeret, til de så rigtige ud.
+
+### Til gengæld siger `sikker` nu faktisk nej
+
+Falsbeskæringens tilsvarende kolonne gav 10/10 på alle 118 sider og
+skilte derfor ingenting fra. Yderkantens mærker 2 af 118 — heriblandt
+`273108_001555`, som er den ene reelle fejl. Værnet virker, men fanger
+ikke `273103_001463`, hvor snittet også ligger for langt inde.

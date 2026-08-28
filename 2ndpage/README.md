@@ -81,9 +81,23 @@ skrives ud. Selvtesten
 ti konstruerede forvanskninger, hvor svaret er kendt på forhånd, og opgør
 hvor stor en del af de indlagte fejl målingen faktisk finder igen.
 
-**Billedforberedelse (stage 04):** godkendt og låst. Snitpunkt-detektionen
-(`src/andenside/bogryg.py`) er verificeret på alle 8 pilotbilleder — kendt
-begrænsning: kun afprøvet på to bind fra samme fotograferingssession.
+**Billedforberedelse (stage 04):** to snit, ét i hver kant af siden.
+
+*Falssiden* beskæres bånd for bånd (`src/andenside/skraa.py`): snitgrænsen
+følger falsen ned gennem siden i stedet for at være lodret, fordi siden
+krummer ind mod bindet og skriveren skrev helt ud. Alle 118 øvesider er
+beskåret, ingen usikre.
+
+*Yderkanten* — den modsatte — renses af `src/andenside/yderkant.py`. Uden
+for vores side ligger enten bogsnittet (bogblokkens sammenpressede
+sidekanter, harmløst) eller et blad længere inde i bindet, som er faldet
+fladt ud og fotograferet med, så der står fremmed håndskrift langs kanten.
+Det gælder 7 af de 118 øvesider. Detektionen måler papirets grundlyshed
+pr. kolonne bånd for bånd og vælger den **inderste rette kant**, mindst 6
+bånd kan enes om; snittet lægges på kantens ydre side, så ordender aldrig
+klippes. Kontaktark: `scripts/yderkant_ark.py` (tilføj `--snit` for at se,
+hvad der fjernes). **Endnu ikke gennemgået af lead**, og ingen beskårne
+billeder er skrevet — det kræver go.
 
 **Næste:** stage 05, første transskription. Alt er nu på plads til at måle
 et forsøg — facit, billeder og måleapparat. Der køres ingen modelkald, før

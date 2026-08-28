@@ -14,6 +14,7 @@ Videre til næste stage kun efter menneskelig gennemgang.
 - [2026-08-27 12:55](diary/2026-08-27.md) — Stage 04 genåbnet: falsdetektionen kunne ikke virke generelt, og piloten afslørede det
 - [2026-08-27 15:40](diary/2026-08-27.md) — Beskæringen følger nu falsen bånd for bånd; tre fejlmålinger undervejs
 - [2026-08-27 17:10](diary/2026-08-27.md) — Alle 118 beskåret, 11x hurtigere; udragende blade udpeget som næste arbejde
+- [2026-08-28](diary/2026-08-28.md) — Yderkanten: facit for alle 118, detektion bygget, snittet vendt udad efter leads indsigelse
 
 ## Fase 0 — Kortlægning og plan (afsluttet 2026-08-18)
 
@@ -259,7 +260,27 @@ uanset hvad litteraturen ellers siger.
       nævnte) på trods af godkendelsen ovenfor.
 - [ ] Ingen usikkerheds-flagning implementeret endnu (intet fejlende
       eksempel at kalibrere en tærskel mod) — se `output/usikre.md`.
-- [ ] Frasortér naboblade der rager usædvanligt langt ind (ikke testet)
+- [x] **Frasortér naboblade der rager ud** (2026-08-28) —
+      `src/andenside/yderkant.py`. Facit for alle 118 yderkanter lavet
+      visuelt (`output/yderkant_facit.csv`): **7 sider har fremmed tekst**
+      langs yderkanten, 110 er rene, 1 usikker. Detektionen måler papirets
+      grundlyshed pr. kolonne bånd for bånd og vælger den inderste rette
+      kant, mindst 6 bånd kan enes om. 19 tests, alle set fejle mod
+      muteret kode.
+- [x] **Snittet vendt udad** (2026-08-28, leads indsigelse): kanten meldes
+      nu i faldets bund og bufferen er hævet til 1,2 % — snittet flyttede
+      22 px udad i median, så ordender ikke klippes.
+- [x] **Alle 118 snit gennemset**: 116 sidder på sidens kant; alle 7
+      problemsider får den fremmede strimmel uden for snittet.
+      `273108_001555` skærer gennem skriften (mærket usikker af koden),
+      `273103_001463` er omtvistet (ikke mærket).
+- [x] **`sikker`-kolonnen siger nu faktisk nej** — 2 af 118 mærkes, mod
+      falsbeskæringens 0 af 118.
+- [ ] **Gennemgang ved lead** af `output/yderkant_facit.csv`,
+      `output/yderkant_ark/` og `output/yderkant_snit_ark/`
+- [ ] **Leads valg: forsøg A (skær alle) eller B (skær kun blad-sider)** —
+      tal i `output/yderkant_eval.md`
+- [ ] Ingen beskårne billeder skrevet endnu — kræver go
 
 ## Stage 05 — Første transskription
 
