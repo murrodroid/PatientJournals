@@ -56,11 +56,12 @@ FALD_SPAND = 12        # ... som skal ske inden for saa faa kolonner
 # (0,2/px). Med spand 25 er graensen 0,20/px -- altsaa praecis paa
 # afdaempningen, og detektionen skaerer midt paa vores egen side. Med 12 er
 # graensen 0,42/px: stadig fem gange under bladets skygge.
-BUFFER_ANDEL = 0.012   # flyttes UDAD, saa intet af vores eget papir ryger
-# 1,2 %, ikke 0,5 %: lead paaviste 2026-08-28, at snittet klippede tre-fire
-# bogstaver af ordenderne. Retningen er ikke symmetrisk -- et tabt bogstav
-# er en fejl i transskriptionen, mens en tilbageblevet flig af naboen kun
-# er stoej, prompten kan bede modellen se bort fra. Paa 1300 px er det ~16 px.
+BUFFER_ANDEL = 0.006   # flyttes UDAD, saa intet af vores eget papir ryger
+# Halveret fra 1,2 % 2026-08-28 efter leads gennemsyn: bufferen gav for
+# meget af det fremmede blad tilbage. Den er ren margen nu -- kanten meldes
+# allerede i faldets bund, altsaa paa selve soemmen mellem vores papir og
+# naboens, saa der er ikke laengere en indad-skaevhed at kompensere for.
+# Paa 1300 px er det ~8 px.
 BLAD_MIN_BREDDE = 45   # lyst baelte bredere end dette = et fremmed blad
 BLAD_MIN_NIVEAU = 0.85 # ... og mindst saa lyst som vores eget papir
 LINJE_TOLERANCE = 10   # px et baand maa afvige fra den rette kant
@@ -68,6 +69,15 @@ MAX_HAELDNING = 90     # px kanten kan flytte sig over hele sidens hoejde
 # 90: falsens maalte haeldning naaede 88 px paa oevemaengden, og en
 # yderkant kan ikke haelde mere end falsen paa samme opslag.
 SAMME_KANT = 40        # px: linjer taettere end dette regnes for SAMME kant
+SOEM_GULV = 6.0        # mindste soem-dybde, foer en linje overhovedet taeller
+# Sidens kant er en FYSISK ting: papiret slipper, og kanten kaster en smal
+# skygge. En linje trukket hen over aabent papir goer ikke. Maalt 2026-08-29
+# paa de linjer, lead doemte forkerte: 3,0 og 5,0. De rigtige kanter maaler
+# 10-163 -- paa naer 273107_001866, hvis rigtige kant kun naar 5-7. Der er
+# altsaa OVERLAP ved 5, og gulvet ligger lige over det hoejeste maalte
+# falske. Marginen er tynd; det er loesningens svageste led.
+SOEM_HALV = 8          # halv bredde af det baand, soemmen soeges i
+SOEM_OMKRING = 40      # ... og af naboskabet, papirets niveau maales i
 MIN_STOETTE = 6        # saa mange baand skal bekraefte en kant, foer den taeller
 # 6 af 24: paa `37554_001496` bekraefter kun 9 baand vores egen kant, mens
 # alle 24 ser bladets. Saettes gulvet hoejere, tabes netop den side.
@@ -193,10 +203,38 @@ def _kandidater_i_profil(profil: list[float], vindue: SoegeVindue, *,
     return ud
 
 
+def soem_dybde(graa: np.ndarray, skaering: float, haeldning: float, *,
+               halv: int = SOEM_HALV, omkring: int = SOEM_OMKRING) -> float:
+    """Hvor dyb en fordybning en linje ligger i, maalt ned gennem hele siden.
+
+    Papirets eget niveau tages som 85-percentilen i et naboskab omkring
+    linjen, og derfra traekkes det moerkeste punkt taet paa linjen. Et snit
+    paa sidens kant ligger i en maerkbar fordybning; et snit midt paa
+    papiret goer ikke.
+
+    Returnerer -1 hvis linjen forlader billedet.
+    """
+    hoejde, bredde = graa.shape
+    dybder = []
+    for y in range(int(hoejde * 0.10), int(hoejde * 0.90), 9):
+        x = int(round(skaering + haeldning * y / hoejde))
+        if not (0 <= x < bredde):
+            return -1.0
+        a, b = max(0, x - omkring), min(bredde, x + omkring + 1)
+        naboskab = graa[y, a:b]
+        if naboskab.size < 20:
+            continue
+        lokal = graa[y, max(0, x - halv) : min(bredde, x + halv + 1)]
+        if lokal.size:
+            dybder.append(float(np.percentile(naboskab, 85) - lokal.min()))
+    return float(np.median(dybder)) if dybder else -1.0
+
+
 def _bedste_linje(
     baand: list[tuple[int, list[int]]], hoejde: int, vindue: SoegeVindue, *,
     tolerance: int = LINJE_TOLERANCE, max_haeldning: int = MAX_HAELDNING,
     min_stoette: int = MIN_STOETTE,
+    graa: "np.ndarray | None" = None,
 ) -> list[int | None]:
     """Vaelger den rette linje, flest baand kan enes om -- og den inderste af dem.
 
@@ -219,14 +257,30 @@ def _bedste_linje(
     laengere oppe -- det er dét, `baand_med_kant` taeller.
     """
     udad = 1 if vindue.retning == "fra_hoejre" else -1
-    linjer: list[tuple[float, int, list[int | None]]] = []
+    stoettende = [k for _, k in baand]
+
+    ys = [float(y) for y, _ in baand]
+    # Den samme fysiske kant foreslaas af hvert eneste baand, der ser den, og
+    # for hver haeldning. Linjen kendes entydigt af sit skaeringspunkt ved
+    # y=0 og sin haeldning, saa gentagelserne kan springes over. Det er her
+    # tiden ligger: uden det proeves ~11.000 linjer pr. side, med det under
+    # en tiendedel. (Numpy hjaelper ikke -- tabellerne er 24x5, og
+    # kaldsomkostningen er stoerre end regnestykket. Maalt, ikke gaettet.)
+    set_af_linjer: set[tuple[int, int]] = set()
+    kandidat_linjer: list[tuple[float, int, float, float, float]] = []
 
     for y_anker, kandidater in baand:
         for x0 in kandidater:
             for haeldning in range(-max_haeldning, max_haeldning + 1, 2):
-                traef: list[int | None] = []
-                for y, kand in baand:
-                    forudsagt = x0 + haeldning * (y - y_anker) / hoejde
+                skaering = x0 - haeldning * y_anker / hoejde
+                noegle = (round(skaering), haeldning)
+                if noegle in set_af_linjer:
+                    continue
+                set_af_linjer.add(noegle)
+
+                traef: list[float | None] = []
+                for y, kand in zip(ys, stoettende):
+                    forudsagt = skaering + haeldning * y / hoejde
                     naermeste = min(kand, key=lambda k: abs(k - forudsagt), default=None)
                     traef.append(
                         naermeste if naermeste is not None
@@ -235,21 +289,49 @@ def _bedste_linje(
                 stoette = sum(1 for t in traef if t is not None)
                 if stoette < min_stoette:
                     continue
-                # inderst = mindst langt udad; udad er +1 mod hoejre, -1 mod venstre
                 inderhed = udad * (sum(t for t in traef if t is not None) / stoette)
-                linjer.append((inderhed, stoette, traef))
+                kandidat_linjer.append((inderhed, stoette, skaering, haeldning, 0.0))
 
-    if not linjer:
+    if not kandidat_linjer:
         return [None] * len(baand)
 
-    # To trin, og raekkefoelgen er hele pointen. FOERST vaelges den inderste
-    # KANT -- for et blad ligger altid uden for vores side. DEREFTER vaelges
-    # den bedst stoettede linje langs netop den kant. Gøres det i én
-    # omgang, vinder en kort, vandret stump oppe i hjørnet over den
-    # rigtige skaeve kant, fordi stumpen ser "inderst" ud.
-    inderst = min(l[0] for l in linjer)
-    samme_kant = [l for l in linjer if l[0] - inderst <= SAMME_KANT]
-    return max(samme_kant, key=lambda l: l[1])[2]
+    # Kandidaterne samles i KANTER: linjer taettere end `SAMME_KANT` paa
+    # hinanden beskriver den samme fysiske kant. Kun den bedst stoettede
+    # linje pr. kant gaar videre -- ellers skulle ~1.000 linjer soem-maales.
+    kandidat_linjer.sort(key=lambda l: l[0])
+    kanter: list[list[tuple[float, int, float, float, float]]] = []
+    for l in kandidat_linjer:
+        if kanter and l[0] - kanter[-1][0][0] <= SAMME_KANT:
+            kanter[-1].append(l)
+        else:
+            kanter.append([l])
+
+    # Hver kant skal BEVISE sin soem. Det er kravet, der skiller sidens
+    # rigtige kant fra en svag, ret skygge inde paa papiret -- og uden det
+    # vandt skyggen paa 273105_001569 og 273103_001437, blot fordi den laa
+    # inderst. Det er en fysisk egenskab, ikke en taerskel valgt paa faelt.
+    if graa is not None:
+        bekraeftede = []
+        for gruppe in kanter:
+            _, stoette, skaering, haeldning, y_anker = max(gruppe, key=lambda l: l[1])
+            if soem_dybde(graa, skaering, haeldning) >= SOEM_GULV:
+                bekraeftede.append(gruppe)
+        if not bekraeftede:
+            return [None] * len(baand)   # hellere afstaa end skaere paa et gaet
+        kanter = bekraeftede
+
+    # FOERST inderste kant -- for et blad ligger altid uden for vores side.
+    # DEREFTER den bedst stoettede linje langs netop den kant.
+    bedste = max(kanter[0], key=lambda l: l[1])
+
+    _, _, skaering, haeldning, _ = bedste
+    valgt: list[int | None] = []
+    for y, kand in zip(ys, stoettende):
+        forudsagt = skaering + haeldning * y / hoejde
+        naermeste = min(kand, key=lambda k: abs(k - forudsagt), default=None)
+        valgt.append(int(naermeste) if naermeste is not None
+                     and abs(naermeste - forudsagt) <= tolerance else None)
+    return valgt
 
 
 def _baand(hoejde: int, *, antal: int = ANTAL_BAAND, overlap: float = OVERLAP):
@@ -276,12 +358,12 @@ def baandkanter_ydre(img: Image.Image, side: Side, *, antal: int = ANTAL_BAAND,
         if yb - ya < 2:
             baand.append((midte, []))
             continue
-        profil = papir_profil(graa, ya, yb)
-        baand.append((midte, _kandidater_i_profil(profil, vindue, min_fald=min_fald)))
+        baand.append((midte, _kandidater_i_profil(papir_profil(graa, ya, yb),
+                                                  vindue, min_fald=min_fald)))
 
     # Baandene ses under ét: kun de kandidater, der ligger paa den samme
     # rette kant, faar lov at bestemme snittet.
-    valgt = _bedste_linje(baand, img.height, vindue)
+    valgt = _bedste_linje(baand, img.height, vindue, graa=graa)
     return [(y, x) for (y, _), x in zip(baand, valgt)]
 
 

@@ -1,8 +1,7 @@
-# Yderkanten — evaluering af forsøg A og B
+# Yderkanten — evaluering
 
-Skrevet 2026-08-28. **Ingen af tallene her er godkendt af lead.** Facit er
-min egen visuelle gennemgang; den skal efterses, før tallene bruges til
-noget. Ingen beskårne billeder er skrevet — det kræver go.
+Skrevet 2026-08-28, omskrevet 2026-08-29 efter leads gennemsyn.
+**Ingen beskårne billeder er skrevet — det kræver go.**
 
 ## Hvad problemet var
 
@@ -10,141 +9,110 @@ Falsbeskæringen (`skraa.py`) renser den ene kant. På den modsatte —
 sidens yderkant — ligger enten **bogsnittet** (bogblokkens sammenpressede
 sidekanter set fra siden, brunt, uden læsbar tekst) eller et **blad
 længere inde i bindet**, som er faldet fladt ud og blevet fotograferet
-med. I sidste tilfælde står der fremmed håndskrift langs kanten, som
-falsbeskæringen aldrig kan nå.
+med. I sidste tilfælde står der fremmed håndskrift langs kanten.
 
-## Facit (`yderkant_facit.csv`) — min gennemgang, ikke leads
+Facit (`yderkant_facit.csv`, min gennemgang rettet efter lead):
+**8 af 118 øvesider har fremmed tekst** langs yderkanten, 110 er rene.
 
-Alle 118 yderkantsstrimler gennemset i `yderkant_ark/` (17 ark à 7
-strimler):
+Lead valgte **forsøg A**: skær alle 118 ved sidens egen kant.
 
-| Klasse | Antal |
-|---|---|
-| `ren` — intet fremmed blæk uden for vores kant | 110 |
-| `fremmed_tekst` — læsbar fremmed skrift uden for kanten | **7** |
-| `usikker` — kan ikke afgøres | 1 |
+## Måleapparatet — bygget FØRST, og efterprøvet
 
-De syv: `273099_001445`, `273103_001437`, `273107_001864`,
-`273107_001866`, `37554_001492`, `37554_001494`, `37554_001496`.
-I bind 37554 er det det **samme** blad, der rager ud på alle tre sider.
+Alle tidligere runder led af det samme: jeg bedømte snittene med øjnene på
+nedskalerede kontaktark og tog fejl. Derfor blev et måleapparat bygget og
+holdt op mod leads egne domme, før det blev brugt til noget.
 
-Et synligt udragende blad (med eller uden tekst) findes på 19 sider,
-usikkert på 8. Den kolonne er min svageste vurdering.
+Det måler **sømdybde**: hvor mørk en fordybning snittet ligger i, målt mod
+papirets eget niveau lige omkring, ned gennem hele siden. Sidens kant er en
+fysisk ting — papiret slipper, og kanten kaster en smal skygge. En linje
+trukket hen over åbent papir gør ikke.
 
-**Fem sider blev efterprøvet i fuld opløsning, fordi kontaktarket førte
-mig på afveje.** To af dem havde jeg klassificeret forkert:
-`273104_001645` er vores EGEN tekst, spejlvendt i arket, og
-`273105_001708` er sidens egne punktummer — ikke fremmed blæk.
+Holdt op mod leads seks domme, på koden som den så ud da han dømte:
 
-## Hvad detektionen gør
+| side | leads dom | sømdybde |
+|---|---|---|
+| `273105_001569` | gået galt | **3,0** |
+| `273103_001437` | lidt galt | **5,0** |
+| `273108_001555` | god | 15,0 |
+| `273111_001376` | god | 18,0 |
+| `37554_001492` | god | 25,0 |
+| `37554_001494` | god | 12,0 |
 
-Papirets grundlyshed pr. kolonne (85-percentil, ikke gennemsnit — blækket
-drukner gennemsnittet), målt bånd for bånd som i `skraa.py`, fordi
-bladene ligger skævt. Hvert bånd melder **alle** betydelige fald udad;
-derefter vælges den **inderste rette linje**, som mindst 6 bånd kan enes
-om. Rækkefølgen er hele pointen: først inderste kant (et blad ligger
-altid uden for vores side), derefter bedst støttede linje langs den kant.
+Dommene skiller sig rent. **Tre tidligere måleforsøg blev kasseret**, fordi
+de ikke bestod denne prøve:
 
-## Snittets retning — rettet efter leads indsigelse
+1. *"Står der blæk på begge sider af linjen?"* — `273108_001555`, hvor
+   snittet beviseligt gik galt, scorede LAVERE end gode sider. Bogsnittets
+   mørke striber tæller som blæk uanset tærskel.
+2. *"Hvor mange rækker har blæk lige inden for snittet?"* — udpegede to
+   sider som de værste; begge var ved fuld opløsning helt rene. Målet
+   talte papirkantens egen skygge mod den sorte baggrund.
+3. *Klippet blæk* (den nuværende støttemåling) har stadig kendte falske
+   udslag på op til 145 rækker på sider, der er i orden. Den bruges som
+   støtte, aldrig som dommer.
 
-Lead så på den første gennemgang, at snittet stedvis tog "tre-fire
-bogstaver" af ordenderne, og bad om at prioritere kantens **ydre** side.
-To ting blev ændret:
+## Hvad der faktisk var galt — og hvad der ikke var
 
-1. Kanten meldes nu i faldets **bund** i stedet for ved dets begyndelse.
-   Begyndelsen ligger op til 12 kolonner inde på vores egen side.
-2. Bufferen er hævet fra 0,5 % til **1,2 %** af bredden (~16 px).
+Undervejs blev der bygget en **svag-bekræftelse**: linjer måtte foreslås af
+de bånd, der så kanten tydeligt, og bekræftes af bånd, der kun anede den.
+Den blev tilføjet for at redde `273108_001555`.
 
-Målt over alle 118: snittet flyttede **22 px udad i median** (20–58 px).
-Fjernet andel faldt fra 12,5 % til **10,9 %** i median. Alle syv sider med
-fremmed tekst holder stadig strimlen uden for snittet — bæltet uden for
-kanten måles nu til 78–130 px mod før 90–142 px.
+**Den var årsagen til begge leads fejl.** Fjernes den, ligger snittet
+rigtigt på `273105_001569` (sømdybde 3,0 → 51,0) og `273103_001437`
+(5,0 → 54,0), og `273108_001555` bliver god alligevel. Den er derfor
+fjernet igen, sammen med de to konstanter, den trak med sig.
 
-Afvejningen er bevidst usymmetrisk: et tabt bogstav er en fejl i
-transskriptionen, mens en tilbageblevet flig af naboen kun er støj, som
-prompten kan bede modellen se bort fra.
+Det er værd at skrive ned som en fejltype: en mekanisme tilføjet for at
+redde ét tilfælde, som ødelagde flere andre — og hvis skade først blev
+synlig, da der fandtes et måleapparat.
 
-## Kontaktarket bedrog — stregen er nu erstattet af en tonet flade
+## Sømkravet — beholdt som værn, ikke som løsning
 
-Den første udgave tegnede snittet som en **rød streg oven på billedet**.
-Stregen dækker de bogstaver, der står tættest på snittet, og efter
-nedskaleringen til arket ser de ud til at være klippet af. Både lead og
-jeg blev ført bag lyset af det: `273101_001164` blev af mig noteret som
-"skærer gennem teksten", men er ved fuld opløsning helt korrekt.
+Kandidatkanter skal nu bevise deres søm, før de kommer i betragtning.
+**Målt ændrer det ingenting på øvemængden**: med og uden kravet er
+resultatet identisk på alle 118 sider, efter at svag-bekræftelsen er væk.
 
-Arket toner nu i stedet det bortskårne rødt. Intet males over: det, der
-beholdes, står urørt, og det, der ryger, kan stadig læses igennem tonen.
+Det bliver stående som værn for materiale, vi ikke har set — prøvemængdens
+50 sider og de ~71.000 rigtige sider — og som det, der ville fange netop
+den fejltype igen. Er der ingen kant med en rigtig søm, skæres siden ikke.
 
-## Forsøg A — skær ved sidens egen kant, alle sider
+Gulvet er 6. De forkerte linjer målte 3,0 og 5,0; de rigtige måler 10-163,
+**på nær `273107_001866`, hvis rigtige kant kun når 5-7**. Der er altså
+overlap ved 5, og gulvet ligger lige over det højeste målte falske.
+**Marginen er tynd, og det er løsningens svageste led.**
 
-Alle 118 snit set efter med øjnene i `yderkant_snit_ark/`:
+## Resultat
 
-| Resultat | Antal |
-|---|---|
-| Snittet sidder på sidens kant | **116** |
-| Snittet skærer gennem vores egen skrift | **1** (`273108_001555`) |
-| Omtvistet | 1 (`273103_001463`) |
-| Sidens egen kant fjernet af bredden | median 10,9 % (4,5–21,2 %) |
-
-- `273108_001555`: snittet ligger ~40 px inde på siden og halverer
-  bogstaverne. **Mærket usikker af koden** (9 af 24 bånd) — værnet virker.
-- `273103_001463`: snittet ligger ~60 px inde, og der står blæk uden for
-  det. Om det blæk er vores eget eller et udragende blads, kan jeg ikke
-  afgøre — det er netop den side, facit også kalder usikker. **Ikke
-  mærket af koden.** Kræver leads øje.
-- Alle **7** sider med fremmed tekst skæres korrekt: den fremmede strimmel
-  havner uden for snittet på alle syv.
-
-Nedskalerede ark kan udpege mistanker; de kan ikke afgøre dem. Hver eneste
-mistanke i denne evaluering er efterprøvet i fuld opløsning, og tre af dem
-holdt ikke.
+- Alle 118 sider skæres; ingen afstår.
+- **Nul sider** har et snit uden rigtig søm (mod fire, da lead dømte).
+- Leads to forkerte sider er rettet; hans fire gode er uændret gode.
+- Fjernet andel af bredden: median 11,5 % (5,1-21,8 %).
+- Alle 8 sider med fremmed tekst får strimlen uden for snittet.
+- `sikker`-kolonnen mærker 2 sider (`273108_001555`, `37554_001496`) —
+  begge er ved eftersyn i orden, så mærket er indtil videre kun set give
+  falsk alarm. Det er stadig bedre end falsbeskæringens kolonne, som gav
+  10/10 på alle 118 og dermed ikke skilte noget fra.
 
 ## Forsøg B — find kun de sider med et fremmed blad
 
-Afgøres på **bredden** af det lyse bælte uden for kanten. Ikke på "kommer
+Afgøres på bredden af det lyse bælte uden for kanten. Ikke på "kommer
 papiret igen": også et rent bogsnit giver ~20 px lyst papir lige uden for
 kanten, så det spørgsmål siger ja til alt.
 
 | Facit siger blad | Sider | B siger ja |
 |---|---|---|
-| ja | 19 | 16 |
-| nej | 91 | 26 |
+| ja | 20 | 17 |
+| nej | 90 | 25 |
 | usikker | 8 | 3 |
 
-På de syv sider med fremmed tekst siger B ja på **6 af 7**. Den, der
-tabes, er `37554_001496`, hvor bladets eget bælte kun måles til 16 px.
-
-B rammer altså ved siden af på 26 af 91 rene sider. Det var det tilsigtede
-bytte (recall før precision), men prisen er høj, og B fanger færre af
-problemsiderne end A skærer rigtigt.
-
-## To mål, der ikke virkede — noteret, ikke skjult
-
-Begge forsøg på at måle snittets rigtighed automatisk blev opgivet.
-
-Det første: "står der blæk på begge sider af linjen?". **Det bestod ikke
-sin egen prøve.**
-`273108_001555`, hvor snittet beviseligt går gennem skriften, scorede
-LAVERE end sider, hvor snittet sidder rigtigt. Bogsnittets mørke striber
-tæller som blæk uanset tærskel.
-
-Det andet: "hvor mange rækker har blæk lige inden for snittet?". Det
-udpegede `273104_001645` og `273110_001526` som de værste — begge er ved
-fuld opløsning helt rene. Målet talte papirkantens egen skygge mod den
-sorte baggrund.
-
-Begge er fjernet igen frem for trimmet, til de så rigtige ud. Snittene må
-ses efter med øjnene.
-
-Til gengæld siger `sikker`-kolonnen nu faktisk nej: 2 af 118 sider mærkes
-(`273108_001555`, `37554_001496`), mod falsbeskæringens 0 af 118. Den ene
-af de to reelle fejl fanges dermed af værnet.
+B er ikke valgt. Den fanger færre af problemsiderne end A skærer rigtigt,
+og rammer alligevel forbi på 25 af 90 rene sider.
 
 ## Hvad tallene IKKE viser
 
-- Intet af dette er målt på prøvemængdens 50 sider. De er urørte med vilje.
+- Intet er målt på prøvemængdens 50 sider. De er urørte med vilje.
 - Der er stadig ikke kørt ét modelkald. Om den fremmede strimmel
-  overhovedet ender i en transskription, er **uafprøvet** — vi ved kun, at
-  den er der.
-- Facit hviler på mit øje, ikke leads. Tre af mine egne aflæsninger viste
-  sig forkerte undervejs, alle rettet ved at gå til fuld opløsning.
+  overhovedet ender i en transskription, er **uafprøvet**.
+- Kontaktarkene i `yderkant_snit_ark/` er ikke gennemset af lead under den
+  endelige kode. Mine egne øjne på nedskalerede ark har taget fejl fire
+  gange i dette arbejde og skal ikke regnes for en godkendelse.

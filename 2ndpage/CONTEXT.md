@@ -1359,3 +1359,55 @@ Falsbeskæringens tilsvarende kolonne gav 10/10 på alle 118 sider og
 skilte derfor ingenting fra. Yderkantens mærker 2 af 118 — heriblandt
 `273108_001555`, som er den ene reelle fejl. Værnet virker, men fanger
 ikke `273103_001463`, hvor snittet også ligger for langt inde.
+
+## 2026-08-29 — Yderkanten, anden runde
+
+### Beslutning 47: forsøg A valgt
+
+Lead valgte at skære alle 118 sider ved sidens egen kant frem for kun de
+sider, hvor et fremmed blad detekteres. Forsøg B fangede færre af
+problemsiderne, end A skar rigtigt, og ramte alligevel forbi på 25 af 90
+rene sider.
+
+### Måleapparat før metode — den lærte lektie
+
+Lead: *"Dine nye parametre har ligesom bare skruet op i stedet for at gå
+kritisk til værks."* Det var rigtigt. Fire konstanter var tilføjet på to
+dage uden noget mål til at afgøre, om de hjalp.
+
+Rettelsen var at bygge et måleapparat og **efterprøve det mod leads egne
+domme, før det blev brugt til noget**. Det måler sømdybde: hvor mørk en
+fordybning snittet ligger i. Hans to forkerte snit lå i 3,0 og 5,0, hans
+fire rigtige i 12-25.
+
+**Tre tidligere måleforsøg blev kasseret**, netop fordi de ikke bestod den
+prøve. Reglen står nu som husregel: et måleapparat, der ikke er holdt op
+mod et kendt svar, må ikke bruges til at bedømme noget.
+
+### Beslutning 48: en regel for meget, ikke en for lidt
+
+Svag-bekræftelsen — at bånd, der kun anede en kant, måtte bekræfte den —
+blev tilføjet 2026-08-28 for at redde én side. **Den var årsagen til begge
+de fejl, lead fandt.** Fjernet igen med sine to konstanter, hvorefter alle
+tre sider er gode.
+
+Fejltypen er værd at huske: en mekanisme tilføjet for ét tilfælde, som
+ødelagde flere andre, og hvis skade først blev synlig, da der fandtes et
+måleapparat.
+
+### Beslutning 49: sømkravet beholdes som værn, ikke som løsning
+
+En kandidatkant skal bevise sin søm, før den kommer i betragtning.
+**Målt ændrer det ingenting på øvemængden** — med og uden er resultatet
+identisk på alle 118 sider. Det bliver stående, fordi det får siden til at
+afstå frem for at gætte på materiale, vi ikke har set, og fordi det er
+det, der ville fange netop denne fejltype igen.
+
+Gulvet er 6. Marginen er tynd: de falske linjer måler 3-5, de rigtige
+10-163, men `273107_001866`s rigtige kant når kun 5-7. Overlappet ved 5 er
+løsningens svageste led og skal ses efter, når nyt materiale kommer til.
+
+### Arbejdsregel: billedgennemsyn skal delegeres
+
+Lead ramte sin session-grænse på, at hovedsessionen læste billeder direkte,
+især i fuld opløsning. Fremover: skalér ned, eller send en subagent.

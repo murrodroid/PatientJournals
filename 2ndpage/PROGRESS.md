@@ -15,6 +15,7 @@ Videre til næste stage kun efter menneskelig gennemgang.
 - [2026-08-27 15:40](diary/2026-08-27.md) — Beskæringen følger nu falsen bånd for bånd; tre fejlmålinger undervejs
 - [2026-08-27 17:10](diary/2026-08-27.md) — Alle 118 beskåret, 11x hurtigere; udragende blade udpeget som næste arbejde
 - [2026-08-28](diary/2026-08-28.md) — Yderkanten: facit for alle 118, detektion bygget, snittet vendt udad efter leads indsigelse
+- [2026-08-29](diary/2026-08-29.md) — Måleapparat efterprøvet mod leads domme; svag-bekræftelsen var fejlen og er fjernet; forsøg A valgt
 
 ## Fase 0 — Kortlægning og plan (afsluttet 2026-08-18)
 
@@ -276,10 +277,22 @@ uanset hvad litteraturen ellers siger.
       `273103_001463` er omtvistet (ikke mærket).
 - [x] **`sikker`-kolonnen siger nu faktisk nej** — 2 af 118 mærkes, mod
       falsbeskæringens 0 af 118.
-- [ ] **Gennemgang ved lead** af `output/yderkant_facit.csv`,
-      `output/yderkant_ark/` og `output/yderkant_snit_ark/`
-- [ ] **Leads valg: forsøg A (skær alle) eller B (skær kun blad-sider)** —
-      tal i `output/yderkant_eval.md`
+- [x] **Leads valg truffet (2026-08-29): forsøg A** — skær alle 118 ved
+      sidens egen kant.
+- [x] **Måleapparat bygget og efterprøvet mod leads egne domme** (2026-08-29):
+      sømdybde skiller hans to forkerte snit (3,0 og 5,0) fra hans fire
+      rigtige (12-25). Tre tidligere måleforsøg blev kasseret, fordi de
+      IKKE bestod den prøve — se `output/yderkant_eval.md`.
+- [x] **Fejlen fundet: svag-bekræftelsen**, tilføjet for at redde én side,
+      ødelagde to andre. Fjernet igen med sine to konstanter. Begge leads
+      forkerte sider er dermed rettet.
+- [x] **Sømkrav indbygget som værn** — ændrer målt intet på øvemængden,
+      men får siden til at afstå frem for at gætte på ukendt materiale.
+- [x] 305 tests grønne; 13 af 14 mutationer fanget (den sidste er
+      sømkravet, som beviseligt intet ændrer på det materiale, vi har).
+- [ ] **Gennemgang ved lead** af `output/yderkant_snit_ark/` under den
+      endelige kode. Mine egne øjne har taget fejl fire gange i dette
+      arbejde og tæller ikke som godkendelse.
 - [ ] Ingen beskårne billeder skrevet endnu — kræver go
 
 ## Stage 05 — Første transskription

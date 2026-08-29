@@ -157,19 +157,22 @@ def test_snittet_laegges_paa_kantens_YDRE_side():
     )
 
 
-def test_bufferen_er_stor_nok_til_at_redde_en_ordende():
-    """Bufferen skal kunne mere end at pynte.
+def test_bufferen_lader_kun_en_flig_af_naboen_staa():
+    """Bufferen er margen, ikke kompensation -- og maa ikke sluge naboen.
 
-    Lead maalte tabet i BOGSTAVER, ikke i pixels. Et bogstav i disse
-    haandskrifter fylder omtrent 15-25 px paa de beskaarne billeder, saa en
-    buffer paa nogle faa pixels ville ikke have hjulpet.
+    Da kanten blev meldt ved faldets BEGYNDELSE, laa den op til 12 kolonner
+    inde paa vores side, og bufferen skulle daekke den skaevhed. Nu meldes
+    kanten i faldets bund, altsaa paa selve soemmen, saa bufferen er ren
+    margen. Lead paapegede 2026-08-28, at den derfor gav for meget af det
+    fremmede blad tilbage, og den blev halveret.
+
+    Prøven vogter den ende af afvejningen: af et blad paa 188 px maa der
+    hoejst blive en tiendedel tilbage inden for snittet.
     """
-    img = _side_med_blad(kant_top=700, kant_bund=700)
-    raa = [x for _, x in baandkanter_ydre(img, RECTO) if x is not None]
+    img = _side_med_blad(kant_top=700, kant_bund=700)   # blad fra x=712 til x=900
     graense = ydre_graense(img, RECTO)
-    assert min(graense) - max(raa) >= 10, (
-        f"bufferen er kun {min(graense) - max(raa)} px -- mindre end et bogstav"
-    )
+    tilbage = max(graense) - 712
+    assert tilbage <= 19, f"{tilbage} px af det fremmede blad blev staaende"
 
 
 def test_graensen_varierer_ned_gennem_siden():
@@ -218,7 +221,12 @@ def _side_med_to_blade(bredde: int = 1000, hoejde: int = 1200) -> Image.Image:
     # svage og de kraftige raekker, og proeven maaler ikke det, den skal.
     a[:, 850:860] = SKYGGE          # det naeste blads kant: kraftig, overalt
     a[:, 920:] = BAGGRUND
-    a[: hoejde // 3, 760:766] = PAPIR - 12   # vores egen kant: kun foroven
+    # Vores egen kant kaster skygge i HELE hoejden -- en rigtig papirkant
+    # goer altid det -- men er kun kraftig nok til at blive fundet baandvist
+    # foroven. Tidligere var den helt fravaerende nedefter, og det er ikke,
+    # hvad et rigtigt billede viser.
+    a[:, 760:766] = PAPIR - 10
+    a[: hoejde // 3, 760:766] = PAPIR - 20
     return Image.fromarray(a, mode="L")
 
 
@@ -367,3 +375,52 @@ def test_verso_beskaeres_i_den_anden_ende():
     # vores side laa til hoejre efter spejlingen; den skal vaere i behold
     hoejre = np.asarray(ud.convert("L"))[:, -1]
     assert (hoejre > 200).all()
+
+
+# --- soem-maalingen for sig selv ----------------------------------------
+
+
+def test_soem_dybde_ser_forskel_paa_en_kant_og_blankt_papir():
+    """Selve maalingen bag soem-kravet.
+
+    Kravet aendrer intet paa oevemaengdens 118 sider -- det er maalt. Det
+    staar der som vaern for materiale, vi ikke har set endnu, og saa maa
+    selve maalingen i det mindste vaere efterproevet: en smal moerk stribe
+    skal give et tydeligt udslag, blankt papir naesten intet.
+    """
+    from andenside.yderkant import soem_dybde
+
+    blankt = np.full((600, 400), PAPIR, dtype=np.uint8)
+    med_kant = blankt.copy()
+    med_kant[:, 198:204] = SKYGGE
+
+    assert soem_dybde(np.asarray(blankt, dtype=float), 200, 0) < 2
+    assert soem_dybde(np.asarray(med_kant, dtype=float), 200, 0) > 40
+
+
+def test_soem_dybden_falder_naar_linjen_ikke_foelger_kanten():
+    """En skaev linje hen over en lodret kant ligger kun delvis i soemmen."""
+    from andenside.yderkant import soem_dybde
+
+    a = np.full((600, 400), PAPIR, dtype=np.uint8)
+    a[:, 198:204] = SKYGGE
+    graa = np.asarray(a, dtype=float)
+    assert soem_dybde(graa, 200, 0) > soem_dybde(graa, 200, 80)
+
+
+def test_bufferen_findes_faktisk():
+    """Bufferen skal flytte snittet maalbart -- ikke bare staa i koden.
+
+    En buffer paa nul ville ikke fejle nogen anden proeve, men den er det
+    eneste, der skiller snittet fra selve kanten.
+
+    Kravet er et FAST antal pixels, ikke `BUFFER_ANDEL` ganget op. Laeser
+    proeven konstanten, kan den aldrig fange, at konstanten bliver skruet
+    ned -- den ville bare saenke sit eget krav tilsvarende.
+    """
+    img = _side_med_blad(kant_top=700, kant_bund=700)     # 1000 px bred
+    raa = [x for _, x in baandkanter_ydre(img, RECTO) if x is not None]
+    graense = ydre_graense(img, RECTO)
+    assert min(graense) - max(raa) >= 4, (
+        f"bufferen er kun {min(graense) - max(raa)} px paa et 1000 px billede"
+    )

@@ -45,7 +45,7 @@ billede,recto_verso,klasse,blad_synligt,efterproevet_fuld_oploesning,note
 273103_001460,verso,ren,nej,nej,
 273103_001461,recto,ren,nej,nej,
 273103_001462,verso,ren,nej,nej,
-273103_001463,recto,usikker,nej,ja,"fuld oploesning: stadig tvivlsom, se usikker-noten"
+273103_001463,recto,ren,nej,ja,lead 2026-08-28: snittet er i orden. Min tvivl var ubegrundet.
 273103_001464,verso,ren,nej,nej,
 273103_001465,recto,ren,nej,nej,
 273103_001466,verso,ren,nej,nej,
@@ -92,7 +92,7 @@ billede,recto_verso,klasse,blad_synligt,efterproevet_fuld_oploesning,note
 273108_001538,recto,ren,nej,nej,
 273108_001553,verso,ren,nej,nej,
 273108_001554,recto,ren,nej,nej,
-273108_001555,verso,ren,nej,nej,
+273108_001555,verso,fremmed_tekst,ja,ja,"lead 2026-08-28: skriften uden for snittet staar paa det UDRAGENDE blad, ikke paa vores side. Jeg laeste den som vores egen og kaldte snittet en fejl."
 273108_001556,recto,ren,nej,nej,
 273108_001557,verso,ren,nej,nej,
 273109_000081,verso,ren,nej,nej,

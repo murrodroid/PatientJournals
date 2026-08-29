@@ -92,12 +92,14 @@ beskåret, ingen usikre.
 for vores side ligger enten bogsnittet (bogblokkens sammenpressede
 sidekanter, harmløst) eller et blad længere inde i bindet, som er faldet
 fladt ud og fotograferet med, så der står fremmed håndskrift langs kanten.
-Det gælder 7 af de 118 øvesider. Detektionen måler papirets grundlyshed
+Det gælder 8 af de 118 øvesider. Detektionen måler papirets grundlyshed
 pr. kolonne bånd for bånd og vælger den **inderste rette kant**, mindst 6
-bånd kan enes om; snittet lægges på kantens ydre side, så ordender aldrig
-klippes. Kontaktark: `scripts/yderkant_ark.py` (tilføj `--snit` for at se,
-hvad der fjernes). **Endnu ikke gennemgået af lead**, og ingen beskårne
-billeder er skrevet — det kræver go.
+bånd kan enes om, og som kan bevise, at den ligger i en **søm** — en
+fordybning i papiret. Snittet lægges på kantens ydre side, så ordender
+ikke klippes. Findes ingen kant med en rigtig søm, skæres siden ikke.
+Kontaktark: `scripts/yderkant_ark.py` (tilføj `--snit` for at se, hvad der
+fjernes); tal: `scripts/yderkant_maal.py`. **Ingen beskårne billeder er
+skrevet — det kræver go.**
 
 **Næste:** stage 05, første transskription. Alt er nu på plads til at måle
 et forsøg — facit, billeder og måleapparat. Der køres ingen modelkald, før
