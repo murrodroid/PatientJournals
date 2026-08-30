@@ -55,8 +55,11 @@ uanset hvad litteraturen ellers siger.
       Script: `scripts/kbharkiv_hent.py` (midlertidigt, 20-billeders grænse).
 - [x] 16 rigtige andensider hentet til `output/proeve_opslag/`, tre af dem
       krydstjekket ord for ord mod facit
-- [x] **Billedanmodningen er sendt til kollegaen** (bekræftet af lead
-      2026-08-20). Afventer hans levering. **Bemærk**: anmodningen dækker
+- [x] **Billedanmodningen er LEVERET** (2026-08-30, ekstern harddisk):
+      307 PNG i `output/levering_2026-08/`. 223 hentet ind (173 øve + 50
+      ekstra uden facit); prøvemængdens 84 bevidst ladt på harddisken.
+      Samme opløsning som vores webp, blot ukomprimeret — målt forskel
+      PSNR 41-42 dB. Script: `scripts/hent_levering.py`. **Bemærk**: anmodningen dækker
       de 38 dødsfaldspatienter, ikke de 10 sider under `273104_001636` — de er
       selvhentet via kbharkiv og ligger i øvemængden, så hullet er lukket.
 - [x] **Hele øvemængden hentet selv** (2026-08-20, leads go): 118 sider fra
@@ -255,10 +258,10 @@ uanset hvad litteraturen ellers siger.
 - [x] **Gennemgang ved lead — GODKENDT** (2026-08-18): "de er perfekte nu".
       Alle 8 kontaktark bekræftet. **Stage 04 er hermed låst** som
       forudsætning for stage 05 på det nuværende pilotmateriale.
-- [ ] **Kendt begrænsning, stadig åben**: kun afprøvet på 2 bind, samme
-      måneder (maj-juni 1896) — bredere test nødvendig, når flere billeder
-      er hentet. Kan afdække nye fejltyper (fx det fjerne bleed lead
-      nævnte) på trods af godkendelsen ovenfor.
+- [ ] **Kendt begrænsning, nu testbar**: beskæringen er kun afprøvet på
+      facit-månederne. De 50 ekstra andensider fra 1889-1897 i
+      `01_datagrundlag/output/levering_2026-08/ekstra_uden_facit/` er
+      hentet netop for at kunne svare på, om den holder bredere.
 - [ ] Ingen usikkerheds-flagning implementeret endnu (intet fejlende
       eksempel at kalibrere en tærskel mod) — se `output/usikre.md`.
 - [x] **Frasortér naboblade der rager ud** (2026-08-28) —
