@@ -108,6 +108,42 @@ kanten, så det spørgsmål siger ja til alt.
 B er ikke valgt. Den fanger færre af problemsiderne end A skærer rigtigt,
 og rammer alligevel forbi på 25 af 90 rene sider.
 
+## Tre uafhængige metoder blev prøvet — og de er enige
+
+To subagenter byggede grundlæggende andre tilgange, målt med samme apparat.
+Begge døde på en session-grænse, før de var helt færdige, men nåede at
+levere resultater for alle 118 sider.
+
+| Tilgang | Sider uden rigtig søm | Median sømdybde | Median fjernet |
+|---|---|---|---|
+| Den gamle kode (som lead dømte) | 4 | 20,0 | 12,5 % |
+| **Bånd + søm (valgt)** | **0** | 40,0 | 11,5 % |
+| 2-D gradient + Hough-akkumulator | 0 | 50,0 | 10,2 % |
+| Områdebestemmelse (sammenhæng + farve) | 0 | 43,5 | 10,8 % |
+
+Alle tre retter leads to forkerte sider og bevarer hans fire rigtige.
+Og de er enige om **hvor** snittet skal ligge: forskellen i fjernet andel
+er 1,2 % i median mod Hough og 0,4 % mod områdemetoden.
+
+Det er stærkere evidens end noget enkelt måletal: tre metoder, der ser på
+helt forskellige ting — 1-D profiler pr. bånd, 2-D gradientfelter, og
+sammenhængende farveflader — lander samme sted.
+
+## Områdemetodens fund: sømmen er for svag halvdelen af tiden
+
+Områdeagenten fik til opgave at efterprøve præmissen "vores side er ét
+sammenhængende ark, det udragende blad er et andet, altså en anden
+komponent". **Den holder kun halvt.** Målt på de 8 sider med fremmed tekst
+adskilte vores side og bladet sig i **4 af 8**; på de øvrige 4 var sømmen
+for svag, og de to ark smeltede sammen til én flade.
+
+Hvor de adskilte sig, lå de 68 px fra hinanden i median (20-208 px).
+
+Det er en reel begrænsning ved den tilgang og forklarer, hvorfor
+områdemetoden ikke uden videre er bedre end den valgte — den kan ikke
+adskille netop halvdelen af de sider, problemet handler om. På rene sider
+"adskilte" den derimod noget på 15 af 110, formentlig bogsnittet.
+
 ## Hvad tallene IKKE viser
 
 - Intet er målt på prøvemængdens 50 sider. De er urørte med vilje.
