@@ -1,6 +1,6 @@
 # Plan: forankringen erstattes af én sidemåling
 
-**Status: UDKAST. Ikke besluttet i alle detaljer, ikke påbegyndt.**
+**Status: fire af fem åbne spørgsmål afklaret. Ikke påbegyndt.**
 Skrevet 2026-08-30 efter en grill-session. Der grilles videre, før noget køres.
 
 ## Hvorfor
@@ -136,22 +136,55 @@ faktisk viste.
    sprogmodeller laver. Talegenkendelse har et fortilfælde for netop et loft:
    løb af indsættelser kappes ved et fast antal.
 
-2. **Overlever den strenge måling (beslutning 44)?** Lead bad 2026-08-23 om et
-   tal, hvor linjer med `[?]` slet ikke er med. Under en sidemåling kan det
-   stadig laves — men det var indført som et værn mod netop forankringens
-   rabat, og den findes ikke længere.
+2. ~~**Overlever den strenge måling (beslutning 44)?**~~ **AFKLARET
+   2026-08-30 (lead): ja, den bevares.**
 
-3. **Tegn eller ord som hovedtal?** Leads ord: *"ord til ord eller
-   linjesammensætning til linjesammensætning"*. Hovedtallet har hidtil været
-   tegnfejl (CER). Skal det forblive det?
+   Den blev indført 2026-08-23 som værn mod forankringens rabat, og den rabat
+   findes ikke længere. Men researchen viste, at netop den fremgangsmåde er
+   **konventionen i HTR**: Transkribus-praksis udelader hele linjen ved
+   ulæselige steder, både ved træning og måling. Beholdes tallet, kan vores
+   resultater sammenlignes med anden forskning.
 
-4. **Hvad med omrokerede linjer?** Lead: *"vi skal tillade omrokering af hele
-   linjer eller rækker af ord hvis de tydeligt bare er blevet sat i forkert
-   rækkefølge, men det er svært at implementere ordentligt."*
-   Foreløbig anbefaling: **byg det ikke ind i tallet.** Rækkefølgen bærer
-   betydning i en journal og skal videre til `PageLine`. Opgør i stedet
-   omrokering som sit eget tal ved siden af, så det kan ses frem for at blive
-   tilgivet stiltiende.
+   Følge: "dækning" vender tilbage som begreb — men **kun for det ene tal**,
+   og med en kendt, fast værdi (12,4 % af øvefacits tegn ligger på linjer med
+   et `[?]`). Det er ikke den glidende, variantafhængige rabat, der væltede
+   konklusionen; det er en fast udeladelse, der er ens for alle varianter.
+   Den forskel skal stå skrevet i rapporten, så de to slags "dækning" ikke
+   forveksles.
+
+3. ~~**Tegn eller ord som hovedtal?**~~ **AFKLARET 2026-08-30 (lead):
+   tegnfejl forbliver beslutningstallet, ordfejl står ved siden af.**
+
+   Begge falder ud af samme udregning, så det koster ingenting at have begge.
+   Tegnfejl er finere: en model, der rammer fire ud af fem bogstaver i et
+   svært ord, får credit for det, og på 1800-tals lægehåndskrift med latinske
+   forkortelser er den forskel reel. Ordfejl er desuden altid et meget større
+   tal — i dag cirka 25 % mod 9 % — fordi ét forkert bogstav gør hele ordet
+   forkert. Det er let at fejllæse udefra som "modellen er elendig".
+
+4. ~~**Hvad med omrokerede linjer?**~~ **AFKLARET 2026-08-30 (lead): måles
+   strengt i rækkefølge. Omrokering opgøres som sit eget tal ved siden af.**
+
+   Lead havde først ønsket, at omrokering blev tilgivet: *"vi skal tillade
+   omrokering af hele linjer eller rækker af ord hvis de tydeligt bare er
+   blevet sat i forkert rækkefølge, men det er svært at implementere
+   ordentligt."*
+
+   To grunde til ikke at bygge det ind i tallet:
+
+   **Teknisk:** editeringsafstand har ingen "flyt"-operation. Tillader man
+   vilkårlige blokflytninger, bliver problemet uoverskueligt at regne eksakt,
+   og enhver tilnærmelse indfører netop den slags skøn, vi lige har fjernet —
+   hvornår er noget *tydeligt bare* omrokeret? Det er samme ladeport som
+   søgningen fremad, i en anden form.
+
+   **Vigtigere:** rækkefølgen er noget, projektet har brug for. Journalen
+   læses kronologisk, og leverancen er `PageLine`-poster, hvor rækkefølgen
+   bærer betydning. En ombyttet linje er en fejl, der skal kunne ses.
+
+   Målingen skal derfor opgøre **antal linjer, der står i en anden orden end
+   facit**, som et selvstændigt tal. Det kan altid besluttes, at det ikke
+   betyder noget; det omvendte kan ikke besluttes, hvis tallet har skjult det.
 
 5. **Hvad sker der med de eksisterende tal i `output/`?** Selvtestens tal og
    rapportformatet i stage 03's output bygger på den gamle måling. Skal de
