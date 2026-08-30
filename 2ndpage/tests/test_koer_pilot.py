@@ -209,7 +209,8 @@ def test_en_haengende_side_stopper_ikke_de_oevrige(script, monkeypatch, capsys):
         return "en linje", {"page_lines": [{"text": "en linje"}]}
 
     monkeypatch.setattr(script, "transskriber", haenger_paa_den_anden)
-    monkeypatch.setattr(script, "SIDEFRIST_SEKUNDER", 1)
+    monkeypatch.setattr(script, "FORSOEGSFRIST_SEKUNDER", 1)
+    monkeypatch.setattr(script, "FORSOEG_PR_SIDE", 1)   # ingen gentagelse her
 
     gemte = {}
     monkeypatch.setattr(script, "gem_koersel",
@@ -219,7 +220,7 @@ def test_en_haengende_side_stopper_ikke_de_oevrige(script, monkeypatch, capsys):
     _koer(script, monkeypatch, ["--antal", "3", "--yes"])
     ud = capsys.readouterr().out
 
-    assert "FRIST UDLOEBET" in ud
+    assert "OPGIVET" in ud
     # De to andre sider skal vaere gemt -- ikke tabt sammen med den haengende.
     assert len(gemte) == 2, gemte
 
@@ -227,3 +228,85 @@ def test_en_haengende_side_stopper_ikke_de_oevrige(script, monkeypatch, capsys):
 def _tom_mappe(rod):
     rod.mkdir(parents=True, exist_ok=True)
     return rod
+
+
+# ------------------------------------------------------------------
+# Gentagelse ved serverfejl
+#
+# Maalt 2026-08-30 paa 16 kald: et kald, der lykkes, tager 7-12 sekunder i
+# ALLE varianter. Fejler det, haenger det til serverens egen frist paa ca.
+# 180 sekunder og svarer 504. Fejlen er binaer, og fejlraten afhaenger
+# staerkt af prompt og skema -- 0 % paa 56 kald for nogle kombinationer,
+# 61 % for andre.
+#
+# Uden gentagelse maales varianterne derfor paa FORSKELLIGE sider, og
+# forskellen mellem dem bliver sidernes i stedet for variantens. Det skete:
+# to af seks varianter fik kun 8 og 4 af 12 sider igennem, og
+# faellesmaengden faldt til 3 sider.
+# ------------------------------------------------------------------
+
+
+def test_en_side_proeves_igen_efter_en_serverfejl(script, monkeypatch,
+                                                  capsys):
+    """En 504 er forbigaaende. Anden gang skal siden vaere med."""
+    forsoeg = {}
+
+    def fejler_foerste_gang(sti, prompt, **kwargs):
+        navn = Path(sti).stem
+        forsoeg[navn] = forsoeg.get(navn, 0) + 1
+        if forsoeg[navn] == 1:
+            raise RuntimeError("504 DEADLINE_EXCEEDED")
+        return "en linje", {"page_lines": [{"text": "en linje"}]}
+
+    monkeypatch.setattr(script, "transskriber", fejler_foerste_gang)
+    gemte = {}
+    monkeypatch.setattr(script, "gem_koersel",
+                        lambda rod, o, svar, **k: (gemte.update(svar),
+                                                   _tom_mappe(rod))[1])
+
+    _koer(script, monkeypatch, ["--antal", "3", "--yes"])
+    ud = capsys.readouterr().out
+
+    assert len(gemte) == 3, f"alle tre sider skulle vaere reddet: {gemte}"
+    assert "forsoeg 2" in ud, ud
+    assert "OPGIVET" not in ud
+
+
+def test_en_side_der_ALTID_fejler_opgives_uden_at_haenge_koerslen(
+        script, monkeypatch, capsys):
+    """Gentagelse maa ikke blive uendelig.
+
+    Et kald, der aldrig lykkes, skal opgives efter det aftalte antal
+    forsoeg -- ellers bytter vi en haengende koersel for en uendelig.
+    """
+    kald = []
+    # Den daarlige side udpeges som den ANDEN, scriptet naar frem til, ikke
+    # ved navn: hvilke sider `--antal` vaelger afhaenger af pilotsider.csv, og
+    # en test, der binder sig til et billed-id, gaar stille i staa den dag
+    # udvalget aendrer sig -- den ville saa bestaa uden at proeve noget.
+    daarlig: list[str] = []
+
+    def fejler_altid_paa_den_anden(sti, prompt, **kwargs):
+        navn = Path(sti).stem
+        if not daarlig and len(set(kald)) == 1 and navn not in kald:
+            daarlig.append(navn)
+        kald.append(navn)
+        if navn in daarlig:
+            raise RuntimeError("504 DEADLINE_EXCEEDED")
+        return "en linje", {"page_lines": [{"text": "en linje"}]}
+
+    monkeypatch.setattr(script, "transskriber", fejler_altid_paa_den_anden)
+    monkeypatch.setattr(script, "FORSOEG_PR_SIDE", 3)
+    gemte = {}
+    monkeypatch.setattr(script, "gem_koersel",
+                        lambda rod, o, svar, **k: (gemte.update(svar),
+                                                   _tom_mappe(rod))[1])
+
+    _koer(script, monkeypatch, ["--antal", "3", "--yes"])
+    ud = capsys.readouterr().out
+
+    assert daarlig, "testen naaede aldrig at udpege en daarlig side"
+    assert "OPGIVET efter 3 forsoeg" in ud, ud
+    assert len([n for n in kald if n == daarlig[0]]) == 3
+    assert len(gemte) == 2, "de oevrige sider skulle stadig vaere gemt"
+    assert daarlig[0] not in gemte

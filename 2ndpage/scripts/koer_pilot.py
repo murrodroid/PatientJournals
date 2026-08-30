@@ -84,7 +84,22 @@ USD_TIL_DKK = 6.9
 # videre. Traaden kan ikke draebes -- den bliver haengende resten af koerslen
 # -- men den blokerer ikke laengere de sider, der kommer efter, og siden ender
 # i `fejlede.txt`, hvorfra den kan koeres om med `--sider`.
-SIDEFRIST_SEKUNDER = 90
+# Frist pr. FORSOEG, ikke pr. side. Maalt 2026-08-30 paa 16 kald: et kald,
+# der lykkes, tager 7-12 sekunder i ALLE varianter -- der findes ingen
+# langsom prompt. Fejler det, haenger det derimod til serverens egen frist paa
+# ca. 180 sekunder og svarer 504 DEADLINE_EXCEEDED.
+#
+# Fejlen er altsaa binaer, ikke en glidende skala, og et daarligt kald spilder
+# 180 sekunder paa at sige nej. Derfor opgives et forsoeg langt foer serverens
+# frist: alt over 45 sekunder er efter alt at doemme allerede tabt, og et nyt
+# forsoeg er billigere end at vente svaret af.
+FORSOEGSFRIST_SEKUNDER = 45
+
+# Hvor mange gange en side proeves i alt. Fejlraten var staerkt afhaengig af
+# prompt og skema -- 0 % paa 56 kald for nogle kombinationer, 61 % for andre
+# -- saa uden gentagelse maales varianterne paa forskellige sider, og
+# forskellen mellem dem bliver sidernes i stedet for variantens.
+FORSOEG_PR_SIDE = 4
 
 
 def _promptfil(navn: str) -> Path:
@@ -246,31 +261,36 @@ def main() -> None:
     print(flush=True)
     pulje = ThreadPoolExecutor(max_workers=1)
     for nummer, (navn, sti) in enumerate(sider, start=1):
-        try:
-            opgave = pulje.submit(
-                transskriber, sti, prompt,
-                model=args.model, temperatur=args.temperatur, skema=skema,
-            )
-            tekst, struktur = opgave.result(timeout=SIDEFRIST_SEKUNDER)
-        except FristUdloebet:
-            fejlede.append((navn, f"intet svar inden {SIDEFRIST_SEKUNDER}s"))
-            print(f"   [{nummer}/{len(sider)}] {navn}  FRIST UDLOEBET",
-                  flush=True)
-            # Traaden haenger stadig paa sit kald, saa puljen kan ikke
-            # genbruges til den naeste side. Der laves en ny.
-            pulje.shutdown(wait=False)
-            pulje = ThreadPoolExecutor(max_workers=1)
-            continue
-        except Exception as fejl:                      # noqa: BLE001
-            # En enkelt fejlet side maa ikke koste de foregaaende svar.
-            fejlede.append((navn, f"{type(fejl).__name__}: {fejl}"))
-            print(f"   [{nummer}/{len(sider)}] {navn}  FEJLEDE: "
-                  f"{type(fejl).__name__}", flush=True)
-            continue
-        svar[navn] = tekst
-        raa[navn] = struktur
-        print(f"   [{nummer}/{len(sider)}] {navn}  "
-              f"{len(tekst.splitlines())} linjer", flush=True)
+        sidste_grund = ""
+        for forsoeg in range(1, FORSOEG_PR_SIDE + 1):
+            try:
+                opgave = pulje.submit(
+                    transskriber, sti, prompt,
+                    model=args.model, temperatur=args.temperatur, skema=skema,
+                )
+                tekst, struktur = opgave.result(timeout=FORSOEGSFRIST_SEKUNDER)
+            except FristUdloebet:
+                sidste_grund = f"intet svar inden {FORSOEGSFRIST_SEKUNDER}s"
+                # Traaden haenger stadig paa sit kald, saa puljen kan ikke
+                # genbruges. Der laves en ny.
+                pulje.shutdown(wait=False)
+                pulje = ThreadPoolExecutor(max_workers=1)
+            except Exception as fejl:                  # noqa: BLE001
+                # En enkelt fejlet side maa ikke koste de foregaaende svar.
+                sidste_grund = f"{type(fejl).__name__}: {fejl}"
+            else:
+                svar[navn] = tekst
+                raa[navn] = struktur
+                igen = f"  (forsoeg {forsoeg})" if forsoeg > 1 else ""
+                print(f"   [{nummer}/{len(sider)}] {navn}  "
+                      f"{len(tekst.splitlines())} linjer{igen}", flush=True)
+                break
+            print(f"   [{nummer}/{len(sider)}] {navn}  forsoeg {forsoeg} af "
+                  f"{FORSOEG_PR_SIDE} gav op: {sidste_grund[:40]}", flush=True)
+        else:
+            fejlede.append((navn, sidste_grund))
+            print(f"   [{nummer}/{len(sider)}] {navn}  OPGIVET efter "
+                  f"{FORSOEG_PR_SIDE} forsoeg", flush=True)
     pulje.shutdown(wait=False)
 
     if not svar:
