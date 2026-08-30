@@ -10,12 +10,13 @@ Leveringen er svaret paa vores egen `billedanmodning/` fra 18. august 2026:
 |---|---:|---|
 | Oevemaengde (patienter i `opdeling.csv` = oeve) | 173 | ja |
 | Ekstra andensider uden facit (spredt 1889-1897) | 50 | ja |
-| **Proevemaengde** (patienter = proeve) | 84 | **NEJ** |
+| **Proevemaengde** (patienter = proeve) | 84 | ja, men i egen mappe |
 
-Proevemaengden hentes bevidst ikke. Beslutningen fra stage 02 er, at de
-sider foerst maa roeres ved den endelige bedoemmelse, og den letteste maade
-at bryde den paa er at have filerne liggende, hvor et glob kan samle dem op.
-De ligger paa harddisken og kan hentes den dag, bedoemmelsen skal koere.
+Proevemaengden henter lead udtrykkeligt (2026-08-30). Den lægges i
+`proeve_LAAST/` -- adskilt, saa et glob over oevematerialet ikke kan samle
+den op ved et uheld. Beslutningen fra stage 02 staar ved magt: de sider maa
+ikke maales paa foer den endelige bedoemmelse. At have filerne er ikke det
+samme som at bruge dem; det er FACIT for de sider, vaernet handler om.
 
 ## Om kvaliteten
 
@@ -83,19 +84,19 @@ def run(udfoer: bool) -> None:
     for navn, filer in grupper.items():
         print(f"{navn:20s} {len(filer):4d} billeder")
 
-    hentes = {k: v for k, v in grupper.items() if k != "proeve"}
+    hentes = dict(grupper)
     i_alt = sum(len(v) for v in hentes.values())
     mb = sum((KILDE / f"{n}.png").stat().st_size for v in hentes.values() for n in v) / 1e6
     print(f"\nhentes: {i_alt} billeder, {mb:.0f} MB -> {MAAL}")
-    print(f"hentes IKKE: {len(grupper['proeve'])} proeve-billeder "
-          f"(beslutning fra stage 02 -- de roeres foerst ved den endelige bedoemmelse)")
+    print(f"  heraf {len(grupper['proeve'])} proeve-billeder i egen mappe "
+          f"'proeve_LAAST' -- de maa IKKE maales paa foer den endelige bedoemmelse")
 
     if not udfoer:
         print("\nTOERLOEB. Kør med --yes for at kopiere.")
         return
 
     for gruppe, filer in hentes.items():
-        mappe = MAAL / gruppe
+        mappe = MAAL / ("proeve_LAAST" if gruppe == "proeve" else gruppe)
         mappe.mkdir(parents=True, exist_ok=True)
         for i, navn in enumerate(filer, 1):
             maal = mappe / f"{navn}.png"
