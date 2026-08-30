@@ -196,7 +196,7 @@ def transskriber(
     prompt: str,
     *,
     model: str = "gemini-3.1-pro-preview",
-    temperatur: float = 0.0,
+    temperatur: float | None = 0.0,
     skema: type[BaseModel] | None = TextPage,
     noegle: str | None = None,
 ) -> tuple[str, dict]:
@@ -205,6 +205,15 @@ def transskriber(
     `tekst` er linjerne samlet, som maaleapparatet vil have dem. `raat_svar`
     er svarets egen struktur -- den gemmes i bogholderiet, saa margendatoer og
     linjeopdeling ikke gaar tabt, bare fordi maalingen ikke bruger dem.
+
+    `temperatur=None` udelader indstillingen HELT i stedet for at saette den
+    til noget. Det er ikke det samme som 0: maalt 2026-08-30 tager ren tekst
+    79-135 sekunder pr. side, hvor skemabundet tager 8-12, og med
+    `temperature=0.0` gik den skemaloese vej over serverens egen frist paa ca.
+    180 sekunder og fejlede 3 ud af 3 gange paa samme side. Uden indstillingen
+    lykkedes den 3 ud af 3. Prisen er, at koerslen saa ikke laengere er bundet
+    til én temperatur -- det skal staa i bogholderiet, for det er et
+    forbehold ved sammenligningen, ikke en detalje.
 
     `skema=None` sender INTET skema og beder om ren tekst. Det er
     `ren_tekst`-varianten i stage 06's forsoeg: litteraturen siger, at et
@@ -219,17 +228,15 @@ def transskriber(
     from google import genai
     from google.genai import types
 
+    valg: dict[str, object] = {}
+    if temperatur is not None:
+        valg["temperature"] = temperatur
     if skema is None:
-        opsaetning = types.GenerateContentConfig(
-            temperature=temperatur,
-            response_mime_type="text/plain",
-        )
+        valg["response_mime_type"] = "text/plain"
     else:
-        opsaetning = types.GenerateContentConfig(
-            temperature=temperatur,
-            response_mime_type="application/json",
-            response_schema=skema,
-        )
+        valg["response_mime_type"] = "application/json"
+        valg["response_schema"] = skema
+    opsaetning = types.GenerateContentConfig(**valg)
 
     klient = genai.Client(
         api_key=noegle or hent_noegle(),

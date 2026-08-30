@@ -175,6 +175,10 @@ def _fang_klientopsaetning(monkeypatch, tmp_path):
             self.models = self
 
         def generate_content(self, **kwargs):
+            # Baade klientens og kaldets argumenter fanges. Opsaetningen af
+            # kaldet (`config`) er det, temperatur og skema ender i, og den
+            # ligger IKKE paa klienten.
+            fanget.update(kwargs)
             return pytypes.SimpleNamespace(
                 text='{"page_lines": [{"text": "en linje"}]}'
             )
@@ -222,3 +226,42 @@ def test_timeouten_er_i_millisekunder_ikke_sekunder(monkeypatch, tmp_path):
 
     assert (fanget["http_options"].kwargs["timeout"]
             == int(m.KALD_TIMEOUT_SEKUNDER * 1000))
+
+
+# ---------------------------------------------------------------------------
+# Temperaturen udelades, hvor den skader
+#
+# Maalt 2026-08-30 paa samme side: ren tekst tager 79-135 sekunder, mens
+# skemabundet tager 8-12. Med `temperature=0.0` gik den skemaloese vej over
+# serverens egen frist paa ca. 180 sekunder og fejlede 3 ud af 3; uden
+# indstillingen lykkedes den 3 ud af 3.
+#
+# `temperatur=None` skal derfor udelade indstillingen HELT. Sendes 0.0 i
+# stedet, virker den skemaloese variant slet ikke -- og fejlen er tavs, fordi
+# den ligner et netvaerksproblem.
+# ---------------------------------------------------------------------------
+
+def test_temperatur_none_udelader_indstillingen_helt(monkeypatch, tmp_path):
+    from andenside import model as m
+
+    fanget, billede = _fang_klientopsaetning(monkeypatch, tmp_path)
+    m.transskriber(billede, "prompt", temperatur=None, skema=None, noegle="x")
+
+    # `GenerateContentConfig` er byttet ud med en dict i proeveopsaetningen.
+    assert "temperature" not in fanget["config"], fanget["config"]
+    assert fanget["config"]["response_mime_type"] == "text/plain"
+
+
+def test_en_temperatur_paa_nul_sendes_stadig_naar_den_er_bedt_om(
+        monkeypatch, tmp_path):
+    """`None` og `0.0` maa ikke forveksles.
+
+    Var de det samme, kunne en koersel ikke laengere bindes til en temperatur,
+    og to koersler ville ikke kunne gentages ens.
+    """
+    from andenside import model as m
+
+    fanget, billede = _fang_klientopsaetning(monkeypatch, tmp_path)
+    m.transskriber(billede, "prompt", temperatur=0.0, noegle="x")
+
+    assert fanget["config"]["temperature"] == 0.0

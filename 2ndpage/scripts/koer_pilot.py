@@ -101,6 +101,12 @@ FORSOEGSFRIST_SEKUNDER = 45
 # forskellen mellem dem bliver sidernes i stedet for variantens.
 FORSOEG_PR_SIDE = 4
 
+# Ren tekst er langsommere end skemabundet -- ikke lidt, men meget. Maalt
+# 2026-08-30 paa samme side: 79-135 sekunder uden skema mod 8-12 med. En
+# faelles frist ville derfor enten opgive alle de skemaloese kald for tidligt
+# eller lade de skemabundne haenge alt for laenge.
+FORSOEGSFRIST_UDEN_SKEMA = 170
+
 
 def _promptfil(navn: str) -> Path:
     sti = PROMPTER / f"{navn}.md"
@@ -217,13 +223,23 @@ def main() -> None:
     p.add_argument("--sider", default="",
                    help="navngivne sider i stedet for udsnittet, adskilt af komma")
     p.add_argument("--model", default="gemini-3.1-pro-preview")
-    p.add_argument("--temperatur", type=float, default=0.0)
+    p.add_argument("--temperatur", type=float, default=None,
+                   help="udelades som standard for skemaloese koersler, hvor "
+                        "temperature=0 fik kaldet til at overskride serverens "
+                        "frist; ellers 0.0")
     p.add_argument("--yes", action="store_true",
                    help="udfør kaldene. Uden dette flag sker der intet.")
     args = p.parse_args()
 
     prompt = _prompt(args.prompt)
     skema = SKEMAER[args.skema]
+    # Temperaturen saettes til 0 hvor det virker, og udelades hvor det ikke
+    # goer. Se `model.transskriber` for maalingen bag.
+    temperatur = args.temperatur
+    if temperatur is None and skema is not None:
+        temperatur = 0.0
+    frist = (FORSOEGSFRIST_SEKUNDER if skema is not None
+             else FORSOEGSFRIST_UDEN_SKEMA)
     kun = [n.strip() for n in args.sider.split(",") if n.strip()]
     sider = _sider(args.variant, args.antal or None, kun or None)
     if not sider:
@@ -231,7 +247,8 @@ def main() -> None:
     pris = len(sider) * PRIS_PR_KALD_USD
 
     print(f"\nVariant:      {args.variant}")
-    print(f"Model:        {args.model} (temperatur {args.temperatur})")
+    print(f"Model:        {args.model} (temperatur "
+          + ("ikke sat" if temperatur is None else str(temperatur)) + ")")
     print(f"Prompt:       {_promptfil(args.prompt).relative_to(ROD)} "
           f"({len(prompt)} tegn)")
     print(f"Skema:        {args.skema}"
@@ -250,9 +267,11 @@ def main() -> None:
         promptversion=f"{args.prompt}/{args.skema}",
         prompt=prompt,
         variant=args.variant,
-        temperatur=args.temperatur,
+        temperatur=temperatur if temperatur is not None else -1.0,
         noter=f"pilot, {len(sider)} af 15 sider, én pr. bind, "
-              f"prompt={args.prompt}, skema={args.skema}",
+              f"prompt={args.prompt}, skema={args.skema}, "
+              f"temperatur="
+              + ("ikke sat" if temperatur is None else str(temperatur)),
     )
 
     svar: dict[str, str] = {}
@@ -266,11 +285,11 @@ def main() -> None:
             try:
                 opgave = pulje.submit(
                     transskriber, sti, prompt,
-                    model=args.model, temperatur=args.temperatur, skema=skema,
+                    model=args.model, temperatur=temperatur, skema=skema,
                 )
-                tekst, struktur = opgave.result(timeout=FORSOEGSFRIST_SEKUNDER)
+                tekst, struktur = opgave.result(timeout=frist)
             except FristUdloebet:
-                sidste_grund = f"intet svar inden {FORSOEGSFRIST_SEKUNDER}s"
+                sidste_grund = f"intet svar inden {frist}s"
                 # Traaden haenger stadig paa sit kald, saa puljen kan ikke
                 # genbruges. Der laves en ny.
                 pulje.shutdown(wait=False)
