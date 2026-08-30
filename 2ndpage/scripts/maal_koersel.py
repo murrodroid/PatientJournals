@@ -187,17 +187,85 @@ def maal_en(mappe: Path) -> dict:
     }
 
 
+def sammenlign(mapper: list[Path]) -> None:
+    """Stiller koersler op mod hinanden paa de sider, de ALLE har.
+
+    En koersel kan mangle sider -- en frist der loeb ud, eller et kald der
+    fejlede. Maales hver koersel paa sit eget saet, sammenlignes varianter paa
+    forskelligt materiale, og forskellen kan lige saa godt vaere sidernes som
+    variantens. Her skaeres alle ned til faellesmaengden foerst.
+
+    Baade hovedtallet og tallet uden daekningens rabat vises. De kan pege hver
+    sin vej -- det gjorde de paa stage 06's foerste fire varianter -- og naar
+    de goer, er det rabatten, man ser.
+    """
+    koersler = []
+    for mappe in mapper:
+        opsaetning, svar = laes_koersel(mappe)
+        koersler.append((mappe, opsaetning, svar))
+
+    faelles = set.intersection(*(set(s) for _, _, s in koersler))
+    alle = set.union(*(set(s) for _, _, s in koersler))
+    if not faelles:
+        raise SystemExit("koerslerne har ingen sider til faelles")
+
+    poster = _facit_for(faelles)
+    faelles = {p["image_name"] for p in poster}
+    print()
+    print(f"Sammenligning paa {len(faelles)} faelles sider "
+          f"(af {len(alle)} i alt paa tvaers af koerslerne)")
+    udeladt = sorted(alle - faelles)
+    if udeladt:
+        print("  udeladt, fordi mindst én koersel mangler dem: "
+              + ", ".join(udeladt))
+
+    print()
+    print(f"{'variant':<34} {'sider':>5} {'hovedtal':>9} {'daekning':>9} "
+          f"{'uden rabat':>11} {'uforankret':>11}")
+    raekker = []
+    for mappe, opsaetning, svar in koersler:
+        kun = {n: t for n, t in svar.items() if n in faelles}
+        saet = maal_saet(poster, kun)
+        fejl, tabt = uden_rabat(poster, kun)
+        raekker.append((opsaetning.promptversion, mappe.name, len(kun),
+                        float(_andel(saet.fladet["raa"], "tegn")),
+                        saet.daekning, fejl, tabt))
+    for navn, _, n, hoved, daek, fejl, tabt in sorted(raekker, key=lambda r: r[5]):
+        print(f"{navn:<34} {n:>5} {hoved:>8.2%} {daek:>9.1%} "
+              f"{fejl:>10.2%} {tabt:>10.2%}")
+
+    bedst_hoved = min(raekker, key=lambda r: r[3])[0]
+    bedst_rabatfri = min(raekker, key=lambda r: r[5])[0]
+    if bedst_hoved != bedst_rabatfri:
+        print()
+        print(f"  BEMAERK: hovedtallet peger paa {bedst_hoved!r}, men uden "
+              f"rabat vinder {bedst_rabatfri!r}.")
+        print("  Forskellen er daekningen: den foerste har tabt mere tekst ud "
+              "af maalingen.")
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("koersel", nargs="?",
                    help="mappenavn under output/koersler/; standard er den nyeste")
     p.add_argument("--alle", action="store_true",
                    help="maal alle koersler og skriv en samlet oversigt")
+    p.add_argument("--sammenlign", nargs="*", metavar="KOERSEL",
+                   help="stil koersler op mod hinanden paa deres faelles "
+                        "sider; uden navne bruges alle")
     args = p.parse_args()
 
     alle = find_koersler(KOERSLER)
     if not alle:
         raise SystemExit(f"ingen koersler i {KOERSLER}")
+
+    if args.sammenlign is not None:
+        valgte = ([m for m in alle if m.name in args.sammenlign]
+                  if args.sammenlign else alle)
+        if len(valgte) < 2:
+            raise SystemExit("der skal mindst to koersler til en sammenligning")
+        sammenlign(sorted(valgte, key=lambda m: m.name))
+        return
 
     if args.alle:
         valgte = alle
