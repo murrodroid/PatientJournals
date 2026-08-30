@@ -1468,3 +1468,43 @@ paa praecis det. Kasseret, ikke trimmet. Valget blev truffet visuelt.
 Bogsnit, fals og papirkant er alle moerke. Vil man maale et snits rigtighed,
 skal det vaere paa noget andet end blaek — soem-dybden virker, fordi den
 maaler papirets fordybning, ikke dets moerke.
+
+## 2026-08-30 (senere) — Stage 04 godkendt og låst
+
+Lead har set de 27 kontaktark igennem under den endelige kode og godkendt
+beskæringen. **Stage 04 er hermed låst** — begge snit, falsen og yderkanten,
+står som de er.
+
+Det er den gennemgang, der manglede. Mine egne øjne tog fejl fire gange i
+dette arbejde, og lead fandt fejl i sider, jeg havde erklæret rigtige, hver
+eneste gang han så efter. Godkendelsen er derfor hans, ikke min.
+
+Genåbnes uden tøven, hvis stage 05's første rigtige modelsvar peger på, at
+snittene alligevel spolerer noget.
+
+### Beslutning 52: piloten begynder på 5-10 sider
+
+Lead: *"vi starter med parse af 5-10 sider, det er vel her vi laver de
+første eksperimenter på prompt etc."*
+
+Piloten skal altså ikke være en måling af beskæringen på hele øvemængden,
+men det sted, hvor prompten formes. Det ændrer to ting:
+
+- **Billedformatet er ligegyldigt ved den størrelse.** De ukomprimerede PNG
+  fra `levering_beskaaret/oeve/beskaarne/` bruges, så komprimering ikke er
+  en åben mistanke, når det første tal kommer. Spørgsmålet om webp mod PNG
+  i fuld skala står stadig åbent og kan afgøres senere med en måling på de
+  samme sider i begge formater.
+- **De første tal er ikke et kvalitetsmål.** 5-10 sider kan forme en prompt;
+  de kan ikke bære en fejlprocent. Tallet skrives med sin dækning ved siden af.
+
+### Åbne punkter, der overlever stage 04's lukning
+
+Lukningen betyder ikke, at alt er set efter. Disse står stadig:
+
+- 21 af 307 sider fik kastet bånd (`output/fals_kvalitet.csv`). De ser
+  rigtige ud, men er ikke set efter én for én.
+- `273111_001380` og `_001381` mærkes stadig usikre på falsen.
+- Søm-gulvet på 6 har tynd margin: `273107_001866`s rigtige kant måler kun
+  5-7, og falske linjer måler 3-5. Løsningens svageste led. Ses efter, når
+  nyt materiale kommer til.

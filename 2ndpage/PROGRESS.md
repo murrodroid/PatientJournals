@@ -17,6 +17,7 @@ Videre til næste stage kun efter menneskelig gennemgang.
 - [2026-08-28](diary/2026-08-28.md) — Yderkanten: facit for alle 118, detektion bygget, snittet vendt udad efter leads indsigelse
 - [2026-08-29](diary/2026-08-29.md) — Måleapparat efterprøvet mod leads domme; svag-bekræftelsen var fejlen og er fjernet; forsøg A valgt
 - [2026-08-30](diary/2026-08-30.md) — Leveringen hentet (307 PNG); falssnittet gik galt på 9 sider og er rettet; buffer sat til 0,5 %
+- [2026-08-30 senere](diary/2026-08-30.md) — Lead godkendte de 27 kontaktark; stage 04 låst; piloten begynder på 5-10 sider
 
 ## Fase 0 — Kortlægning og plan (afsluttet 2026-08-18)
 
@@ -237,7 +238,7 @@ uanset hvad litteraturen ellers siger.
 - [x] **Løs ende lukket**: `pyproject.toml`s døde kommando-indgang
       (`andenside.cli:main` uden en `cli.py`) er fjernet efter leads valg.
 
-## Stage 04 — Billedforberedelse
+## Stage 04 — Billedforberedelse — **GODKENDT OG LÅST 2026-08-30**
 
 - [x] **Model revideret** (2026-08-18): opgaven er at skære en smal
       forurenende strimmel væk fra ÉN kant, ikke at dele midt over.
@@ -280,9 +281,10 @@ uanset hvad litteraturen ellers siger.
       forkert hele tiden, uden at nogen måling sagde fra.
 - [x] **Kontaktarkene viser nu det bortskårne** (fals rød, yderkant blå) —
       man kan ikke bedømme et snit på resultatet alene.
-- [ ] **Gennemgang ved lead** af `output/levering_beskaaret/*/kontaktark/`
-      (27 ark), efter rettelsen. Rækkefølge, de fire usikre og de 21 sider
-      med kastede bånd står i mappens README.
+- [x] **Gennemgang ved lead — GODKENDT** (2026-08-30) af
+      `output/levering_beskaaret/*/kontaktark/` (27 ark) under den endelige
+      kode. **Stage 04 er hermed låst.** Genåbnes uden tøven, hvis stage 05's
+      første modelsvar peger på, at snittene spolerer noget.
 - [x] **Falssnittets buffer sat til 0,5 %** (2026-08-30, leads visuelle
       valg mellem 2,0/1,0/0,5 % i `output/buffer_sammenligning/`). Alle 307
       skåret om; alle seks af leads tidligere domme holder.
@@ -320,20 +322,38 @@ uanset hvad litteraturen ellers siger.
       men får siden til at afstå frem for at gætte på ukendt materiale.
 - [x] 305 tests grønne; 13 af 14 mutationer fanget (den sidste er
       sømkravet, som beviseligt intet ændrer på det materiale, vi har).
-- [ ] **Gennemgang ved lead** af `output/yderkant_snit_ark/` under den
-      endelige kode. Mine egne øjne har taget fejl fire gange i dette
-      arbejde og tæller ikke som godkendelse.
-- [ ] Ingen beskårne billeder skrevet endnu — kræver go
+- [x] **Gennemgang ved lead — GODKENDT** (2026-08-30): dækket af
+      gennemgangen af de 27 kontaktark, som viser begge snit på samme ark
+      (fals rød, yderkant blå).
+- [x] Beskårne billeder skrevet for alle 307 sider (2026-08-30, leads go).
 
 ## Stage 05 — Første transskription
 
 *(splittet ud af tidligere "05 Metodeforsøg" 2026-08-18 — fin opdeling af
 selve læse-implementeringen, samme princip som resten af planen)*
 
+- [ ] **Første skridt: 5-10 sider** (leads valg 2026-08-30, beslutning 52) —
+      piloten er dér, prompten formes, ikke en måling af beskæringen. Kilde:
+      de ukomprimerede PNG i
+      `stages/04_billedforberedelse/output/levering_beskaaret/oeve/beskaarne/`,
+      så komprimering ikke er en åben mistanke ved det første tal.
 - [ ] Forsøg 1: kun billedforberedelsen varieres (`gemini-3.1-pro`, fast prompt)
 - [ ] Bogholderi: rå svar + fuld opsætning gemmes pr. kørsel
 - [ ] **Ingen fuld kørsel uden leads go**
 - [ ] **Gennemgang ved lead** — er beskæringen god nok til at gå videre?
+
+**Blokeret på to ting, begge leads:**
+
+- [ ] API-nøgle i `C:\Workndpage_keys.json` (feltnavn skal indeholde
+      `gemini`, `genai` eller `google`). Indholdet læses aldrig; tjek med
+      `hent_noegle()`.
+- [ ] Leads go til de første modelkald. **Der er endnu ikke kørt ét eneste
+      modelkald i projektet.**
+
+**Åbent, som ikke lukkede med stage 04:** webp mod PNG i fuld skala. Ved
+5-10 sider er filstørrelsen ligegyldig; ved en fuld kørsel er de 173 PNG
+37 gange større end de 118 webp. Kan afgøres med en måling på de samme
+sider i begge formater, når der først findes rigtige modelsvar at måle på.
 
 ## Stage 06 — Prompt og model
 

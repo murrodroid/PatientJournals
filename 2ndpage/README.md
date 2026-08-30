@@ -43,16 +43,21 @@ tests/                   Herunder strukturtesten
 
 ## Status
 
-Kortlægning og planlægning er færdig, og 44 beslutninger er låst i
-`CONTEXT.md`.
+Stage 02, 03 og 04 er færdige, godkendte og låste. 52 beslutninger er
+låst i `CONTEXT.md`. **Der er endnu ikke kørt ét eneste modelkald** — hvert
+kvalitetstal i repoet er en prøve af måleapparatet, ikke et resultat.
 
 **Billeder (stage 01):** kbharkiv.dk's kildeviser har et åbent API, så vi
-kan hente selv (`scripts/kbharkiv_hent.py`). Hele øvemængden er hentet —
-118 sider fra 15 bind i `stages/01_datagrundlag/output/oeve_billeder/`,
-plus 8 tidligere pilotbilleder. Prøvemængdens sider er bevidst **ikke**
-hentet. Forskydningen mellem kildeviserens sidetal og masterlistens
-billed-id er efterprøvet på alle 15 bind. Billedanmodningen til kollegaen
-(307 billeder) er sendt og afventer levering.
+kan hente selv (`scripts/kbharkiv_hent.py`), og **billedanmodningen til
+kollegaen er leveret** (2026-08-30): 307 PNG i
+`stages/01_datagrundlag/output/levering_2026-08/`, fordelt på `oeve/` (173),
+`ekstra_uden_facit/` (50, andensider 1889-1897) og `proeve_LAAST/` (84).
+PNG'erne er samme opløsning som de webp, vi selv hentede, blot
+ukomprimerede (målt PSNR 41-42 dB) — ikke skarpere. Prøvemængden ligger
+adskilt med vilje og **må ikke måles på** før den endelige bedømmelse;
+`vaern.sikr_oevemaengde` håndhæver det i kode. Forskydningen mellem
+kildeviserens sidetal og masterlistens billed-id er efterprøvet på alle 15
+bind. Hentning: `scripts/hent_levering.py`.
 
 **Facit (stage 02):** færdigt, godkendt og låst 2026-08-21.
 `src/andenside/facit.py` læser de 39 håndlavede RTF-filer og skriver fire
@@ -81,12 +86,18 @@ skrives ud. Selvtesten
 ti konstruerede forvanskninger, hvor svaret er kendt på forhånd, og opgør
 hvor stor en del af de indlagte fejl målingen faktisk finder igen.
 
-**Billedforberedelse (stage 04):** to snit, ét i hver kant af siden.
+**Billedforberedelse (stage 04):** færdig, godkendt og låst 2026-08-30.
+To snit, ét i hver kant af siden. Begge er kørt på alle 307 leverede sider
+(`scripts/beskaer_levering.py`) → `stages/04_billedforberedelse/output/levering_beskaaret/`.
+Fjernet i alt: 28-32 % i median. **4 af 307 mærket usikre.**
 
 *Falssiden* beskæres bånd for bånd (`src/andenside/skraa.py`): snitgrænsen
 følger falsen ned gennem siden i stedet for at være lodret, fordi siden
-krummer ind mod bindet og skriveren skrev helt ud. Alle 118 øvesider er
-beskåret, ingen usikre.
+krummer ind mod bindet og skriveren skrev helt ud. Falsen er dog praktisk
+talt en ret linje (5 px afvigelse i median), så `fjern_udskridende` kaster
+de bånd, der ikke ligger på flertallets linje, før snittet lægges — uden
+den kunne én gal måling trække snittet 400 px ind over skriften. Buffer
+0,5 %. 21 af 307 sider fik kastet bånd; de står i `output/fals_kvalitet.csv`.
 
 *Yderkanten* — den modsatte — renses af `src/andenside/yderkant.py`. Uden
 for vores side ligger enten bogsnittet (bogblokkens sammenpressede
@@ -98,12 +109,16 @@ bånd kan enes om, og som kan bevise, at den ligger i en **søm** — en
 fordybning i papiret. Snittet lægges på kantens ydre side, så ordender
 ikke klippes. Findes ingen kant med en rigtig søm, skæres siden ikke.
 Kontaktark: `scripts/yderkant_ark.py` (tilføj `--snit` for at se, hvad der
-fjernes); tal: `scripts/yderkant_maal.py`. **Ingen beskårne billeder er
-skrevet — det kræver go.**
+fjernes); tal: `scripts/yderkant_maal.py`. Kontaktarkene **toner det
+bortskårne** — fals rød, yderkant blå — i stedet for at tegne en streg oven
+på billedet: en streg dækker netop de bogstaver, der skal bedømmes.
 
-**Næste:** stage 05, første transskription. Alt er nu på plads til at måle
-et forsøg — facit, billeder og måleapparat. Der køres ingen modelkald, før
-stage 03's rapportformat er gennemgået og der er givet go.
+**Næste:** stage 05, første transskription. Facit, billeder og måleapparat
+er alle på plads. Piloten begynder på **5-10 sider** — det er dér, prompten
+formes, ikke en måling af beskæringen — på de ukomprimerede PNG i
+`levering_beskaaret/oeve/beskaarne/`. Stage 05 er blokeret på to ting:
+API-nøglen i projektets egen nøglefil, og et udtrykkeligt go til de første
+modelkald.
 
 ## Nøglefakta
 
