@@ -24,6 +24,17 @@ saa ingen senere kørsel kan komme til at blande de to maengder sammen.
   <ud>/<gruppe>/beskaarne/      de faerdige sider, én PNG pr. billede
   <ud>/<gruppe>/snit.csv        ét maaletal pr. side for begge snit
   <ud>/<gruppe>/kontaktark/     miniaturer 12 ad gangen til gennemsyn
+
+Kontaktarkene viser det HELE billede med det bortskaarne tonet roedt -- ikke
+kun det, der er tilbage. Lead paapegede 2026-08-30, at man ikke kan bedoemme
+et snit paa resultatet alene: er der skaaret for meget, ses det ikke, for
+det manglende er jo netop ikke i billedet laengere. Begge snit tones, saa
+falsen og yderkanten kan skelnes.
+
+Tonen laegges paa det fulde billede FOER beskaering. Yderkantens graense
+maales paa det falsbeskaarne billede og skal derfor forskydes tilbage: for
+recto klipper falssnittet fra venstre, saa forskydningen er snittets egen
+x; for verso klipper det fra hoejre, og forskydningen er nul.
 """
 
 from __future__ import annotations
@@ -39,9 +50,12 @@ from PIL import Image, ImageDraw, ImageFont
 ROD = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROD / "src"))
 
+import numpy as np  # noqa: E402
+
 from andenside.masterlist import load_masterlist, lookup  # noqa: E402
-from andenside.skraa import beskaer_langs_fals  # noqa: E402
-from andenside.yderkant import beskaer_ydre  # noqa: E402
+from andenside.skraa import beskaer_langs_fals, fals_graense  # noqa: E402
+from andenside.yderkant import beskaer_ydre, ydre_graense  # noqa: E402
+from andenside.bogryg import soegevindue  # noqa: E402
 
 LEVERING = ROD / "stages" / "01_datagrundlag" / "output" / "levering_2026-08"
 UD = ROD / "stages" / "04_billedforberedelse" / "output" / "levering_beskaaret"
@@ -66,6 +80,35 @@ def _skrifttype():
     return ImageFont.load_default()
 
 
+ROED_FALS = (255, 70, 70)
+ROED_YDRE = (70, 120, 255)
+
+
+def _tavle(img: Image.Image, fals: list[int], ydre: list[int],
+           forskydning: int, retning: str) -> Image.Image:
+    """Det fulde billede med begge bortskaarne omraader tonet.
+
+    Falsen toner roedt, yderkanten blaat, saa de to snit kan skelnes fra
+    hinanden i ét blik.
+    """
+    data = np.asarray(img.convert("RGB")).astype(float)
+    kol = np.arange(img.width)[None, :]
+    if fals:
+        g = np.asarray(fals)[:, None]
+        ude = (kol >= g) if retning == "fra_hoejre" else (kol < g)
+        data = np.where(ude[:, :, None],
+                        data * 0.55 + np.array(ROED_FALS, dtype=float)[None, None, :] * 0.45,
+                        data)
+    if ydre:
+        g = (np.asarray(ydre) + forskydning)[:, None]
+        # yderkanten ligger modsat falsen
+        ude = (kol > g) if retning == "fra_venstre" else (kol < g)
+        data = np.where(ude[:, :, None],
+                        data * 0.55 + np.array(ROED_YDRE, dtype=float)[None, None, :] * 0.45,
+                        data)
+    return Image.fromarray(data.astype(np.uint8), "RGB")
+
+
 def _beskaer_én(opgave: tuple[str, str]) -> dict:
     """Beskaerer ét billede i begge kanter. Koeres i sin egen proces.
 
@@ -83,12 +126,21 @@ def _beskaer_én(opgave: tuple[str, str]) -> dict:
     with Image.open(LEVERING / gruppe / f"{billede}.png") as img:
         img.load()
         foer_bredde = img.width
+        fals_g = fals_graense(img, side)
         efter_fals, m_fals = beskaer_langs_fals(img, side)
+        ydre_g = ydre_graense(efter_fals, side)
         efter_begge, m_ydre = beskaer_ydre(efter_fals, side)
+        retning = soegevindue(side, img.width).retning
+        forskydning = 0 if retning == "fra_hoejre" else (max(0, min(fals_g)) if fals_g else 0)
+        tavle = _tavle(img, fals_g, ydre_g, forskydning, retning)
 
     mappe = UD / gruppe / "beskaarne"
     mappe.mkdir(parents=True, exist_ok=True)
     efter_begge.save(mappe / f"{billede}.png", optimize=True)
+    tavle_mappe = UD / gruppe / "tavler"
+    tavle_mappe.mkdir(parents=True, exist_ok=True)
+    h = round(tavle.height * 640 / tavle.width)
+    tavle.resize((640, h)).save(tavle_mappe / f"{billede}.png", optimize=True)
 
     return {
         "billede": billede,
@@ -108,7 +160,7 @@ def _beskaer_én(opgave: tuple[str, str]) -> dict:
 def _kontaktark(poster: list[dict], gruppe: str, sti: Path, skrift) -> None:
     miniaturer = []
     for post in poster:
-        with Image.open(UD / gruppe / "beskaarne" / f"{post['billede']}.png") as img:
+        with Image.open(UD / gruppe / "tavler" / f"{post['billede']}.png") as img:
             img.load()
             h = round(img.height * MINIATURE_BREDDE / img.width)
             miniaturer.append(img.convert("RGB").resize((MINIATURE_BREDDE, h)))

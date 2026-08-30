@@ -241,3 +241,73 @@ def test_en_LODRET_fals_giver_en_naesten_konstant_graense():
     """
     graense = fals_graense(_skraa_fals(top_x=850, bund_x=850), _side(1))
     assert max(graense) - min(graense) <= 12
+
+
+# --- udskridende baand ---------------------------------------------------
+
+
+def _fals_med_spike(bredde: int = 1000, hoejde: int = 1200, x: int = 820,
+                    tykkelse: int = 40) -> Image.Image:
+    """En lige fals -- og ét baand, hvor noget andet moerkt ligger langt inde.
+
+    Det virkelige tilfaelde, maalt paa leveringen 2026-08-30: paa 9 af 307
+    sider fandt ALLE 24 baand en kant, men de laa ikke paa samme linje. Et
+    enkelt baand kunne pege 400 px inde paa siden, og fordi `fals_graense`
+    interpolerer frit mellem baandene, trak den ene maaling snittet med sig
+    og skar tvaers gennem teksten. `sikker` sagde ja, for den taeller kun,
+    om baandene fandt NOGET.
+    """
+    img = Image.new("L", (bredde, hoejde), HVID)
+    px = img.load()
+    for y in range(hoejde):
+        for dx in range(tykkelse):
+            px[x + dx, y] = SORT
+    # En moerk klat inde paa siden, kun i nogle faa baand. NB: den skal
+    # ligge INDEN FOR soegevinduet (de ydre 40 % af bredden), ellers ses
+    # den slet ikke, og proeven maaler ingenting.
+    # Klatten skal daekke et helt baand (~120 raekker) for at slaa falsen i
+    # baandets egen profil -- ellers vinder falsen, og proeven maaler intet.
+    for y in range(420, 700):
+        for dx in range(60):
+            px[640 + dx, y] = SORT
+    return img
+
+
+def test_et_udskridende_baand_traekker_ikke_snittet_med_sig():
+    """Den baerende test mod takkede snit.
+
+    Uden frasortering foelger graensen den enlige klat 400 px ind paa siden.
+    Falsen er maalt til at afvige hoejst 11 px fra en ret linje paa 90 % af
+    leveringens 307 sider, saa et baand, der peger 400 px vaek, er en fejl
+    -- ikke en krumning.
+    """
+    img = _fals_med_spike()
+    graense = fals_graense(img, _side(1))
+    assert graense
+    assert min(graense) > 760, (
+        f"snittet blev traukket ind paa siden af de faa baand med klatten: "
+        f"{min(graense)}-{max(graense)}"
+    )
+
+
+def test_en_side_med_uenige_baand_maerkes_usikker():
+    """Et maal, der siger ja til alt, er ikke et maal.
+
+    Paa leveringen stod alle 9 gale sider som `sikker=ja`, fordi kolonnen kun
+    taalte baand med et fund. Den skal ogsaa se paa, om de er ENIGE.
+    """
+    bredde, hoejde = 1000, 1200
+    img = Image.new("L", (bredde, hoejde), HVID)
+    px = img.load()
+    rng = __import__("random").Random(0)
+    # Kanten staar fast inden for hvert baand, men hopper mellem baandene --
+    # ellers udglattes den til ingenting, og hvert baand melder blot 'intet
+    # fund'. Proeven skal ramme det tilfaelde, hvor ALLE baand finder noget,
+    # og de bare ikke er enige.
+    for blok in range(0, hoejde, 120):
+        x0 = rng.randrange(620, 900)
+        for y in range(blok, min(blok + 120, hoejde)):
+            for dx in range(40):
+                px[x0 + dx, y] = SORT
+    _, maaling = beskaer_langs_fals(img, _side(1))
+    assert not maaling.sikker, "en side uden nogen ret fals blev erklaeret sikker"

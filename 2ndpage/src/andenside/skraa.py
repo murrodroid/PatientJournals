@@ -34,6 +34,12 @@ from andenside.masterlist import Side
 ANTAL_BAAND = 24       # antal maalepunkter ned gennem siden
 OVERLAP = 2.5          # hvert vindues hoejde, malt i skridt mellem punkterne
 MARGEN = 0.03          # top og bund udelades -- affotograferingens skygge
+LINJE_TOLERANCE = 25   # px et baand maa afvige fra flertallets rette linje
+# 25, ikke mindre: maalt paa leveringens 307 sider afviger falsen 5 px fra
+# en ret linje i median og 11 px ved 90-percentilen. En tolerance paa 25
+# rummer altsaa al virkelig krumning med god margen. De sider, lead kaldte
+# gaaet galt, afveg 245-412 px -- ti gange for meget til at vaere en fals.
+MIND_ENIGE = 8         # saa mange baand skal blive tilbage, ellers er siden usikker
 BUFFER_ANDEL = 0.02    # flyttes vaek fra vores egen tekst
 # 2%, ikke 1%: maalt paa 273104_001639, hvor skriften loeber ud i papirets
 # krumning, redder 1% ikke de nederste linjer. Den baandvise graense kan kun
@@ -52,11 +58,18 @@ class SkraaBeskaering:
     baand_med_kant: int
     baand_i_alt: int
 
+    afvigelse_px: int = 0   # stoerste afstand fra et baand til den rette fals
+
     @property
     def sikker(self) -> bool:
-        # Under halvdelen af baandene fandt en fals -> graensen er gaettet
-        # ud fra for lidt, og siden skal ses efter med oejnene.
-        return self.baand_med_kant * 2 >= self.baand_i_alt
+        # To krav, ikke ét. Det gamle taalte kun, om baandene fandt NOGET,
+        # og sagde derfor ja til alle 9 sider, hvor snittet paa leveringen
+        # skar tvaers gennem teksten -- dér fandt alle 24 baand en kant, de
+        # var bare ikke enige om hvor. Baandene skal ogsaa ligge paa samme
+        # rette linje.
+        return (self.baand_med_kant * 2 >= self.baand_i_alt
+                and self.baand_med_kant >= MIND_ENIGE
+                and self.afvigelse_px <= LINJE_TOLERANCE)
 
 
 def _graatoner(img: Image.Image) -> "np.ndarray":
@@ -123,6 +136,50 @@ def baandkanter(
     return ud
 
 
+def fjern_udskridende(
+    kanter: list[tuple[int, int | None]], *, tolerance: int = LINJE_TOLERANCE,
+    mindst: int = MIND_ENIGE,
+) -> tuple[list[tuple[int, int | None]], int]:
+    """Kaster de baand, der ikke ligger paa flertallets rette linje.
+
+    Falsen er maalt til at afvige hoejst 11 px fra en ret linje paa 90 % af
+    leveringens 307 sider. Et baand, der peger 400 px vaek, har altsaa ikke
+    fundet falsen, men noget andet moerkt -- en klat, en skygge, en
+    fingerkant. Interpolationen i `fals_graense` spaender frit mellem
+    baandene, saa ét saadant baand traekker snittet med sig og skaerer
+    tvaers gennem siden. Det skete paa 9 af leveringens 307 sider.
+
+    Den vaerste kastes ad gangen og linjen laegges paa ny, indtil alle
+    tilbagevaerende ligger inden for `tolerance`. Ét gennemloeb ville ikke
+    raekke: en enkelt vild maaling traekker selve linjen skaev, saa flere
+    rigtige baand ser ud til at afvige.
+
+    Returnerer `(kanter, stoerste afvigelse tilbage)`.
+    """
+    fundne = [(y, x) for y, x in kanter if x is not None]
+    if len(fundne) < 3:
+        return kanter, 0
+
+    beholdt = dict(fundne)
+    while len(beholdt) > mindst:
+        ys = np.array(list(beholdt), dtype=float)
+        xs = np.array(list(beholdt.values()), dtype=float)
+        haeldning, skaering = np.polyfit(ys, xs, 1)
+        afvig = np.abs(xs - (haeldning * ys + skaering))
+        if afvig.max() <= tolerance:
+            break
+        del beholdt[int(ys[int(afvig.argmax())])]
+
+    ys = np.array(list(beholdt), dtype=float)
+    xs = np.array(list(beholdt.values()), dtype=float)
+    if len(beholdt) >= 3:
+        haeldning, skaering = np.polyfit(ys, xs, 1)
+        rest = int(round(float(np.abs(xs - (haeldning * ys + skaering)).max())))
+    else:
+        rest = 0
+    return [(y, x if y in beholdt else None) for y, x in kanter], rest
+
+
 def fals_graense(
     img: Image.Image, side: Side, *, antal: int = ANTAL_BAAND,
     buffer_andel: float = BUFFER_ANDEL,
@@ -137,6 +194,7 @@ def fals_graense(
     # saerbehandling: interpolationen nedenfor spaender hen over dem, og
     # raekker uden for yderste kendte baand faar dets vaerdi.
     raa = baandkanter(img, side, antal=antal) if kanter is None else kanter
+    raa, _ = fjern_udskridende(raa)
     kanter = [(y, x) for y, x in raa if x is not None]
     if not kanter:
         return []
@@ -168,6 +226,7 @@ def beskaer_langs_fals(
     # funktion baade baandkanter og fals_graense, og sidstnaevnte beregnede
     # dem forfra -- altsaa tre gange det samme arbejde pr. side.
     kanter = baandkanter(img, side, antal=antal)
+    kanter, afvigelse = fjern_udskridende(kanter)
     med_kant = sum(1 for _, x in kanter if x is not None)
     graense = fals_graense(img, side, antal=antal, buffer_andel=buffer_andel,
                            kanter=kanter)
@@ -177,6 +236,7 @@ def beskaer_langs_fals(
             billede=side.image_name, recto_verso=side.recto_verso,
             bredde_foer=img.width, bredde_efter=img.width,
             haeldning_px=0, baand_med_kant=0, baand_i_alt=len(kanter),
+            afvigelse_px=afvigelse,
         )
         return img.copy(), maaling
 
