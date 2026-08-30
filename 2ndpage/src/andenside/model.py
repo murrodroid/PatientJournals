@@ -34,6 +34,8 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from andenside.skemaer import tekst_af_svar
+
 # Projektets EGEN noeglefil, bevidst adskilt fra andre noeglefiler paa
 # maskinen. Ligger uden for repoet, saa et uagtsomt `git add -A` ikke kan
 # publicere den.
@@ -185,16 +187,39 @@ def transskriber(
     *,
     model: str = "gemini-3.1-pro-preview",
     temperatur: float = 0.0,
+    skema: type[BaseModel] | None = TextPage,
     noegle: str | None = None,
 ) -> tuple[str, dict]:
     """Sender ét billede til modellen og returnerer `(tekst, raat_svar)`.
 
     `tekst` er linjerne samlet, som maaleapparatet vil have dem. `raat_svar`
-    er skemaets egen struktur -- den gemmes i bogholderiet, saa margendatoer
-    og linjeopdeling ikke gaar tabt, bare fordi maalingen ikke bruger dem.
+    er svarets egen struktur -- den gemmes i bogholderiet, saa margendatoer og
+    linjeopdeling ikke gaar tabt, bare fordi maalingen ikke bruger dem.
+
+    `skema=None` sender INTET skema og beder om ren tekst. Det er
+    `ren_tekst`-varianten i stage 06's forsoeg: litteraturen siger, at et
+    skema forringer fri generering, og uden den variant kan vi ikke se,
+    hvilken retning mere struktur traekker tallet. Svaret pakkes da som
+    `{"ren_tekst": ...}`, saa bogholderiet har samme form for alle varianter.
+
+    Beskrivelserne i `skema` er IKKE dokumentation -- Gemini laegger dem ind i
+    det skema, modellen ser, saa de virker som prompttekst. Skift af skema er
+    derfor en aendring af prompten og skal behandles som en.
     """
     from google import genai
     from google.genai import types
+
+    if skema is None:
+        opsaetning = types.GenerateContentConfig(
+            temperature=temperatur,
+            response_mime_type="text/plain",
+        )
+    else:
+        opsaetning = types.GenerateContentConfig(
+            temperature=temperatur,
+            response_mime_type="application/json",
+            response_schema=skema,
+        )
 
     klient = genai.Client(api_key=noegle or hent_noegle())
     svar = klient.models.generate_content(
@@ -206,11 +231,40 @@ def transskriber(
             ),
             prompt,
         ],
-        config=types.GenerateContentConfig(
-            temperature=temperatur,
-            response_mime_type="application/json",
-            response_schema=TextPage,
-        ),
+        config=opsaetning,
     )
+
+    if skema is None:
+        raat = {"ren_tekst": _rens_fri_tekst(svar.text)}
+        return raat["ren_tekst"], raat
+
     raat = json.loads(svar.text)
-    return tekst_af_sider(raat["page_lines"]), raat
+    return tekst_af_svar(raat), raat
+
+
+# ---------------------------------------------------------------------------
+# Ren tekst uden skema
+# ---------------------------------------------------------------------------
+
+# Prompten beder udtrykkeligt om ren tekst uden hegn, men en model foelger ikke
+# altid. Bliver et markdown-hegn staaende, taeller ```-linjerne som tekst,
+# modellen har digtet, og varianten straffes for noget, der ikke er en
+# laesefejl. Det er stage 03's egen advarsel om "Her er transskriptionen:",
+# som skemasvaret hidtil har gjort umulig -- den bliver relevant igen her.
+HEGN = "```"
+
+
+def _rens_fri_tekst(tekst: str) -> str:
+    """Fjerner et markdown-hegn omkring svaret, hvis modellen lagde et paa.
+
+    Kun et hegn, der omslutter HELE svaret, fjernes. Et hegn midt i teksten
+    roeres ikke -- det ville vaere noget, modellen skrev, og det skal med i
+    maalingen som det, det er.
+    """
+    strimlet = tekst.strip()
+    if not strimlet.startswith(HEGN):
+        return strimlet
+    linjer = strimlet.splitlines()
+    if len(linjer) < 2 or not linjer[-1].strip().startswith(HEGN):
+        return strimlet
+    return "\n".join(linjer[1:-1]).strip()

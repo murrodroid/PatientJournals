@@ -42,11 +42,12 @@ sys.path.insert(0, str(ROD / "src"))
 
 from andenside.koersel import Opsaetning, gem_koersel  # noqa: E402
 from andenside.model import transskriber  # noqa: E402
+from andenside.skemaer import SKEMAER  # noqa: E402
 from andenside.vaern import sikr_oevemaengde  # noqa: E402
 
 STAGE05 = ROD / "stages" / "05_foerste_transskription"
 UD = STAGE05 / "output"
-PROMPTFIL = STAGE05 / "prompts" / "textpage_uaendret.md"
+PROMPTER = STAGE05 / "prompts"
 
 # De faerdige snit ligger i stage 04, ikke her. Stage 05 laaner dem; den
 # laver ikke sine egne. Gruppen `proeve_LAAST` er med vilje IKKE med -- de
@@ -69,13 +70,26 @@ PRIS_PR_KALD_USD = 2_000 / 1e6 * 2.0 + 1_500 / 1e6 * 12.0
 USD_TIL_DKK = 6.9
 
 
-def _prompt() -> str:
-    """Selve promptteksten ud af den menneskelaesbare promptfil."""
-    tekst = PROMPTFIL.read_text(encoding="utf-8")
+def _promptfil(navn: str) -> Path:
+    sti = PROMPTER / f"{navn}.md"
+    if not sti.exists():
+        muligheder = ", ".join(sorted(p.stem for p in PROMPTER.glob("*.md")))
+        raise SystemExit(f"ingen promptfil {navn!r}. Findes: {muligheder}")
+    return sti
+
+
+def _prompt(navn: str) -> str:
+    """Selve promptteksten ud af den menneskelaesbare promptfil.
+
+    Filen er skrevet til et menneske: begrundelsen staar udenom, og selve
+    teksten staar i det ene kodehegn. Det er med vilje -- en prompt uden sin
+    begrundelse bliver aendret af den naeste, der synes noget andet.
+    """
+    tekst = _promptfil(navn).read_text(encoding="utf-8")
     foer, _, rest = tekst.partition("```")
     krop, _, _ = rest.partition("```")
     if not krop.strip():
-        raise ValueError(f"fandt ingen prompttekst i {PROMPTFIL}")
+        raise ValueError(f"fandt ingen prompttekst i {_promptfil(navn)}")
     return krop.strip()
 
 
@@ -161,6 +175,10 @@ def _sider(variant: str, antal: int | None,
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--variant", choices=sorted(KILDER), default="beskaaret")
+    p.add_argument("--prompt", default="textpage_uaendret",
+                   help="navn paa promptfilen i prompts/ (uden .md)")
+    p.add_argument("--skema", default="bar", choices=sorted(SKEMAER),
+                   help="skemavariant; `ren_tekst` sender intet skema")
     p.add_argument("--antal", type=int, default=8,
                    help="antal sider, spredt ud over svaerhedsgraden "
                         "(0 = alle 15)")
@@ -172,7 +190,8 @@ def main() -> None:
                    help="udfør kaldene. Uden dette flag sker der intet.")
     args = p.parse_args()
 
-    prompt = _prompt()
+    prompt = _prompt(args.prompt)
+    skema = SKEMAER[args.skema]
     kun = [n.strip() for n in args.sider.split(",") if n.strip()]
     sider = _sider(args.variant, args.antal or None, kun or None)
     if not sider:
@@ -181,7 +200,10 @@ def main() -> None:
 
     print(f"\nVariant:      {args.variant}")
     print(f"Model:        {args.model} (temperatur {args.temperatur})")
-    print(f"Prompt:       {PROMPTFIL.relative_to(ROD)} ({len(prompt)} tegn)")
+    print(f"Prompt:       {_promptfil(args.prompt).relative_to(ROD)} "
+          f"({len(prompt)} tegn)")
+    print(f"Skema:        {args.skema}"
+          + ("  (intet skema sendes)" if skema is None else ""))
     print(f"Sider:        {len(sider)}")
     print(f"Prisoverslag: ca. {pris:.2f} USD / {pris * USD_TIL_DKK:.0f} kr\n")
     for navn, sti in sider:
@@ -193,11 +215,12 @@ def main() -> None:
 
     opsaetning = Opsaetning(
         model=args.model,
-        promptversion="textpage-uaendret",
+        promptversion=f"{args.prompt}/{args.skema}",
         prompt=prompt,
         variant=args.variant,
         temperatur=args.temperatur,
-        noter=f"pilot, {len(sider)} af 15 sider, én pr. bind",
+        noter=f"pilot, {len(sider)} af 15 sider, én pr. bind, "
+              f"prompt={args.prompt}, skema={args.skema}",
     )
 
     svar: dict[str, str] = {}
@@ -207,7 +230,8 @@ def main() -> None:
     for nummer, (navn, sti) in enumerate(sider, start=1):
         try:
             tekst, struktur = transskriber(
-                sti, prompt, model=args.model, temperatur=args.temperatur
+                sti, prompt, model=args.model, temperatur=args.temperatur,
+                skema=skema,
             )
         except Exception as fejl:                      # noqa: BLE001
             # En enkelt fejlet side maa ikke koste de foregaaende svar.

@@ -102,11 +102,35 @@ def test_toerloeb_viser_et_prisoverslag(script, monkeypatch, capsys):
 
 
 def test_prompten_hentes_ud_af_promptfilen(script):
-    prompt = script._prompt()
+    prompt = script._prompt("textpage_uaendret")
     assert "expert archivist" in prompt
     # Den menneskelaesbare indramning omkring kodeblokken maa ikke med.
     assert "Kollegaens egen prompt" not in prompt
     assert not prompt.startswith("#")
+
+
+def test_alle_promptfiler_kan_laeses_og_giver_ren_prompttekst(script):
+    """Hver variant skal kunne hentes, og indramningen skal blive udenfor.
+
+    Promptfilerne er skrevet til et menneske: begrundelsen staar rundt om
+    selve teksten. Slipper indramningen med ud, sender vi vores egne noter
+    til modellen som en del af prompten -- og maaler saa noget andet, end vi
+    tror.
+    """
+    filer = sorted(p.stem for p in script.PROMPTER.glob("*.md"))
+    assert len(filer) >= 3, filer
+    for navn in filer:
+        prompt = script._prompt(navn)
+        assert prompt and not prompt.startswith("#"), navn
+        assert "```" not in prompt, navn
+        assert "Teksten" not in prompt, navn
+
+
+def test_ukendt_promptnavn_fejler_med_en_liste_over_dem_der_findes(script):
+    """En stavefejl i et variantnavn maa ikke koere en tilfaeldig prompt."""
+    with pytest.raises(SystemExit) as fejl:
+        script._prompt("findes_ikke")
+    assert "textpage_uaendret" in str(fejl.value)
 
 
 def test_ukendt_variant_afvises_af_argumentparseren(script, monkeypatch):

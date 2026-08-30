@@ -40,6 +40,7 @@ sys.path.insert(0, str(ROD / "src"))
 from andenside.koersel import find_koersler, laes_koersel  # noqa: E402
 from andenside.maal import maal_saet  # noqa: E402
 from andenside.rapport import skriv_gab, skriv_rapport  # noqa: E402
+from andenside.skemaer import tekst_af_svar  # noqa: E402
 from andenside.vaern import sikr_oevemaengde  # noqa: E402
 
 FACIT = ROD / "stages" / "02_facit" / "output" / "facit.jsonl"
@@ -57,6 +58,35 @@ def _facit_for(navne: set[str]) -> list[dict]:
     poster = [json.loads(l) for l in FACIT.read_text(encoding="utf-8").splitlines()]
     return sorted((p for p in poster if p["image_name"] in navne),
                   key=lambda p: p["image_name"])
+
+
+def _svar_med_metadata(mappe: Path, svar: dict[str, str]) -> dict[str, str] | None:
+    """Samme svar, men med margendatoen foldet ind i linjens tekst.
+
+    Kollegaens app laegger datoen i `metadata`; facit har den inline. En
+    variant, der samler sine egne dele (`linjefelter`), faar den altsaa med,
+    mens `beskrevet` taber den -- og saa vinder den foerste delvist paa
+    udfoldningen i stedet for paa skemaet. Her foldes det GEMTE svar ud paa
+    begge maader uden et nyt modelkald, saa begge tal kan staa side om side.
+
+    Returnerer None, naar varianten ikke har et metadata-felt at folde ind --
+    saa er der intet at sammenligne.
+    """
+    raa_fil = mappe / "raa_skemasvar.json"
+    if not raa_fil.exists():
+        return None
+    raa = json.loads(raa_fil.read_text(encoding="utf-8"))
+    if not any("metadata" in l for d in raa.values()
+               for l in d.get("page_lines", [])):
+        return None
+    anderledes = {}
+    for navn, d in raa.items():
+        tekst = tekst_af_svar(d, med_metadata=True)
+        if tekst != svar.get(navn):
+            anderledes[navn] = tekst
+    if not anderledes:
+        return None
+    return {**svar, **anderledes}
 
 
 def maal_en(mappe: Path) -> dict:
@@ -86,6 +116,15 @@ def maal_en(mappe: Path) -> dict:
         encoding="utf-8")
     (mappe / "gab.csv").write_text(skriv_gab(saet), encoding="utf-8")
 
+    # Samme svar, foldet ud med margendatoen inde i teksten. Koster intet
+    # ekstra kald og gør, at varianter med og uden `metadata` kan stilles op
+    # mod hinanden uden at udfoldningen afgør sammenligningen.
+    med_md = _svar_med_metadata(mappe, svar)
+    cer_med_md = ""
+    if med_md is not None:
+        saet_md = maal_saet(poster, med_md)
+        cer_med_md = _andel(saet_md.fladet["raa"], "tegn")
+
     return {
         "koersel": mappe.name,
         "model": opsaetning.model,
@@ -98,6 +137,7 @@ def maal_en(mappe: Path) -> dict:
         "cer_arbejdstal": _andel(saet.fladet["arbejdstal"], "tegn"),
         "wer_raa": _andel(saet.fladet["raa"], "ord"),
         "cer_raa_streng": _andel(saet.rene["raa"], "tegn"),
+        "cer_raa_med_metadata": cer_med_md,
         "daekning": f"{saet.daekning:.4f}",
         "daekning_streng": f"{saet.rene_daekning:.4f}",
         "linjedaekning": f"{saet.linjedaekning:.4f}",
@@ -141,6 +181,9 @@ def main() -> None:
               f"(dækning {float(r['daekning_streng']):.1%})")
         print(f"  ordfejl raa         {float(r['wer_raa']):.2%}")
         print(f"  linjedækning        {float(r['linjedaekning']):.1%}")
+        if r["cer_raa_med_metadata"]:
+            print(f"  tegnfejl m. margendato "
+                  f"{float(r['cer_raa_med_metadata']):.2%}")
         print(f"  rapport  {(mappe / 'rapport.md').relative_to(ROD)}")
 
     if len(raekker) > 1:
