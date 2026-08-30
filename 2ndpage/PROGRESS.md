@@ -18,6 +18,7 @@ Videre til næste stage kun efter menneskelig gennemgang.
 - [2026-08-29](diary/2026-08-29.md) — Måleapparat efterprøvet mod leads domme; svag-bekræftelsen var fejlen og er fjernet; forsøg A valgt
 - [2026-08-30](diary/2026-08-30.md) — Leveringen hentet (307 PNG); falssnittet gik galt på 9 sider og er rettet; buffer sat til 0,5 %
 - [2026-08-30 senere](diary/2026-08-30.md) — Lead godkendte de 27 kontaktark; stage 04 låst; piloten begynder på 5-10 sider
+- [2026-08-30 aften](diary/2026-08-30-aften.md) — **De første modelkald i projektet**: 8 sider, to modeller, 8-9 % tegnfejl; måleapparatet koblet på en kørsel
 
 ## Fase 0 — Kortlægning og plan (afsluttet 2026-08-18)
 
@@ -332,24 +333,44 @@ uanset hvad litteraturen ellers siger.
 *(splittet ud af tidligere "05 Metodeforsøg" 2026-08-18 — fin opdeling af
 selve læse-implementeringen, samme princip som resten af planen)*
 
-- [ ] **Første skridt: 5-10 sider** (leads valg 2026-08-30, beslutning 52) —
+- [x] **Første skridt: 5-10 sider** (leads valg 2026-08-30, beslutning 52) —
       piloten er dér, prompten formes, ikke en måling af beskæringen. Kilde:
       de ukomprimerede PNG i
       `stages/04_billedforberedelse/output/levering_beskaaret/oeve/beskaarne/`,
       så komprimering ikke er en åben mistanke ved det første tal.
-- [ ] Forsøg 1: kun billedforberedelsen varieres (`gemini-3.1-pro-preview`,
-      fast prompt)
-- [ ] Bogholderi: rå svar + fuld opsætning gemmes pr. kørsel
+- [x] **De første modelkald er kørt** (2026-08-30, leads go). To kørsler à
+      8 sider, samme sider og samme prompt:
+
+      | | `gemini-3.1-pro-preview` | `gemini-3.7-flash` |
+      |---|---|---|
+      | Tegnfejl, rå | 8,62 % | 9,26 % |
+      | Dækning | 91,8 % | 90,5 % |
+      | Tegnfejl, streng | 8,31 % | 8,94 % |
+      | Ordfejl, rå | 26,65 % | 26,53 % |
+      | Linjedækning | 90,1 % | 87,9 % |
+
+      **Forskellen er 28 tegn ud af 4.350 — otte sider kan ikke skille de to
+      modeller.** Tallene er desuden GULVE: målingen finder ca. 93 % af de
+      fejl, der faktisk er der (stage 03's selvtest).
+- [x] **Modelnavnet rettet**: `gemini-3.1-pro` findes ikke på nøglen. Alle
+      otte første kald faldt på 404. Rigtigt navn: `gemini-3.1-pro-preview`.
+      **En preview-model kan skifte under os** — åben risiko for
+      reproducerbarheden, noteret, ikke løst.
+- [x] **`scripts/maal_koersel.py`**: fører en gemt kørsel gennem stage 03's
+      måleapparat og skriver `rapport.md` + `gab.csv` ved siden af svarene.
+      `--alle` skriver en samlet `oversigt.csv`.
+- [x] Bogholderi: rå svar + fuld opsætning gemmes pr. kørsel
+- [x] **Målt, ikke gættet**: `aa`-instruktionen koster næsten intet på disse
+      sider. Facit har 8 `å`, modellen skrev 3 — højst en håndfuld tegn, ikke
+      forklaringen på de 375.
+- [ ] Forsøg 1: kun billedforberedelsen varieres — `helt_opslag` mod
+      `beskaaret` på samme sider er ikke kørt endnu
 - [ ] **Ingen fuld kørsel uden leads go**
 - [ ] **Gennemgang ved lead** — er beskæringen god nok til at gå videre?
-
-**Blokeret på to ting, begge leads:**
-
-- [ ] API-nøgle i `C:\Workndpage_keys.json` (feltnavn skal indeholde
-      `gemini`, `genai` eller `google`). Indholdet læses aldrig; tjek med
-      `hent_noegle()`.
-- [ ] Leads go til de første modelkald. **Der er endnu ikke kørt ét eneste
-      modelkald i projektet.**
+- [ ] **Hvor mange sider skal der til for at skille to modeller?** Otte er
+      for få. Spørgsmålet er ikke besvaret.
+- [ ] **Chandra kan ikke køre lokalt**: maskinens GPU har 6 GB, Chandra
+      anbefaler 16 GB+. Afventer leads valg om anden vej.
 
 **Åbent, som ikke lukkede med stage 04:** webp mod PNG i fuld skala. Ved
 5-10 sider er filstørrelsen ligegyldig; ved en fuld kørsel er de 173 PNG
