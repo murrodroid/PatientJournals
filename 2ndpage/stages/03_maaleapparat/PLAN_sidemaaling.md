@@ -290,6 +290,67 @@ fra `orden.py`), og de værste sider.
   `fuldside` bruges i virkeligheden i linje 226, 229 og 238. Kortlæggerens
   øvrige linjenumre er derfor ikke efterprøvet og skal slås efter ved brug.
 
+## Kan testene køre hurtigere? (målt 2026-08-30)
+
+Hele pakken tager 67 sekunder. Den er kørt et tocifret antal gange på én dag,
+så det er ikke pynt at gøre noget ved. **Målt** med `pytest --durations=12`,
+ikke gættet:
+
+| | |
+|---|---|
+| Hele pakken | 67 s |
+| De 11 langsomste tests (alle billedbaserede) | ~57 s |
+| Den enkeltværste, `test_soem_gulvet_ligger_under_alle_godkendte_snit` | 22,6 s |
+
+### Årsagen er ikke billederne — det er masterlisten
+
+`load_masterlist()` læser en CSV på **47 MB med 570.519 rækker**, og den
+genindlæses fra bunden ved hvert eneste kald: målt 2,3 s første gang, 3,1 s
+anden gang. Ingen cache.
+
+`tests/test_yderkant_rigtige_billeder.py` kalder den 12 gange — seks
+parametriserede tests plus seks gennemløb i løkketesten, som behandler
+nøjagtig de samme seks sider én gang til. Cirka **36 af de 67 sekunder er ren
+genindlæsning af den samme fil**.
+
+### Forslag, i den rækkefølge de betaler sig
+
+1. **`@lru_cache` på `load_masterlist()`.** Én linje. Efterprøvet: ingen
+   kalder muterer det returnerede opslag (den eneste `index[...]` er et
+   opslag inde i `lookup`), så cachen kan ikke forgifte nogen. Forventet
+   gevinst: langt størstedelen af de 36 sekunder.
+   Bonus: **tre scripts har hver sin private omgåelse** af netop dette
+   (`_INDEX`-globaler i `beskaer_alle.py`, `beskaer_levering.py` og
+   `fals_kvalitet.py`). De kan falde bort bagefter — samme løsning skrevet
+   tre steder, fordi den manglede ét sted.
+2. **Cache `_graense_og_soem()` pr. side i testfilen.** De seks sider
+   behandles to gange. En `lru_cache` fjerner den ene omgang.
+3. **Parallelkørsel.** Maskinen har 22 kerner; `pytest-xdist` med `-n auto`
+   ville dele arbejdet. Kræver en ny udviklingsafhængighed i et miljø, hvor
+   der med vilje kun er numpy og PIL — og gevinsten er begrænset af den
+   enkeltværste test (Amdahls lov). **Tag punkt 1 og 2 først**; er pakken
+   nede omkring 20 sekunder, er dette formentlig ikke besværet værd.
+4. **Del pakken op.** Mærk billedtestene (`@pytest.mark.billeder`) og lad
+   dem være fra som standard, med hele pakken før commit. Giver en hurtig
+   inderste løkke, men indfører en risiko for, at nogen glemmer at køre
+   det hele. Kun værd at overveje, hvis 1-3 ikke rækker.
+
+### Om at vektorisere: pas på
+
+Et glidende vindue over båndene med kumulative summer i stedet for en løkke
+er en oplagt tanke, og den kan være rigtig i selve detektionskoden. Men
+projektet har allerede prøvet den slags én gang: **vektorisering af
+linjesøgningen gjorde den LANGSOMMERE** (0,5 → 0,7 s pr. side), fordi
+tabellerne er 24×5, og numpys kaldsomkostning er større end regnestykket
+(dagbog 2026-08-29). Mål før og efter, hver gang — og husk at gevinsten her
+efter alt at dømme ligger i CSV-indlæsningen, ikke i billedbehandlingen.
+
+### Ikke gjort
+
+Ingen af punkterne er udført. Punkt 1 rører `masterlist.py`, som hører til
+den låste stage 01/04-kode, og bør besluttes særskilt frem for at glide med
+som en sidegevinst i en måleapparats-ombygning.
+
 ## Hvad der IKKE er i planen
 
 - Ingen ændring i facit (stage 02 er låst og urørt).
