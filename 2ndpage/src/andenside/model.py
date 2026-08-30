@@ -1,4 +1,4 @@
-"""Modellaget: kaldet til gemini-3.1-pro og oversaettelsen af svaret.
+"""Modellaget: kaldet til gemini-3.1-pro-preview og oversaettelsen af svaret.
 
 Projektet afleverer en prompt og et skema til kollegaens app -- ikke
 koerselskode. Det her er derfor med vilje tyndt: nok til at maale, om prompten
@@ -183,7 +183,7 @@ def transskriber(
     billede: Path,
     prompt: str,
     *,
-    model: str = "gemini-3.1-pro",
+    model: str = "gemini-3.1-pro-preview",
     temperatur: float = 0.0,
     noegle: str | None = None,
 ) -> tuple[str, dict]:

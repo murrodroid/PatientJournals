@@ -19,6 +19,18 @@ udtrykkeligt om det 2026-08-30 for at kunne se snittene efter.
 Resultatet lægges alligevel i sin EGEN mappe, og maalefilen holdes adskilt,
 saa ingen senere kørsel kan komme til at blande de to maengder sammen.
 
+## De ti selvhentede sider
+
+Gruppen `selvhentet` er de oevesider, vi hentede selv via kildeviseren, og
+som ikke kom med i kollegaens levering (de ti under `273104_001637`-`001646`).
+De findes kun som webp. De skaeres med praecis samme kode som resten og
+skrives som PNG, saa alt materiale har samme format -- men **billedpunkterne
+har vaeret gennem webp-komprimering én gang**, og det kan en PNG ikke lave om
+paa. Formatet bliver ens; kvaliteten bliver det ikke.
+
+Gruppen er defineret ved at traekke leveringen fra oevemaengden, ikke ved en
+liste i koden, saa den toemmer sig selv, hvis de ti sider senere leveres.
+
 ## Hvad der skrives
 
   <ud>/<gruppe>/beskaarne/      de faerdige sider, én PNG pr. billede
@@ -58,9 +70,12 @@ from andenside.yderkant import beskaer_ydre, ydre_graense  # noqa: E402
 from andenside.bogryg import soegevindue  # noqa: E402
 
 LEVERING = ROD / "stages" / "01_datagrundlag" / "output" / "levering_2026-08"
+OEVE_BILLEDER = ROD / "stages" / "01_datagrundlag" / "output" / "oeve_billeder"
 UD = ROD / "stages" / "04_billedforberedelse" / "output" / "levering_beskaaret"
 
-GRUPPER = ("oeve", "ekstra_uden_facit", "proeve_LAAST")
+LEVEREDE_GRUPPER = ("oeve", "ekstra_uden_facit", "proeve_LAAST")
+SELVHENTET = "selvhentet"
+GRUPPER = LEVEREDE_GRUPPER + (SELVHENTET,)
 MINIATURE_BREDDE = 300
 PR_ARK = 12
 SOEJLER = 4
@@ -109,6 +124,31 @@ def _tavle(img: Image.Image, fals: list[int], ydre: list[int],
     return Image.fromarray(data.astype(np.uint8), "RGB")
 
 
+def _kildefil(gruppe: str, billede: str) -> Path:
+    """Stien til raabilledet. Kun `selvhentet` ligger som webp."""
+    if gruppe == SELVHENTET:
+        return OEVE_BILLEDER / f"{billede}.webp"
+    return LEVERING / gruppe / f"{billede}.png"
+
+
+def _billeder_i(gruppe: str) -> list[str]:
+    """Billed-id'erne i en gruppe.
+
+    `selvhentet` har ingen mappe for sig. Den er defineret som de oevesider,
+    vi hentede selv via kildeviseren, og som IKKE kom med i leveringen --
+    udregnet ved at trække leveringen fra, ikke ved en liste i koden, saa
+    gruppen foelger med af sig selv, hvis leveringen senere udvides.
+    """
+    if gruppe != SELVHENTET:
+        kilde = LEVERING / gruppe
+        return sorted(p.stem for p in kilde.glob("*.png")) if kilde.exists() else []
+
+    leveret = {p.stem for g in LEVEREDE_GRUPPER
+               for p in (LEVERING / g).glob("*.png")}
+    return sorted(p.stem for p in OEVE_BILLEDER.glob("*.webp")
+                  if p.stem not in leveret)
+
+
 def _beskaer_én(opgave: tuple[str, str]) -> dict:
     """Beskaerer ét billede i begge kanter. Koeres i sin egen proces.
 
@@ -123,7 +163,7 @@ def _beskaer_én(opgave: tuple[str, str]) -> dict:
         index = _INDEX = load_masterlist()
 
     side = lookup(billede, index)
-    with Image.open(LEVERING / gruppe / f"{billede}.png") as img:
+    with Image.open(_kildefil(gruppe, billede)) as img:
         img.load()
         foer_bredde = img.width
         fals_g = fals_graense(img, side)
@@ -188,11 +228,10 @@ def _kontaktark(poster: list[dict], gruppe: str, sti: Path, skrift) -> None:
 
 
 def koer_gruppe(gruppe: str, kerner: int, skrift) -> list[dict]:
-    kilde = LEVERING / gruppe
-    if not kilde.exists():
-        print(f"  {gruppe}: mappen findes ikke, springes over")
+    billeder = _billeder_i(gruppe)
+    if not billeder:
+        print(f"  {gruppe}: ingen billeder, springes over")
         return []
-    billeder = sorted(p.stem for p in kilde.glob("*.png"))
     print(f"\n=== {gruppe}: {len(billeder)} sider paa {kerner} kerner ===", flush=True)
 
     raekker: list[dict] = []

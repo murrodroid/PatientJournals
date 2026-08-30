@@ -21,7 +21,7 @@ allerede har målt på (Humphries m.fl.).
 
 ## Process
 
-1. Model og prompt holdes fast: `gemini-3.1-pro` og kollegaens eksisterende
+1. Model og prompt holdes fast: `gemini-3.1-pro-preview` og kollegaens eksisterende
    `textpage`-prompt, let tilpasset til dansk hospitalsmateriale.
 2. Sammenlign hele opslag mod stage 04's beskårne sider mod facit.
 3. Alle kørsler sker på **øvemængden**. Den låste prøvemængde røres først,

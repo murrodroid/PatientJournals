@@ -337,7 +337,8 @@ selve læse-implementeringen, samme princip som resten af planen)*
       de ukomprimerede PNG i
       `stages/04_billedforberedelse/output/levering_beskaaret/oeve/beskaarne/`,
       så komprimering ikke er en åben mistanke ved det første tal.
-- [ ] Forsøg 1: kun billedforberedelsen varieres (`gemini-3.1-pro`, fast prompt)
+- [ ] Forsøg 1: kun billedforberedelsen varieres (`gemini-3.1-pro-preview`,
+      fast prompt)
 - [ ] Bogholderi: rå svar + fuld opsætning gemmes pr. kørsel
 - [ ] **Ingen fuld kørsel uden leads go**
 - [ ] **Gennemgang ved lead** — er beskæringen god nok til at gå videre?
