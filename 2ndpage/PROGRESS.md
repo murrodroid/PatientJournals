@@ -363,14 +363,32 @@ selve læse-implementeringen, samme princip som resten af planen)*
 - [x] **Målt, ikke gættet**: `aa`-instruktionen koster næsten intet på disse
       sider. Facit har 8 `å`, modellen skrev 3 — højst en håndfuld tegn, ikke
       forklaringen på de 375.
-- [ ] Forsøg 1: kun billedforberedelsen varieres — `helt_opslag` mod
-      `beskaaret` på samme sider er ikke kørt endnu
+- [x] **Forsøg 1 kørt** (2026-08-30): samme 8 sider, samme model og prompt,
+      med og uden beskæring. **Tegnfejl 8,62 % beskåret mod 8,68 % helt
+      opslag** — 0,06 procentpoint, langt inde i støjen. Otte sider kan
+      hverken bekræfte eller afvise, at beskæringen hjælper. Spørgsmålet
+      står åbent.
+- [x] **Fejlgennemgang** (2026-08-30). To prompt-fejl er målt og små:
+      `metadata`-reglen flytter margendatoerne ud af teksten (22 tegn), og
+      modellen skriver decimalkomma hvor facit har punktum (5 tegn) —
+      tilsammen 7 % af fejlen. Resten er almindelige læsefejl på svær
+      håndskrift; 48 % af linjerne er nøjagtig rigtige.
+- [x] **Hypotese afvist**: at falssnittet klippede linjeenderne. Afkortningen
+      sker lige så meget uden snit, og modellen skriver 99-104 % af facits
+      tegnantal — der er intet systematisk underskud.
+- [x] **Beslutning 35 besvaret**: modellen følger sidens linjer. 158 af 164
+      facit-linjer ligger inden for én modellinje, 163 af 164 får deres egen.
+      Linjeskiftene kan afleveres videre til `PageLine`-skemaet.
 - [ ] **Ingen fuld kørsel uden leads go**
 - [ ] **Gennemgang ved lead** — er beskæringen god nok til at gå videre?
 - [ ] **Hvor mange sider skal der til for at skille to modeller?** Otte er
       for få. Spørgsmålet er ikke besvaret.
-- [ ] **Chandra kan ikke køre lokalt**: maskinens GPU har 6 GB, Chandra
-      anbefaler 16 GB+. Afventer leads valg om anden vej.
+- [ ] **Chandra parkeret, ikke droppet** (leads valg 2026-08-30): denne
+      maskines GPU har 6 GB, Chandra anbefaler 16 GB+. Muligheden holdes
+      åben — en lånt maskine med 32 GB ville kunne køre den.
+- [ ] **Prompt engineering** er næste skridt (leads valg 2026-08-30).
+      Startpunkterne er de to målte fejl ovenfor; de er gratis at rette, men
+      flytter kun hovedtallet fra 8,62 % til omkring 8,0 %.
 
 **Åbent, som ikke lukkede med stage 04:** webp mod PNG i fuld skala. Ved
 5-10 sider er filstørrelsen ligegyldig; ved en fuld kørsel er de 173 PNG
