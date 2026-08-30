@@ -14,7 +14,7 @@ rykker søgepunktet med, og alt før det punkt er derefter uden for rækkevidde.
 
 Det skete på `273107_001864` i variant V4:
 
-```
+```text
 facit linje  1: 'Ingen Snue.'                       -> forankret ved position 564 af 617
 facit linje 26: 'Tg. ikke [?] suspect ingen Snue.'
 ```
@@ -114,9 +114,27 @@ faktisk viste.
 
 ## Åbne spørgsmål — skal afklares FØR trin 1
 
-1. **Hvor meget må et joker-felt sluge?** Et `[?]` står typisk for ét ord. Må
-   modellen skrive 200 tegn dér uden at det koster, har den frit lejde til at
-   digte. Skal der være et loft, og hvad skal det være?
+1. ~~**Hvor meget må et joker-felt sluge?**~~ **AFKLARET 2026-08-30 (lead):
+   loft på 15 tegn, og det slugte opgøres ved siden af.**
+
+   Tallet er hentet fra materialet, ikke valgt pænt: 15 ligger over 99.
+   percentil for et enkelt ord i øvefacit (14 tegn), så et `[?]`, der dækkede
+   ét ord, altid slipper gratis igennem — også et langt sammensat ord. 250 af
+   de 354 mærker står alene på deres linje og dækker efter alt at dømme netop
+   ét ord. Skriver modellen mere end 15 tegn på ét ulæseligt sted, koster
+   overskuddet som fejl.
+
+   Rapporten skal desuden skrive ud, **hvor mange tegn modellen i alt lagde i
+   joker-felterne**. Det er det eneste sted, tilbøjeligheden til at digte kan
+   ses, og det koster ingenting at regne ud.
+
+   Baggrund: HTR-traditionen (Transkribus) udelader hele linjen ved ulæselige
+   steder — strengere end begge de muligheder, der blev stillet op, men det
+   ville koste 12,4 % af facits tegn, systematisk det sværeste materiale.
+   Nyere OCR-benchmarks (olmOCR-Bench) lægger omvendt eksplicitte fradrag ind
+   for hallucineret tekst, fordi almindelig CER ikke fanger den fejltype
+   sprogmodeller laver. Talegenkendelse har et fortilfælde for netop et loft:
+   løb af indsættelser kappes ved et fast antal.
 
 2. **Overlever den strenge måling (beslutning 44)?** Lead bad 2026-08-23 om et
    tal, hvor linjer med `[?]` slet ikke er med. Under en sidemåling kan det
@@ -138,6 +156,31 @@ faktisk viste.
 5. **Hvad sker der med de eksisterende tal i `output/`?** Selvtestens tal og
    rapportformatet i stage 03's output bygger på den gamle måling. Skal de
    genberegnes, arkiveres med en note, eller begge dele?
+
+## Facit kan blive rettet senere — det skal planen tåle
+
+Lead (2026-08-30): *"i fremtiden kunne jeg godt forestille mig at gå ind og
+læse selv og tilrette vores gt facitter."*
+
+Det er ikke en fjern mulighed, det er allerede aktuelt. Der er én bekræftet
+fejllæsning i det leverede facit (`37554_001491`: facit skriver "for 2 Dage
+siden", på siden står "for 3 Dage siden"), og hyppigheden er ukendt — ét fund
+på tretten stikprøver. Og 354 `[?]`-mærker er 354 steder, hvor en mere øvet
+læser kan komme videre.
+
+Tre følger for den her plan:
+
+- **Målingen må ikke antage, at `[?]` er permanent.** Antallet af jokerfelter
+  vil falde, hvis facit rettes, og tallene skal kunne regnes om uden andet end
+  en ny kørsel af måleapparatet på de gemte svar. Det er de i forvejen — men
+  det må ikke bygges væk.
+- **Gab-filen bliver et arbejdsredskab, ikke kun et måletal.** Den viser, hvad
+  modellen skrev netop dér, hvor transskribenten gav op. Det er den korteste
+  vej til en liste over steder, der er værd at kigge på med egne øjne. Det er
+  et argument for at bevare den, uanset hvad der ellers falder bort.
+- **Ingen tal må gemmes uden den facit-udgave, de er regnet på.** Rettes facit,
+  er gamle tal ikke sammenlignelige med nye, og det skal kunne ses frem for at
+  skulle huskes.
 
 ## Hvad der IKKE er i planen
 
