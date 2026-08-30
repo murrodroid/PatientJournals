@@ -1,6 +1,7 @@
 # Plan: forankringen erstattes af én sidemåling
 
-**Status: fire af fem åbne spørgsmål afklaret. Ikke påbegyndt.**
+**Status: alle fem åbne spørgsmål afklaret 2026-08-30. Klar til trin 1.
+Ikke påbegyndt.**
 Skrevet 2026-08-30 efter en grill-session. Der grilles videre, før noget køres.
 
 ## Hvorfor
@@ -94,9 +95,17 @@ Skal bevares, fordi de er kontraktbundne eller efterspurgte:
 
 ### Trin 4 — rapporten skrives om
 
-Afsnittene om dækning og om den strenge måling skal enten udgå eller omskrives
-(se åbent spørgsmål 2). Afsnittet "Sådan er der målt" skal beskrive den nye
-metode i almindeligt sprog.
+Afsnittet om dækning udgår. Afsnittet om den strenge måling **bevares** (se
+spørgsmål 2), men skal skrive tydeligt, at dens "dækning" er en fast
+udeladelse på 12,4 %, ens for alle varianter — ikke den glidende rabat, der
+væltede konklusionen 30. august.
+
+Nyt afsnit: hvor mange tegn modellen lagde i joker-felterne, og hvor mange
+linjer der stod i en anden orden end facit.
+
+Afsnittet "Sådan er der målt" skal beskrive den nye metode i almindeligt
+sprog. Det skal kunne læses uden `CONTEXT.md` ved hånden — det krav gjaldt
+også den gamle rapport.
 
 ### Trin 5 — selvtesten køres om
 
@@ -112,7 +121,18 @@ Tager omkring ni minutter. Ingen modelkald.
 Gratis; svarene ligger gemt. Først dér ved vi, hvad wordpicking-forsøget
 faktisk viste.
 
-## Åbne spørgsmål — skal afklares FØR trin 1
+Det gamle output arkiveres samtidig i `output/foer_sidemaaling/` med en
+README (se spørgsmål 5).
+
+**Forventning, skrevet ned på forhånd så den kan tages fejl:** V4
+(`linjefelter`) rykker op, fordi dens dårlige tal skyldtes ét falsk træf på
+`273107_001864`. Bliver den ikke bedre, er der noget andet galt, som vi ikke
+har forstået endnu.
+
+## Afklarede spørgsmål
+
+Alle fem blev afklaret med lead 2026-08-30, efter en grill-session og
+research på, hvordan andre håndterer ulæselige steder i facit.
 
 1. ~~**Hvor meget må et joker-felt sluge?**~~ **AFKLARET 2026-08-30 (lead):
    loft på 15 tegn, og det slugte opgøres ved siden af.**
@@ -186,9 +206,16 @@ faktisk viste.
    facit**, som et selvstændigt tal. Det kan altid besluttes, at det ikke
    betyder noget; det omvendte kan ikke besluttes, hvis tallet har skjult det.
 
-5. **Hvad sker der med de eksisterende tal i `output/`?** Selvtestens tal og
-   rapportformatet i stage 03's output bygger på den gamle måling. Skal de
-   genberegnes, arkiveres med en note, eller begge dele?
+5. ~~**Hvad sker der med de eksisterende tal i `output/`?**~~ **AFKLARET
+   2026-08-30 (lead): arkivér med en note, og genberegn alt.**
+
+   De gamle filer flyttes til `output/foer_sidemaaling/` med en README, der
+   siger hvorfor de ikke gælder længere. Alt genberegnes med den nye måling.
+
+   Begrundelsen er ikke pietet. Dagens vigtigste læring **er**, at det gamle
+   apparat kunne vende en rangorden — og den læring kan kun efterprøves, hvis
+   de gamle tal stadig findes. Slettes de, står dagbogen med tal, ingen kan
+   kontrollere.
 
 ## Facit kan blive rettet senere — det skal planen tåle
 
