@@ -38,13 +38,52 @@ ROD = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROD / "src"))
 
 from andenside.koersel import find_koersler, laes_koersel  # noqa: E402
-from andenside.maal import maal_saet  # noqa: E402
+from andenside import cer  # noqa: E402
+from andenside.maal import maal_saet, maal_side  # noqa: E402
 from andenside.rapport import skriv_gab, skriv_rapport  # noqa: E402
 from andenside.skemaer import tekst_af_svar  # noqa: E402
 from andenside.vaern import sikr_oevemaengde  # noqa: E402
 
 FACIT = ROD / "stages" / "02_facit" / "output" / "facit.jsonl"
 KOERSLER = ROD / "stages" / "05_foerste_transskription" / "output" / "koersler"
+
+
+def uden_rabat(poster: list[dict], svar: dict[str, str]) -> tuple[float, float]:
+    """Tegnfejl hvor de linjer, maalingen ikke kunne finde, taeller som fejl.
+
+    Hovedtallet maaler kun forankrede linjer. Det giver en RABAT, der vokser,
+    jo mere modellens tekst afviger: en variant, der faar modellen til at
+    skrive noget andet, taber netop de svaere linjer ud af maalingen, og de
+    tilbageblevne ser bedre ud. Rabatten er ikke lille -- paa stage 06's
+    foerste fire varianter vendte den rangordenen HELT om. Den variant, der
+    saa bedst ud paa hovedtallet (7,97 %), var daarligst her (17,48 %), fordi
+    den havde tabt dobbelt saa meget tekst ud af maalingen.
+
+    Tallet er en NEDRE graense: en linje, maalingen ikke kunne finde, er ikke
+    noedvendigvis laest forkert -- den kan bare vaere laest anderledes nok til
+    ikke at kunne genfindes. Hovedtallet er den oevre graense. Sandheden ligger
+    imellem, og afstanden mellem de to ER rabatten.
+
+    Returnerer `(fejlandel, andel_uforankret)`. Den anden fortaeller, hvor
+    meget af det foerste der er tabt tekst frem for maalte fejl.
+    """
+    facit = {p["image_name"]: p for p in poster}
+    afstand = tegn = tabt = 0
+    for side in sorted(svar):
+        if side not in facit:
+            continue
+        m = maal_side(side, facit[side]["alt_linjer"], svar[side])
+        for f in m.linjer:
+            tegn += len(f.facit)
+            if not f.forankret:
+                afstand += len(f.facit)
+                tabt += len(f.facit)
+                continue
+            afstand += cer.maal_par(f.facit_maalt, f.model_maalt,
+                                    **cer.VARIANTER["raa"]).tegnafstand
+    if not tegn:
+        return 0.0, 0.0
+    return afstand / tegn, tabt / tegn
 
 
 def _andel(m, slags: str) -> str:
@@ -125,6 +164,8 @@ def maal_en(mappe: Path) -> dict:
         saet_md = maal_saet(poster, med_md)
         cer_med_md = _andel(saet_md.fladet["raa"], "tegn")
 
+    fejl_uden_rabat, andel_tabt = uden_rabat(poster, svar)
+
     return {
         "koersel": mappe.name,
         "model": opsaetning.model,
@@ -138,6 +179,8 @@ def maal_en(mappe: Path) -> dict:
         "wer_raa": _andel(saet.fladet["raa"], "ord"),
         "cer_raa_streng": _andel(saet.rene["raa"], "tegn"),
         "cer_raa_med_metadata": cer_med_md,
+        "cer_uden_rabat": f"{fejl_uden_rabat:.4f}",
+        "andel_uforankret": f"{andel_tabt:.4f}",
         "daekning": f"{saet.daekning:.4f}",
         "daekning_streng": f"{saet.rene_daekning:.4f}",
         "linjedaekning": f"{saet.linjedaekning:.4f}",
@@ -181,6 +224,8 @@ def main() -> None:
               f"(dækning {float(r['daekning_streng']):.1%})")
         print(f"  ordfejl raa         {float(r['wer_raa']):.2%}")
         print(f"  linjedækning        {float(r['linjedaekning']):.1%}")
+        print(f"  tegnfejl UDEN rabat {float(r['cer_uden_rabat']):.2%} "
+              f"(heraf {float(r['andel_uforankret']):.2%} uforankret tekst)")
         if r["cer_raa_med_metadata"]:
             print(f"  tegnfejl m. margendato "
                   f"{float(r['cer_raa_med_metadata']):.2%}")
