@@ -242,6 +242,54 @@ Tre følger for den her plan:
   er gamle tal ikke sammenlignelige med nye, og det skal kunne ses frem for at
   skulle huskes.
 
+## Kortlægning af hvad der falder med `forankr()` (efterprøvet 2026-08-30)
+
+Lavet ved delegeret gennemlæsning og derefter **stikprøvet i koden**. To af
+kortlæggerens påstande holdt ikke og er rettet nedenfor — linjehenvisninger
+herfra skal slås efter, ikke tros.
+
+### Felter i `SideMaaling`, delt efter om de overlever
+
+**Forsvinder med forankringen** (findes kun for at beskrive, hvad den tabte):
+`linjer`, `facit_tegn_maalt`, `linjer_maalt`, `svaere_linjer_reddet`,
+`model_tegn_daekket`, `rene_linjer_maalt`, `rene_tegn_maalt`,
+`uden_linjeskift_indeni`, `egen_modellinje`, samt egenskaberne `daekning` og
+`model_tegn_uforankret`.
+
+**Overlever uændret** (regnes af facit eller modeltekst alene):
+`image_name`, `facit_tegn_i_alt`, `linjer_i_alt`, `svaere_linjer`,
+`model_tegn_i_alt`, `rene_linjer_i_alt`, `rene_tegn_i_alt`.
+
+**Skal bygges om, ikke fjernes:** `fladet`, `pr_linje`, `rene`, `fuldside`,
+`gab`. De er alle regnet på forankrede linjer i dag, men har hver især en
+meningsfuld udgave under sidemålingen.
+
+I `SaetMaaling` er kun `sider` et felt; resten er egenskaber, der summerer
+ovenstående og følger med.
+
+### To fejlslutninger fra kortlægningen, rettet
+
+**"Gab-mekanismen kan ikke fungere uden forankring."** Rigtigt om den
+NUVÆRENDE kode — et gab dannes mellem to *fundne* stumper, og uden søgning er
+ingen stump fundet. Men forkert om den nye måling: dér er et gab netop den
+modeltekst, der blev stillet op mod et `[?]`-jokerfelt. Det falder direkte ud
+af sammenligningen og kræver hverken søgning eller stumper. Gabene bliver
+**lettere** at danne, ikke sværere.
+
+**"Hele rapporten bliver meningsløs."** Overdrevet. Afsnittene om dækning og
+om de tyndest målte sider udgår, fordi begreberne forsvinder. Resten
+overlever i omskrevet form: hovedtallet, den strenge måling (bevaret, se
+spørgsmål 2), opdigtning (nu fra jokerfelternes indhold), linjetrofasthed (nu
+fra `orden.py`), og de værste sider.
+
+### Verificeret ved stikprøve
+
+- Gab-dannelsen står i `maal.py` omkring linje 346-356 — bekræftet ordret.
+- Feltlisten for `SideMaaling` stemmer med dataklassen selv.
+- **Henvisningen "rapport.py:636" findes ikke** — filen er 393 linjer.
+  `fuldside` bruges i virkeligheden i linje 226, 229 og 238. Kortlæggerens
+  øvrige linjenumre er derfor ikke efterprøvet og skal slås efter ved brug.
+
 ## Hvad der IKKE er i planen
 
 - Ingen ændring i facit (stage 02 er låst og urørt).
