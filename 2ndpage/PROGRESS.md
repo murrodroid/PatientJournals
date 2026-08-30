@@ -269,8 +269,23 @@ uanset hvad litteraturen ellers siger.
 - [x] **Bredden afprøvet uden for facit-perioden**: de 50 andensider fra
       1889-1897 gav **nul usikre**. Første tegn på at forberedelsen holder
       bredere — men kun et fravær af alarm, ikke en måling.
+- [x] **Falssnittet rettet** (2026-08-30, efter leads gennemgang): båndene
+      fandt hver især noget, men lå ikke på samme linje, og interpolationen
+      trak snittet med. Målt afviger falsen 5 px fra en ret linje i median
+      (90-percentil 11 px); leads gale sider afveg 245-412 px.
+      `skraa.fjern_udskridende` kaster nu de uenige bånd, og `sikker`
+      kræver enighed. Alle gale sider har nu afvigelse 0.
+      **4 af de 9 gale sider lå i øvemængden** og havde været skåret
+      forkert hele tiden, uden at nogen måling sagde fra.
+- [x] **Kontaktarkene viser nu det bortskårne** (fals rød, yderkant blå) —
+      man kan ikke bedømme et snit på resultatet alene.
 - [ ] **Gennemgang ved lead** af `output/levering_beskaaret/*/kontaktark/`
-      (27 ark). Rækkefølge og de fire usikre står i mappens README.
+      (27 ark), efter rettelsen. Rækkefølge, de fire usikre og de 21 sider
+      med kastede bånd står i mappens README.
+- [ ] **Åbent, leads spørgsmål**: sidder snittet generelt for langt ude?
+      Knappen er `skraa.BUFFER_ANDEL` (2 % ≈ 35 px, flyttet væk fra vores
+      tekst). Afventer hans dom på de RETTEDE ark — falssnittet flyttede
+      sig på 21 sider, så spørgsmålet skal stilles til det nye resultat.
 - [ ] Ingen usikkerheds-flagning implementeret endnu (intet fejlende
       eksempel at kalibrere en tærskel mod) — se `output/usikre.md`.
 - [x] **Frasortér naboblade der rager ud** (2026-08-28) —
