@@ -147,3 +147,78 @@ def test_noeglefilens_placering_kan_saettes_med_en_miljoevariabel(monkeypatch):
     finally:
         monkeypatch.delenv("ANDENSIDE_NOEGLEFIL", raising=False)
         importlib.reload(m)
+
+
+# ---------------------------------------------------------------------------
+# Timeout paa det enkelte kald
+#
+# 2026-08-30 stod en koersel paa 12 sider stille i over ti minutter, mens et
+# enkeltkald samtidig svarede paa 14 sekunder. Uden en timeout hverken lykkes
+# eller fejler et haengende kald, saa fejlhaandteringen pr. side i
+# `koer_pilot.py` udloeses aldrig -- koerslen bliver bare vaek.
+#
+# Selve haengningen kan ikke fremkaldes offline. Det, der KAN testes, er
+# ledningen: at timeouten faktisk gives videre til klienten. Det er ogsaa den,
+# der lydloest forsvinder, hvis nogen rydder op i opsaetningen.
+# ---------------------------------------------------------------------------
+
+def _fang_klientopsaetning(monkeypatch, tmp_path):
+    """Bytter google.genai ud og returnerer de argumenter, klienten fik."""
+    import sys
+    import types as pytypes
+
+    fanget = {}
+
+    class FalskKlient:
+        def __init__(self, **kwargs):
+            fanget.update(kwargs)
+            self.models = self
+
+        def generate_content(self, **kwargs):
+            return pytypes.SimpleNamespace(
+                text='{"page_lines": [{"text": "en linje"}]}'
+            )
+
+    class FalskHttpOptions:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    falsk_types = pytypes.SimpleNamespace(
+        HttpOptions=FalskHttpOptions,
+        GenerateContentConfig=lambda **k: k,
+        Part=pytypes.SimpleNamespace(from_bytes=lambda **k: k),
+    )
+    falsk_genai = pytypes.SimpleNamespace(Client=FalskKlient, types=falsk_types)
+    monkeypatch.setitem(sys.modules, "google.genai", falsk_genai)
+    monkeypatch.setitem(sys.modules, "google", pytypes.SimpleNamespace(genai=falsk_genai))
+
+    billede = tmp_path / "side.png"
+    billede.write_bytes(b"ikke et rigtigt billede")
+    return fanget, billede
+
+
+def test_kaldet_faar_en_timeout_med(monkeypatch, tmp_path):
+    """Uden denne ledning kan ét kald blokere en hel koersel i det uendelige."""
+    from andenside import model as m
+
+    fanget, billede = _fang_klientopsaetning(monkeypatch, tmp_path)
+    m.transskriber(billede, "prompt", noegle="x")
+
+    assert "http_options" in fanget, "klienten fik ingen http_options"
+    assert fanget["http_options"].kwargs.get("timeout"), "ingen timeout sat"
+
+
+def test_timeouten_er_i_millisekunder_ikke_sekunder(monkeypatch, tmp_path):
+    """Biblioteket vil have millisekunder.
+
+    Sendes 180 i stedet for 180000, faar hvert kald 0,18 sekunder og ALT
+    fejler -- eller, hvis biblioteket tolker det som sekunder, er vaernet
+    tusind gange for slapt. Begge dele er tavse fejl.
+    """
+    from andenside import model as m
+
+    fanget, billede = _fang_klientopsaetning(monkeypatch, tmp_path)
+    m.transskriber(billede, "prompt", noegle="x")
+
+    assert (fanget["http_options"].kwargs["timeout"]
+            == int(m.KALD_TIMEOUT_SEKUNDER * 1000))

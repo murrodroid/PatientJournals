@@ -179,3 +179,51 @@ def test_en_proeveside_i_listen_STOPPER_koerslen(script, monkeypatch, tmp_path):
 
     assert proeveside in str(fejl.value)
     assert script._kald == [], "modellen blev kaldt trods en prøveside i listen"
+
+
+# ---------------------------------------------------------------------------
+# Fristen pr. side
+#
+# 2026-08-30: to koersler paa 12 sider stod stille i henholdsvis ti og seks
+# minutter, mens enkeltkald samtidig svarede paa 10-12 sekunder. Bibliotekets
+# egen http-timeout afbroed ikke kaldet. Uden en frist, vi selv haandhaever,
+# forsvinder en koersel bare -- den hverken lykkes eller fejler, og
+# fejlhaandteringen pr. side udloeses aldrig.
+# ---------------------------------------------------------------------------
+
+def test_en_haengende_side_stopper_ikke_de_oevrige(script, monkeypatch, capsys):
+    """Den side, der haenger, skal opgives -- resten skal koeres faerdig.
+
+    Uden fristen bliver ALLE svar vaek, ogsaa dem der allerede var hentet,
+    fordi koerslen aldrig naar frem til at gemme.
+    """
+    import time
+
+    kaldte = []
+
+    def haenger_paa_den_anden(sti, prompt, **kwargs):
+        navn = Path(sti).stem
+        kaldte.append(navn)
+        if len(kaldte) == 2:
+            time.sleep(30)          # laengere end fristen nedenfor
+        return "en linje", {"page_lines": [{"text": "en linje"}]}
+
+    monkeypatch.setattr(script, "transskriber", haenger_paa_den_anden)
+    monkeypatch.setattr(script, "SIDEFRIST_SEKUNDER", 1)
+
+    gemte = {}
+    monkeypatch.setattr(script, "gem_koersel",
+                        lambda rod, o, svar, **k: (gemte.update(svar),
+                                                   _tom_mappe(rod))[1])
+
+    _koer(script, monkeypatch, ["--antal", "3", "--yes"])
+    ud = capsys.readouterr().out
+
+    assert "FRIST UDLOEBET" in ud
+    # De to andre sider skal vaere gemt -- ikke tabt sammen med den haengende.
+    assert len(gemte) == 2, gemte
+
+
+def _tom_mappe(rod):
+    rod.mkdir(parents=True, exist_ok=True)
+    return rod

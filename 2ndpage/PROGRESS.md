@@ -19,6 +19,7 @@ Videre til næste stage kun efter menneskelig gennemgang.
 - [2026-08-30](diary/2026-08-30.md) — Leveringen hentet (307 PNG); falssnittet gik galt på 9 sider og er rettet; buffer sat til 0,5 %
 - [2026-08-30 senere](diary/2026-08-30.md) — Lead godkendte de 27 kontaktark; stage 04 låst; piloten begynder på 5-10 sider
 - [2026-08-30 aften](diary/2026-08-30-aften.md) — **De første modelkald i projektet**: 8 sider, to modeller, 8-9 % tegnfejl; måleapparatet koblet på en kørsel
+- [2026-08-30 research](diary/2026-08-30-research.md) — Research på prompts; wordpicking-forsøget bygget i seks varianter; vores skema havde tabt kollegaens feltbeskrivelser; to kørsler hang og fik en frist
 
 ## Fase 0 — Kortlægning og plan (afsluttet 2026-08-18)
 

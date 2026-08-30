@@ -48,6 +48,16 @@ NOEGLEFIL = Path(
 GEMINI_ORD = ("gemini", "genai", "google")
 NOEGLE_ORD = ("api_key", "apikey", "key", "noegle", "secret", "token")
 
+# Loft over ét enkelt kald. Uden det kan en haengende forespoergsel blokere en
+# hel koersel i det uendelige: fejlhaandteringen pr. side i `koer_pilot.py`
+# udloeses aldrig, fordi kaldet hverken lykkes eller fejler. Det skete
+# 2026-08-30, hvor en koersel paa 12 sider stod stille i over ti minutter,
+# mens et enkeltkald samtidig svarede paa 14 sekunder.
+#
+# Vaerdien er sat rundhaandet: en svaer side maa gerne tage lang tid. Den er
+# et vaern mod at haenge, ikke en optimering.
+KALD_TIMEOUT_SEKUNDER = float(os.environ.get("ANDENSIDE_TIMEOUT", "180"))
+
 
 class NoegleFejl(RuntimeError):
     """Rejses, naar der ikke kan findes en brugbar Gemini-noegle."""
@@ -221,7 +231,12 @@ def transskriber(
             response_schema=skema,
         )
 
-    klient = genai.Client(api_key=noegle or hent_noegle())
+    klient = genai.Client(
+        api_key=noegle or hent_noegle(),
+        http_options=types.HttpOptions(
+            timeout=int(KALD_TIMEOUT_SEKUNDER * 1000)  # biblioteket vil have ms
+        ),
+    )
     svar = klient.models.generate_content(
         model=model,
         contents=[

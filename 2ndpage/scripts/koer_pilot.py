@@ -35,6 +35,8 @@ import argparse
 import csv
 import json
 import sys
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FristUdloebet
 from pathlib import Path
 
 ROD = Path(__file__).resolve().parents[1]
@@ -68,6 +70,21 @@ KILDER = {
 # maaling.
 PRIS_PR_KALD_USD = 2_000 / 1e6 * 2.0 + 1_500 / 1e6 * 12.0
 USD_TIL_DKK = 6.9
+
+
+# Haard frist pr. side, haandhaevet af os -- ikke af modelbiblioteket.
+#
+# `model.KALD_TIMEOUT_SEKUNDER` gives videre til google-genai's egen
+# http-timeout, men den viste sig 2026-08-30 IKKE at afbryde et haengende
+# kald: en koersel paa 12 sider stod stille i seks minutter, mens enkeltkald
+# samtidig svarede paa 10-12 sekunder. Vi stoler derfor ikke paa bibliotekets
+# frist alene og saetter vores egen ovenpaa.
+#
+# Kaldet lever i sin egen traad, saa hovedtraaden kan opgive det og gaa
+# videre. Traaden kan ikke draebes -- den bliver haengende resten af koerslen
+# -- men den blokerer ikke laengere de sider, der kommer efter, og siden ender
+# i `fejlede.txt`, hvorfra den kan koeres om med `--sider`.
+SIDEFRIST_SEKUNDER = 90
 
 
 def _promptfil(navn: str) -> Path:
@@ -226,21 +243,35 @@ def main() -> None:
     svar: dict[str, str] = {}
     raa: dict[str, dict] = {}
     fejlede: list[tuple[str, str]] = []
-    print()
+    print(flush=True)
+    pulje = ThreadPoolExecutor(max_workers=1)
     for nummer, (navn, sti) in enumerate(sider, start=1):
         try:
-            tekst, struktur = transskriber(
-                sti, prompt, model=args.model, temperatur=args.temperatur,
-                skema=skema,
+            opgave = pulje.submit(
+                transskriber, sti, prompt,
+                model=args.model, temperatur=args.temperatur, skema=skema,
             )
+            tekst, struktur = opgave.result(timeout=SIDEFRIST_SEKUNDER)
+        except FristUdloebet:
+            fejlede.append((navn, f"intet svar inden {SIDEFRIST_SEKUNDER}s"))
+            print(f"   [{nummer}/{len(sider)}] {navn}  FRIST UDLOEBET",
+                  flush=True)
+            # Traaden haenger stadig paa sit kald, saa puljen kan ikke
+            # genbruges til den naeste side. Der laves en ny.
+            pulje.shutdown(wait=False)
+            pulje = ThreadPoolExecutor(max_workers=1)
+            continue
         except Exception as fejl:                      # noqa: BLE001
             # En enkelt fejlet side maa ikke koste de foregaaende svar.
             fejlede.append((navn, f"{type(fejl).__name__}: {fejl}"))
-            print(f"   [{nummer}/{len(sider)}] {navn}  FEJLEDE: {type(fejl).__name__}")
+            print(f"   [{nummer}/{len(sider)}] {navn}  FEJLEDE: "
+                  f"{type(fejl).__name__}", flush=True)
             continue
         svar[navn] = tekst
         raa[navn] = struktur
-        print(f"   [{nummer}/{len(sider)}] {navn}  {len(tekst.splitlines())} linjer")
+        print(f"   [{nummer}/{len(sider)}] {navn}  "
+              f"{len(tekst.splitlines())} linjer", flush=True)
+    pulje.shutdown(wait=False)
 
     if not svar:
         print("\nIngen sider lykkedes — intet gemt.")
