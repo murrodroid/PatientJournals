@@ -40,10 +40,24 @@ LINJE_TOLERANCE = 25   # px et baand maa afvige fra flertallets rette linje
 # rummer altsaa al virkelig krumning med god margen. De sider, lead kaldte
 # gaaet galt, afveg 245-412 px -- ti gange for meget til at vaere en fals.
 MIND_ENIGE = 8         # saa mange baand skal blive tilbage, ellers er siden usikker
-BUFFER_ANDEL = 0.02    # flyttes vaek fra vores egen tekst
-# 2%, ikke 1%: maalt paa 273104_001639, hvor skriften loeber ud i papirets
-# krumning, redder 1% ikke de nederste linjer. Den baandvise graense kan kun
-# koebe forskellen mellem baandene (dér 25 px) -- resten skal bufferen give.
+BUFFER_ANDEL = 0.005   # flyttes VAEK fra vores egen tekst, ind mod falsen
+# 0,5 %, valgt af lead 2026-08-30 efter at have set samme sider ved 2,0 %,
+# 1,0 % og 0,5 % med det bortskaarne tonet
+# (`stages/04_billedforberedelse/output/buffer_sammenligning/`).
+#
+# Vaerdien har vaeret 1 %, saa 2 %, og nu 0,5 %. Historien er vaerd at kende:
+# den blev sat OP til 2 % den 2026-08-27, fordi 1 % ikke reddede de nederste
+# linjer paa 273104_001639, hvor siden krummer ind mod falsen og skriveren
+# skrev helt ud. Den bekymring blev afloest af, at baandene siden er blevet
+# renset for udskridende maalinger (`fjern_udskridende`): snitlinjen ligger
+# nu dér, hvor falsen faktisk er, og ikke trukket skaev af en enkelt gal
+# maaling, saa der er ikke laengere brug for en stor buffer til at daekke
+# over uroen. Lead saa 273104_001639 ved 0,5 % og godtog den.
+#
+# Retningen er ikke symmetrisk: en stor buffer lader naboens strimmel staa
+# (stoej, prompten kan bede modellen se bort fra), en for lille barberer
+# vores egne ordender (en fejl i transskriptionen). Gaa derfor kun lavere
+# efter et nyt visuelt gennemsyn.
 
 
 @dataclass(frozen=True)

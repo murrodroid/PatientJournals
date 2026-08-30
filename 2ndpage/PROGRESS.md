@@ -16,6 +16,7 @@ Videre til næste stage kun efter menneskelig gennemgang.
 - [2026-08-27 17:10](diary/2026-08-27.md) — Alle 118 beskåret, 11x hurtigere; udragende blade udpeget som næste arbejde
 - [2026-08-28](diary/2026-08-28.md) — Yderkanten: facit for alle 118, detektion bygget, snittet vendt udad efter leads indsigelse
 - [2026-08-29](diary/2026-08-29.md) — Måleapparat efterprøvet mod leads domme; svag-bekræftelsen var fejlen og er fjernet; forsøg A valgt
+- [2026-08-30](diary/2026-08-30.md) — Leveringen hentet (307 PNG); falssnittet gik galt på 9 sider og er rettet; buffer sat til 0,5 %
 
 ## Fase 0 — Kortlægning og plan (afsluttet 2026-08-18)
 
@@ -282,10 +283,12 @@ uanset hvad litteraturen ellers siger.
 - [ ] **Gennemgang ved lead** af `output/levering_beskaaret/*/kontaktark/`
       (27 ark), efter rettelsen. Rækkefølge, de fire usikre og de 21 sider
       med kastede bånd står i mappens README.
-- [ ] **Åbent, leads spørgsmål**: sidder snittet generelt for langt ude?
-      Knappen er `skraa.BUFFER_ANDEL` (2 % ≈ 35 px, flyttet væk fra vores
-      tekst). Afventer hans dom på de RETTEDE ark — falssnittet flyttede
-      sig på 21 sider, så spørgsmålet skal stilles til det nye resultat.
+- [x] **Falssnittets buffer sat til 0,5 %** (2026-08-30, leads visuelle
+      valg mellem 2,0/1,0/0,5 % i `output/buffer_sammenligning/`). Alle 307
+      skåret om; alle seks af leads tidligere domme holder.
+- [ ] 21 sider fik kastet bånd (`output/fals_kvalitet.csv`) — de ser nu
+      rigtige ud, men er ikke set efter én for én.
+- [ ] `273111_001380` og `_001381` mærkes stadig usikre på falsen.
 - [ ] Ingen usikkerheds-flagning implementeret endnu (intet fejlende
       eksempel at kalibrere en tærskel mod) — se `output/usikre.md`.
 - [x] **Frasortér naboblade der rager ud** (2026-08-28) —

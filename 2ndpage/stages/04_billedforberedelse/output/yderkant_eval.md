@@ -86,8 +86,12 @@ overlap ved 5, og gulvet ligger lige over det højeste målte falske.
 - Alle 118 sider skæres; ingen afstår.
 - **Nul sider** har et snit uden rigtig søm (mod fire, da lead dømte).
 - Leads to forkerte sider er rettet; hans fire gode er uændret gode.
-- Fjernet andel af bredden: median 11,5 % (5,1-21,8 %).
+- Fjernet andel af bredden: median 11,8 % (5,2-22,5 %).
 - Alle 8 sider med fremmed tekst får strimlen uden for snittet.
+- Tallene er målt om 2026-08-30, efter at falssnittet blev rettet og dets
+  buffer sat til 0,5 %. Yderkanten arbejder på det falsbeskårne billede, så
+  dens tal afhænger af det. **Alle seks af leads domme holder stadig**, og
+  der er fortsat nul sider uden rigtig søm.
 - `sikker`-kolonnen mærker 2 sider (`273108_001555`, `37554_001496`) —
   begge er ved eftersyn i orden, så mærket er indtil videre kun set give
   falsk alarm. Det er stadig bedre end falsbeskæringens kolonne, som gav

@@ -1411,3 +1411,60 @@ løsningens svageste led og skal ses efter, når nyt materiale kommer til.
 
 Lead ramte sin session-grænse på, at hovedsessionen læste billeder direkte,
 især i fuld opløsning. Fremover: skalér ned, eller send en subagent.
+
+## 2026-08-30 — Leveringen, og falssnittet rettet
+
+### Billedanmodningen er leveret
+
+307 PNG paa ekstern harddisk — hele vores egen anmodning fra 18. august.
+Samme oploesning som de webp, vi selv hentede fra kbharkiv, blot
+ukomprimerede (maalt: PSNR 41-42 dB, 1,3-1,6 graatoners middelafvigelse).
+Alle 307 hentet ind; proevemaengdens 84 ligger i `proeve_LAAST/` for sig
+selv. Lead bad udtrykkeligt om dem. Vaernet handler om at SE FACIT for de
+sider, ikke om at behandle billedpunkter, saa de er ogsaa beskaaret — men
+de maa fortsat ikke maales paa.
+
+### Beslutning 50: falsen er en ret linje, og udskridende baand kastes
+
+Paa leveringens bredere materiale (1889-1897) skar falssnittet tvaers gennem
+siden paa 9 af 307 sider. Alle stod som `sikker=ja`, fordi kolonnen kun
+taalte, om baandene fandt NOGET — ikke om de var enige. Fire af de ni laa i
+**oevemaengden** og havde vaeret skaaret forkert hele tiden.
+
+Maalt paa alle 307 afviger falsen 5 px fra en ret linje i median og 11 px
+ved 90-percentilen. De sider, lead kaldte gaaet galt, afveg 245-412 px.
+Instrumentet skiller hans tre grupper rent (god 3-7 px, lidt galt 11-72 px,
+galt 245-412 px).
+
+`skraa.fjern_udskridende` kaster derfor de baand, der ikke ligger paa
+flertallets linje — den vaerste ad gangen, med ny linje hver gang, indtil
+resten ligger inden for 25 px. Ét gennemloeb raekker ikke: en enkelt vild
+maaling traekker selve linjen skaev. `sikker` kraever nu ogsaa enighed.
+
+Bemaerk hvad det betyder for den oprindelige begrundelse for baandvis snit:
+falsen er praktisk talt ret. Det baandvise er stadig rigtigt — det fanger de
+faa graders haeldning — men den frie interpolation mellem baandene var
+farligere end antaget.
+
+### Beslutning 51: falssnittets buffer saettes til 0,5 %
+
+Lead valgte 0,5 % efter at have set samme sider ved 2,0 %, 1,0 % og 0,5 %
+med det bortskaarne tonet. Vaerdien har vaeret 1 %, saa 2 %, nu 0,5 %.
+
+De 2 % var indfoert, fordi 1 % ikke reddede de nederste linjer paa
+273104_001639. Den bekymring er afloest af beslutning 50: naar snitlinjen
+ikke laengere traekkes skaev af en enkelt gal maaling, er der ikke brug for
+en stor buffer til at daekke over uroen.
+
+### Et tredje maaleforsoeg strandede paa samme fælde
+
+Et maal for luften mellem falssnittet og vores egen skrift blev bygget for
+at kunne vaelge bufferen paa et tal. Det gav negativ margen paa alle 307
+sider — ogsaa dem, lead netop havde godkendt — fordi falsen selv er moerk og
+taeller som blaek. Det er TREDJE gang et "klipper vi blaek"-maal strander
+paa praecis det. Kasseret, ikke trimmet. Valget blev truffet visuelt.
+
+**Regel heraf:** blaekbaserede maal ved en kant duer ikke i dette materiale.
+Bogsnit, fals og papirkant er alle moerke. Vil man maale et snits rigtighed,
+skal det vaere paa noget andet end blaek — soem-dybden virker, fordi den
+maaler papirets fordybning, ikke dets moerke.

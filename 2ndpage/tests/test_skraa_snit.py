@@ -190,8 +190,11 @@ def test_bufferen_findes_og_flytter_vaek_fra_vores_tekst():
     med = fals_graense(img, _side(1))
     flyt = [m - u for m, u in zip(med, uden)]
     assert min(flyt) > 0, "bufferen flytter ikke snittet vaek fra vores tekst"
-    # 2% af 1000 px = 20 px; der maa ikke vaere skruet ned bag om ryggen.
-    assert min(flyt) >= 15, f"bufferen er skrumpet til {min(flyt)} px"
+    # Gulvet vogter RETNINGEN og at bufferen ikke skrumper bort bag om
+    # ryggen -- ikke den praecise stoerrelse. Den er lead's visuelle valg og
+    # har vaeret 1 %, 2 % og nu 0,5 %; en test, der pinner tallet, ville
+    # blot skulle rettes hver gang han ser paa arkene igen.
+    assert min(flyt) >= 4, f"bufferen er skrumpet til {min(flyt)} px"
 
 
 def test_manglende_kant_i_TOPBAANDET_giver_ikke_et_spring():
