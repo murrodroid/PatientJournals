@@ -59,7 +59,9 @@ uanset hvad litteraturen ellers siger.
       307 PNG i `output/levering_2026-08/`. 223 hentet ind (173 øve + 50
       ekstra uden facit); prøvemængdens 84 bevidst ladt på harddisken.
       Samme opløsning som vores webp, blot ukomprimeret — målt forskel
-      PSNR 41-42 dB. Script: `scripts/hent_levering.py`. **Bemærk**: anmodningen dækker
+      PSNR 41-42 dB. Script: `scripts/hent_levering.py`. Prøvemængdens 84
+      hentet efter leads ønske (2026-08-30) i `proeve_LAAST/`, adskilt så
+      et glob ikke kan samle dem op; de må stadig ikke måles på. **Bemærk**: anmodningen dækker
       de 38 dødsfaldspatienter, ikke de 10 sider under `273104_001636` — de er
       selvhentet via kbharkiv og ligger i øvemængden, så hullet er lukket.
 - [x] **Hele øvemængden hentet selv** (2026-08-20, leads go): 118 sider fra
@@ -258,10 +260,17 @@ uanset hvad litteraturen ellers siger.
 - [x] **Gennemgang ved lead — GODKENDT** (2026-08-18): "de er perfekte nu".
       Alle 8 kontaktark bekræftet. **Stage 04 er hermed låst** som
       forudsætning for stage 05 på det nuværende pilotmateriale.
-- [ ] **Kendt begrænsning, nu testbar**: beskæringen er kun afprøvet på
-      facit-månederne. De 50 ekstra andensider fra 1889-1897 i
-      `01_datagrundlag/output/levering_2026-08/ekstra_uden_facit/` er
-      hentet netop for at kunne svare på, om den holder bredere.
+- [x] **Begge snit kørt på hele leveringen** (2026-08-30, leads go):
+      307 sider gennem falssnit + yderkantssnit →
+      `output/levering_beskaaret/`. Første gang yderkant-snittet faktisk
+      SKRIVES; hidtil var det kun målt. Fjernet i alt: median 28-32 %.
+      **Kun 4 af 307 mærket usikre** (`273111_001380`, `273111_001381`,
+      `37554_001496`, `273107_001884`). Script: `scripts/beskaer_levering.py`.
+- [x] **Bredden afprøvet uden for facit-perioden**: de 50 andensider fra
+      1889-1897 gav **nul usikre**. Første tegn på at forberedelsen holder
+      bredere — men kun et fravær af alarm, ikke en måling.
+- [ ] **Gennemgang ved lead** af `output/levering_beskaaret/*/kontaktark/`
+      (27 ark). Rækkefølge og de fire usikre står i mappens README.
 - [ ] Ingen usikkerheds-flagning implementeret endnu (intet fejlende
       eksempel at kalibrere en tærskel mod) — se `output/usikre.md`.
 - [x] **Frasortér naboblade der rager ud** (2026-08-28) —
