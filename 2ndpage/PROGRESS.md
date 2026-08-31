@@ -157,7 +157,58 @@ uanset hvad litteraturen ellers siger.
       historisk rigtige tekst til et færdigt datasæt. Modellen promptes
       IKKE til at genkende overstregninger.
 
-## Stage 03 — Måleapparat — **GODKENDT OG LÅST 2026-08-23**
+## Stage 03 — Måleapparat — **GENÅBNET 2026-08-30, OMBYGGET 2026-08-31**
+
+**Forankringen er fjernet.** Stagen blev låst 2026-08-23 med betingelsen
+*"genåbnes uden tøven, hvis der viser sig et hul ved de første rigtige tal"*.
+Hullet var reelt: på `273107_001864` står "ingen Snue" to gange i facit selv,
+søgningen efter linje 1 fandt det ordrette træf nede i linje 26, flyttede
+søgepunktet dertil, og 26 af 29 linjer faldt ud af målingen. Det gjorde
+forsøgets bedste variant til dens dårligste.
+
+Målingen er nu **én redigeringsafstand over hele siden, i rækkefølge, uden
+søgning**. Hele facit står altid i nævneren. Planen med alle seks trin står i
+`stages/03_maaleapparat/PLAN_sidemaaling.md`; dagbogen for ombygningen er
+`diary/2026-08-31-sidemaaling.md`.
+
+- [x] **Trin 1-2**: `src/andenside/sidemaaling.py` (sidemålingen med jokerfelt
+      ved `[?]`) og `src/andenside/orden.py` (omrokering som eget tal).
+- [x] **Trin 3-4** (commit `ab21ade`): `forankr()` fjernet fra `maal.py`;
+      rapporten skrevet om. Med forankringen forsvandt **dækning**, **rabat**,
+      `pr_linje` og fuldside-kontrollen — de fandtes alle for at beskrive, hvad
+      søgningen tabte.
+- [x] **Trin 5**: selvtesten kørt om med **gentaget ord** som ny
+      forvanskningstype — netop den fejltype, der væltede den gamle måling.
+- [x] **Trin 6**: de seks varianter målt forfra; de gamle tal arkiveret i
+      `stages/05_foerste_transskription/output/foer_sidemaaling/` med en README.
+- [x] **Jokerloftet er MÅLT, ikke valgt** (`output/jokerloft.md`). Da en hel
+      udeladt linje bliver til ét jokermærke, skal mærket have et loft, og det
+      er en knap. Fundet: "linjens længde + 15" gav nøjagtig samme tal som
+      **slet intet loft** i 15 af 16 kørsler — de 15 tegn var altså ikke et
+      mildt slæk, loftet blev aldrig bindende. Linjens egen længde er den
+      eneste kandidat, der ikke er systematisk mildere end hovedtallet.
+- [x] **Reel fejl fundet af en test**: orddelingsreglen (beslutning 42) blev
+      kun brugt på facit, ikke på modelteksten. En side uden en eneste
+      læsefejl målte 2 tegn galt. Fanget af "facit mod sig selv".
+- [ ] **ÅBENT: beslutning 35 kan ikke længere besvares.**
+      `uden_linjeskift_indeni` og `egen_modellinje` var forankringstal.
+      `orden.py`s linjeparring kan ikke skelne "modellen slog to af sidens
+      linjer sammen" fra "modellen brød dem et andet sted". Parringsraten
+      bærer signalet groft, men blander linjestruktur sammen med læsekvalitet.
+      **Skal afklares, før `PageLine`-poster afleveres videre til kollegaen.**
+- [ ] **ÅBENT: beslutning 44's formulering bør revideres.** Reglen siger, at
+      er den strenge måling højere end hovedtallet, "har redningen pyntet, og
+      så er det den strenge, der gælder". Den redning fandtes kun under
+      forankringen. Målt på alle 16 kørsler er den strenge nu **konsekvent ca.
+      1 procentpoint højere, uden undtagelse** — fordi hovedtallet har en
+      fribillet ved hvert `[?]`, som den strenge ikke har. Reglen ville
+      udløses hver gang og siger dermed ikke længere noget.
+- [ ] **Gennemgang ved lead** — af hele ombygningen.
+
+### Sådan så stagen ud, da den blev låst 2026-08-23
+
+*(bevaret som historik — tallene herunder er regnet med forankringen og
+gælder ikke længere. Se arkivet for de gamle rapporter.)*
 
 - [x] **Mål BÅDE fladet og pr. linje.** Linjeparringen er selve forankringen:
       hver facit-linje søges i modellens rå tekst uden hensyn til dens

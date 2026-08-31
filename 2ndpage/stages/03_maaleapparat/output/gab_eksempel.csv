@@ -1,93 +1,355 @@
-side,facit_mellem,model_tekst,model_start,model_slut
-273098_001498,[?],utydeligt,109,118
-273098_001498,[?],utydelsgt,277,288
-273098_001499,[?],utydeligt,503,513
-273098_001503,[?],utydeligj,94,105
-273098_001503,[?],utydeligt,131,142
-273098_001503,[?],utydeligt,308,319
-273098_001503,[?]. [?],utydeligt. utydeuigt,372,394
-273098_001509,[?] [?],utydelijt utydeligt,477,498
-273098_001512,[?],utydeligt,254,264
-273098_001513,[?],utydeligt,265,275
-273100_001294,[?],utydeligt,462,472
-273100_001295,[?],utydeliet,161,171
-273100_001306,[?],utydeligt,274,285
-273100_001306,[?],utydelimt,404,414
-273100_001306,[?],utydeligt,570,581
-273100_001307,[?],ukydeligt,108,119
-273101_001165,[?],utydeligt,143,154
-273101_001165,[?],utydelygj,401,412
-273101_001166,[?],utydeligt,343,352
-273101_001167,[?],utydeligt,227,238
-273102_001064,[?],utydeligt,26,37
-273102_001064,[?],utydeligt,481,492
-273103_001436,[?],utydeligt,338,349
-273103_001436,[?],utydeligt,801,812
-273103_001437,[?],uaydelsgt,283,294
-273103_001437,[?],utydeligt,666,677
-273103_001460,[?],uwydeligt,342,353
-273103_001460,[?],utydeligt,645,656
-273103_001461,[?],utydeligt,226,237
-273103_001461,[?],utydeligt,250,261
-273103_001462,[?],utydeligt,571,582
-273103_001464,[?],utldslwgt,55,65
-273104_001633,[?],utyhcligt,616,626
-273104_001634,[?],utydeligt,310,321
-273104_001634,[?],utydeligt,483,494
-273104_001639,[?] [?],utydeligt utydeligt,252,273
-273104_001639,[?],utydeligt,359,370
-273104_001639,[?],utydeligt,607,618
-273104_001640,[?],utydeligt,331,342
-273104_001640,[?],utydeligt,615,626
-273104_001640,[?],utydeligt,653,664
-273104_001641,[?],utyveligt,132,142
-273104_001641,[?],utydeligt,157,168
-273104_001641,[?],utydeligt,387,398
-273104_001642,[?],utpdeligc,322,333
-273104_001644,[?],utydeligt,720,731
-273104_001644,[?],utydeligt,823,834
-273104_001645,[?],ujydeligt,110,121
-273104_001645,[?],utydeligt,576,587
-273105_001553,[?],utydnlegu,368,379
-273105_001568,[?],btydeligt,264,275
-273105_001569,[?],e utydeligt,102,113
-273105_001569,[?],y utydeligt,452,463
-273105_001570,[?] [?] [?],utyxeligt utydeligt utydeligt,186,217
-273105_001570,[?],uuydeligt,441,450
-273105_001570,[?],utydeligt,480,491
-273105_001707,[?],utydeligt,230,241
-273105_001707,[?][?],utydeligtutydeligt,391,412
-273105_001707,[?],utydeligt,576,587
-273105_001707,[?],utydeligt,655,666
-273105_001709,[?],utydeligt,311,321
-273105_001710,[?],utydeligt,75,85
-273105_001710,[?],utydeqigt,211,222
-273105_001710,[?],utfdeligt,339,349
-273105_001711,[?],utydeligt,546,557
-273105_001712,[?],utyxelift,418,429
-273107_001864,[?],utydeligt,600,611
-273107_001865,[?] [?],utydeligt utykeligb,203,224
-273108_001537,[?],utydalift,110,121
-273108_001538,[?],utydeligt,35,45
-273108_001553,[?],utydeligt,187,198
-273108_001553,[?],utydeligt,422,432
-273108_001555,[?],utydeligt,327,338
-273108_001555,[?],utybeligt,406,417
-273109_000081,[?],utyduligt,103,114
-273109_000081,[?],dtydeligt,335,346
-273109_000081,[?],mtydeligj,371,382
-273109_000081,[?],utydeligt,490,501
-273110_001527,[?],utydeligt,216,227
-273110_001528,[?],utydelict,359,370
-273111_001370,[?],utydeligt,102,112
-273111_001370,[?],utydeliqt,141,151
-273111_001375,[?],utydeligt,403,414
-273111_001376,[?],utydhkigt,424,435
-37554_001491,[?],utydeligt,238,249
-37554_001491,[?],utydeligt,276,287
-37554_001491,[?],utydeligt,435,446
-37554_001493,[?],utydeligt,7,18
-37554_001494,[?],utydeligt,133,143
-37554_001495,[?],utfdåligt,547,558
-37554_001497,[?],utydeligt,76,86
-37554_001497,[?],utkdeligt,693,704
+side,facit_foer,model_tekst,facit_efter,indholdstegn
+273098_001496,rachitisk. Der er rigelig,gtydelige,"Udflod fra Næsen, ingen",9
+273098_001498,noget har ikke været,utydeligt,", drikker Kun lidt,",9
+273098_001498,at afstødes. Foetor idag,utydelsgt,mindre. P. nogenlunde regelm.,9
+273098_001498,Rp. Serum dan. 10cbctm.,utydeligt,ufor. Rp.,9
+273098_001498,ufor. Rp.,utyrecigt,. sol. nitr. arg.,9
+273098_001499,varm. Pulsen er regelmæssig,utydeligt,kraftig. Døser ikke. Igår,9
+273098_001499,middelstærke rester af belægning,utydeligt,(infiltration) Udseendet er i,9
+273098_001502,Hun er varm p,utydeligt,"Extremiteterne nu, køligere p",9
+273098_001502,gennem næsen. 2 dr,uty,,3
+273098_001502,,deligt uwydeligt,P. c 120 lille.,15
+273098_001503,begyndte at drikke; med,utydeligj,kl 1 Tiden begyndte,9
+273098_001503,Tiden begyndte hun at,utydeligt,Skrigeture med c. 10,9
+273098_001503,"v. Varmedunke. Ingen Kramper,",utydeligt,Opkastn.,9
+273098_001503,Opkastn.,utydeligt,2,9
+273098_001503,2,utydeligt,Aabn. og Vandladn. i,9
+273098_001503,Aabn. og Vandladn. i,uty,.,3
+273098_001503,.,deligt utydeuigt,tiltog og omsider døde,15
+273098_001509,"Urin normal, lys let",utydeligt,af Urater. 2de Stueg.,9
+273098_001509,"begge anguli, navne. h.,",k uty,,4
+273098_001509,,delijt utydeligt,skulde Belægn. nærmest være,15
+273098_001511,Røde gane. Siderne og,utydeligt,af uvula belagt. Paa,9
+273098_001512,ad næsen. Igår aftes,utydeligt,blødning både fra næsen,9
+273098_001512,tidligere udtrækning idag på,utydeligt,. Har inat fået,9
+273098_001512,c. 90 teml. lille.,utydeligt,½ sprøjte. 3 g.,9
+273098_001513,sår (injectionssted?),utydeligt,om injectionsstederne på femur,9
+273098_001513,femur er der på,utydeligb,steder infiltration og Ømhed,9
+273098_001513,steder infiltration og Ømhed,utyaeligt,på h. side. 30/4.,9
+273098_001513,Næseblødn tilmorgen Foetor. omtr.,utydeligt,. Der er ret,9
+273098_001513,Han er nogenlunde varm.,utydelwgt,". noget lille, synes",9
+273098_001514,Gang. (200 Cbctm) denne,utydeligt,. Middelmaadig. Esbach viser,9
+273098_001514,i ret stor Udstrækn.,utydeligt,paa. v. Side. Sep.,9
+273098_001514,døde han kl 20.,utydeligt,Kramper. Anuri i Sidste,9
+273098_001514,i Sidste Døgn (,utydemigt patienten udskrevet rask,).,31
+273099_001445,a. Time Damp. Brystthe.,mtydeligt,Tep.,9
+273099_001445,Tep.,utyduligt,Respir. paa begge Bagflader,9
+273099_001445,"Dæmpning. Angulærgl. smaa, ikke",utydeligt,Svulne. Han døde under,9
+273100_001258,bløde Ganebue en c.,utydeligc,Øre stor hvidlig tynd,9
+273100_001259,P. 84. regelm. kraftig.,g utydeligt,Pensling og Gurlge med,10
+273100_001260,begge sider af Septum.,utydeligt,ved v. ang. og,9
+273100_001260,v. ang. og Belægningerne,utydeliut,i Fauces er af,9
+273100_001294,Ganen; maa kaldes 1,utydeligt grads patienten udskrevet,Grads,32
+273100_001295,ved Respirationen. Belægn.s ned,utydeliet,Grænse kan ikke bestemmes.,9
+273100_001295,en Del i aftes,utydelilt,fr. M. camph. 1,9
+273100_001295,M. camph. 1 Spisk.,utydeligt,Belægn. er afstødte fra,9
+273100_001302,h. Tonsil. Uvula er,utydeligt skjult mpylem patienten ud,skjult mellem,32
+273100_001303,Urinen: 0/0 (Koge. Heller.,uty,,3
+273100_001303,,delfgt utydeligt,er af naturlig Farve.,15
+273100_001304,er knap middelstore let,utydeligt,Glandler ved begge Anugli,9
+273100_001304,og Coccer (ikke i,åtyddligt,) omtrent lige mange,9
+273100_001304,mange af hver Slags.,utydeligt vaxt patienten udskrevet,Vaxt.,31
+273100_001305,,utyceligt,II Carla Larsen Cont,9
+273100_001305,Ingen egentl. Hoste. Urin,utydelfgt,/0. 5/7 38.5/37.6 Belægn,9
+273100_001305,reproducere sig. Belægn. ere,utydeligt,af en smidsig graa,9
+273100_001306,Hostens Karakter er “,utydeligt,” Fik i Gaar,9
+273100_001306,kølig Fødderne ere ved,utydeligt,godt varme Hænderne derimod,9
+273100_001306,"tale igjennem, taler med",utydelimt,stemme. Der er kommen,9
+273100_001306,Peri infiltrationen er fuld,utydeligt,svunden og der er,9
+273100_001307,i fauces er af,ukydeligt,Udstrækning paa Ganen er,9
+273101_001164,Cbctm. N. 4481 Rp:,utydeligt,Creolin Sol.Chlor.Kal. Tamponade af,9
+273101_001165,P. normal lille og,utydeligt,lidt mucøs Secret fra,9
+273101_001165,ligger til Morgen fuldstændig,utydelygj,og døset hen. Der,9
+273101_001166,"Skive, ved Kogeprøven nærmest",utyyelrgt,Ingen Blodreaktion mg. Guajac.,9
+273101_001166,døsig hen og smaa,utydeligt,", men er ikke",9
+273101_001167,alternerende ½ Sprt. hv.,utydeligt,med Mixt camph. cont.,9
+273101_001167,Par Timer Kølig pr.,utydeligt,Kl. 17 ¼ under,9
+273102_001064,"Barnet har haft mæslinger,",utydeligt,Scarlatina. Smittekilde ukjendt. Hun,9
+273102_001064,"Barnet ses nu blegt,",uts,,3
+273102_001064,,deligt utydeligt,", noget medtaget. Der",15
+273102_001064,og til Hoste af,utydeligt,Karakter. Der er >,9
+273102_001065,"Ps. 144, noget uregelm.,",utydelogt,lille Øvrige obj. undersøgelse,9
+273102_001065,lapis Gurgl m. Chloros,å stydeligt,mixt. hydrargyr 1Barneskf. bikor,10
+273103_001436,blev pt. hæs fri,utydeligt,"der indfandt sig resp.-besvær,",9
+273103_001436,stridor og indtrækning af,uty,-,3
+273103_001436,-,derigtutydeligt,og interconstalrummene nedadtil Stærk,15
+273103_001436,blodskorper om mundåbbingen. Blodigt,utydeligt,næseflod og skorper om,9
+273103_001437,stærkere parenchymatri blødning fra,upydeligå,der dog,9
+273103_001437,der dog,uaydelsgt,standses med Chlorxzink Pt.,9
+273103_001437,inj. ætherea 1 Pravaz,utydzligt,dampstue Pt er betydeligt,9
+273103_001437,mixt. hydrargyr 1 spsk.,utydeligt hv time patienten udskr,hv. time.,29
+273103_001438,hurtig inspection af fauces,utydeligt,denne opfyldt af blodfarvede,9
+273103_001438,14/10 37.5 Canylen ligger,ujydemigt,har sovet lidt i,9
+273103_001460,lidt Ømme. Rigelig serøs,uwydeligt,Snue. Tg. hvidlig belagt.,9
+273103_001460,"Stridor, nogen Indtrækning, men",ytydeligt,er,9
+273103_001460,er,utwdeligt,svækket overalt. Resp. ikke,9
+273103_001460,Der på nogen Veneblødning,utydeuigt,forløb uden Vanskelighed. Der,9
+273103_001460,Der ophostedes en større,utydeligt,Membran og et Par,9
+273103_001461,,utydeligt,. Trachea behandles ved,9
+273103_001461,"vedblev at være svækket,",utydeligy,uklar på Venstre Side,9
+273103_001461,Side hvor der navnlig,utydeligt,høres talrige,9
+273103_001461,høres talrige,utydeligt,og fugtige Rallelyd. Kl.,9
+273103_001462,"2 større store, noget",utydelict,Membraner. Der er rigelig,9
+273103_001462,tionen stadig meget udbredt,uty,,3
+273103_001462,,deligt utydeligt,største Delen af den,15
+273103_001462,i dag pletvis mindre,uty,-,3
+273103_001462,-,delibtutydeligt,. Der har udviklet,15
+273103_001462,"en betydelig, omtrent symmetrisk",utydeligt,i begge Regiones parotideæ,9
+273103_001463,Reaction fra Inj. stederne.,utydeligt,på Brystets Forflade er,9
+273103_001464,"og mindre Membranstumper, (nogen",utldslwgt,). ikke Kortaandet. 2,9
+273103_001464,fra Saaret (Forbind. skiftes,utydeligt,morges). Ansigtsfarven god. Peri-infiltrationen,9
+273103_001464,af Ømhed). Circumferensen over,utydeligt,af Patella er 1½,9
+273103_001465,"ikke godt igennem, har",utydeligt,i sidste Døgn Ophostet,9
+273103_001466,løbet af natten bleven,utydeligt,betydelig forværret Har været,9
+273103_001466,været tør og er,uty,,3
+273103_001466,,ieligt utydeligt,tør. Hun sidder op,15
+273103_001466,foetor fra mund og,utydeligt patienten udskrevet rask,.,31
+273103_001467,"hænderne, ikke på fødderne.",utydeligt,mixt. camphor 1 barneskef.,9
+273103_001467,mixt. camphor 1 barneskef.,utydeligt,Ct. ætheris spirit. gtt.,9
+273103_001467,ætheris spirit. gtt. 5,utydeligt,. Ømheden af underextrem,9
+273103_001467,inj. moschi 1 pravaz,uty,.,3
+273103_001467,.,deliyt utydeligt,. ct. inj. moschi,15
+273103_001467,stadig urolig og tør,utydeligt stydel,,15
+273103_001467,,igt blødning døde kl 16 ¼ p,"Blødning, døde Kl. 16",21
+273104_001633,Ingen Cyanose. Respira tionen,utydeligt,c. 40. Der er,9
+273104_001633,Del Trøske. Rødme og,utydeligu,af fauces. Inspektionen vanskelig,9
+273104_001633,der synes at være,utyhcligt,ligende Belægninger paa begge,9
+273104_001634,Trøskelignende Pletter. På Tonsillerne,utydeligt,hvide Belægninger. Nogen Slim,9
+273104_001634,i Farynx Små indolent,utydeligt,åå begge Sider. Ved,9
+273104_001634,i v. Axillarregion og,utyleligt,samt på v.,9
+273104_001634,samt på v.,utydeligt,høres en Del Rallelyd.,9
+273104_001637,og øverste Del af,,,0
+273104_001637,,utydeligt uty,,12
+273104_001637,,deligt utydeligt,. Intet Exanthem Pensling,15
+273104_001637,Intet Exanthem Pensling m.,utydeligt patienten udskrevet rask,,31
+273104_001638,nogen Rødme og Svulst.,utydeligt,som igaar. Nogen mucopus,9
+273104_001638,Chloroformnarkose til tracheostomia sup,utydeligt,som fuldførtes uden særlige,9
+273104_001639,"fri, men der har",utydeligt,"hele Tiden været Kortaandethed,",9
+273104_001639,"Tiden været Kortaandethed, fin",uty,,3
+273104_001639,,deligt utydeligt,en Del Slim har,15
+273104_001639,5-6 Gange tyndt Aabning.,uty,,3
+273104_001639,,deligt utydeligt,at have tabt sig.,15
+273104_001639,"Har sovet Del godt,",utydeligt,en Del. 22/10 40.3/38.3.,9
+273104_001639,kortåndet. Har sovet noget,utydsligt,. Har hostet nogenl.,9
+273104_001639,vin og mælk. (Løber,utydeligt,ud gj tracheostomisaaret (når,9
+273104_001639,affør i sidste Døgn.,utydeøigt,ser flunken ud tilmorgen.,9
+273104_001639,flunken ud tilmorgen. Endnu,uttdeligt,"kortåndet, resp. c. 64.",9
+273104_001640,h. infrascapul; resp. høres,,,0
+273104_001640,,utydåligt uty,",",12
+273104_001640,",",deligt utydelvgt,bronchis resp. el. fine,15
+273104_001640,resp. el. fine rallelyd.,,,0
+273104_001640,,utydeligt uty,,12
+273104_001640,,deligt utydeligt,1 Canylen ikke fjærnet.,15
+273104_001640,hv. 2 time Epist.,utydeligt,thoracis decoct chinæ 1,9
+273104_001640,Slim ingen Membraner. Stadig,utydeligt,-lig ringe Kortaandethed. Canylen,9
+273104_001640,lidt svullet og belagt.,utydeligt,"i Fauces, Tg. naturlig,",9
+273104_001640,"Fauces, Tg. naturlig, paa",utydeligt og i ans,og i Ansigtet,15
+273104_001641,Døgn. Stadig været Rødme,utyveligt,. Der opbringes,9
+273104_001641,. Der opbringes,utydeligt,"Slim, hostes ikke godt",9
+273104_001641,25/10 38.2/38. Har haft,utydeligt,til været Kortåndet og,9
+273104_001642,højre i såret. -,q utpdeligc,huden stadig nogle ikke,10
+273104_001643,opadtil strækker sig en,uty,-,3
+273104_001643,-,deligtdtydelist,poche sig nedad og,15
+273104_001643,perforation til trachea (Fibiger),,,0
+273104_001643,,utwdeligt uty,,12
+273104_001643,,deliut utydmligt,". 30/10 38,2/39,2. Hun",15
+273104_001643,"kortåndet. Hoster en Del,",utydelfgt patienten udskrevet rask,,31
+273104_001644,ikke kan overses. Jodoformmicke,utydeligt,Fj. af Canylen. 31/10,9
+273104_001644,120 regelm. nogenl. kraft.,utydeligt,normal. cont.,9
+273104_001644,normal. cont.,utydeligt,Sondefodring 1/11 38.7/38.6 Har,9
+273104_001644,og sondefodringen lykkedes ikke,utydeligt,igår. Er tilmorgen kortåndet,9
+273104_001644,nogenl. kraftig. Ved Stethoscopien,utydeligt dæmpning pz patienten u,dæmpning på,29
+273104_001645,fugtige rallelyd. På forfl.,ujydeligt,sikker dæmpninger. Kanylen var,9
+273104_001645,1 ½-2 Timer daglig,utydeligt,Saarets Skyld 2/11 39/39,9
+273104_001645,Stethoscop viser omtr. samme,utydeligt,"som igår, den bronchis",9
+273104_001645,"igår, den bronchis resp",utydeligt,stærkest på v. bagfl.,9
+273104_001646,Fænomener på h. bagfl.,uxy,,3
+273104_001646,,deligt utydeligt,Angulus scap. omtrent ufor.,15
+273105_001553,afstødte væsentlig af samme,utydnlegu,som igaar men tyndere.,9
+273105_001568,sit Navn. Tp. 38.3,utydeligt,>120 af Legemsstørrelse som,9
+273105_001568,stærkt deform Legemsbygning. Underextr.,utydeyige,bøjede i extrem Flexion,9
+273105_001568,Hofteleddet så venstre Knæ,btydeligt,når til Axillen i,9
+273105_001568,Axillen i Dorsalregionen en,utydeligt,", hun ligger stadig",9
+273105_001568,"og Svulst i fauces,",utydeligt,spredte Belægning; ingen svulst,9
+273105_001569,op efter alle flydende,e utydeligt,; fast Føde synker,10
+273105_001569,fauces. P. > 120,utadeligt,". Tg. tør, rød",9
+273105_001569,Har været en Del,utydeligt,"og klynkende, ikke urolig,",9
+273105_001569,afbrudt. Har omtr. spist,y utydeligt,", ikke kastet op.",10
+273105_001569,opfyldt af Slim og,uty,,3
+273105_001569,,deligt utydeligæ,. Intet særlig paa,15
+273105_001570,sovet godt. Spist <,utydeligt,1/2. I fauces ingen,9
+273105_001570,paa Hænder og Underarme,,,0
+273105_001570,,utyxeligt uty,,12
+273105_001570,,deligt utydeligt,fremkommen en Del spredte,15
+273105_001570,"(var tilstede ved Indlæggelsen),",utydelggt,ringe Afskalning,9
+273105_001570,ringe Afskalning,uty,. -,3
+273105_001570,. -,deligt utyieligt,v. males begyndende,15
+273105_001570,v. males begyndende,utydeligt,. Mp. ep,9
+273105_001570,. Mp. ep,uuydeligt,. borde. Vandladning naturlig.,9
+273105_001570,. borde. Vandladning naturlig.,utydeligt,eller ovre,9
+273105_001570,eller ovre,utydeligt,. Mangler Aff. Clysma,9
+273105_001570,100 reglm. teml. lille-,utydeligt,mixt. hydrarg Mp. mist.,9
+273105_001570,Mp. mist. camph. 1,uty,,3
+273105_001570,,deligt utydeligt,20/12 38.7/39.9 Har døset,15
+273105_001571,Haand. Ved v. Spina,udydeligt,post. sup et Barnehaand,9
+273105_001571,"ufølelig, brachialis c. 100",utydeligt,. Hun har ligget,9
+273105_001571,"døsende bevidstløs hen, skriger",utydeligt,op. Spiser lidt Havresuppe.,9
+273105_001571,der er kommet noget,utydeligj,af,9
+273105_001571,af,utydeligt,Decubitussåret uforandret.,9
+273105_001571,Decubitussåret uforandret.,q uty,,4
+273105_001571,,deligt utådeligt,sig godt i at,15
+273105_001645,senere “moribund” F. Inject.atherea,utydeligt,. 1. Pt. laa,9
+273105_001707,fik skrattende Hoste et,utydeligt,Dage før Indl. havde,9
+273105_001707,og cyanotisk. Resp. frevent.,uty,,3
+273105_001707,,deligtutydeligt,en Del medtaget og,15
+273105_001707,Ved Anguli svulne godt,utydeligt,Glandel. Ingen Snue -,9
+273105_001707,eller Afskalning. Der foretages,utydeligt,under Kloroformmaske Tracheostomi sup.,9
+273105_001707,Kloroformmaske Tracheostomi sup. Fik,utydeligt + utyde,+,15
+273105_001707,+,igt fibiger patienten ud,Fibiger.,21
+273105_001708,No 24. Jodoform i,utt,.,3
+273105_001708,.,deligt utyheligt,. Chlorzink. Forbd. m.,15
+273105_001708,100. nogenl. kraftig -,utydelitt,Uregelm. Ved Stethoskopi høres,9
+273105_001708,fugtig Rallelyd i venstre,etydeligt,iøvrigt Respirationen vesicular. Der,9
+273105_001708,ingen Dæmpning. I h.,utydeligt,en,9
+273105_001708,en,uty,,3
+273105_001708,,deligt utydeligt,. Damp. Mixtur camphorat,15
+273105_001708,Mixtur camphorat 1 Theskef,utydeligt,Kl.,9
+273105_001708,Kl.,utydeligt,ser. dan. fort. No.,9
+273105_001709,betyd. Slimrallen. Alæ nasi,utydeligt,. sig under Resp.,9
+273105_001709,under Resp. Urin normal.,utydeligt,3/12 fauces larynx} +,9
+273105_001709,end paa h. Haand.,uty,,3
+273105_001709,,deligt utydeligt,til lille. Resp. c.,15
+273105_001710,Stethoskopisk paavises følgende: Percurssion,utydeligt,af Bagfladerne der er,9
+273105_001710,den stærkt udtalt Dorsalkyphose.,utydeligt,ingen sikre Dæmpninger og,9
+273105_001710,ingen sikre Dæmpninger og,utydeqigt,enkelte ret storblærede Rallelyd.,9
+273105_001710,ret storblærede Rallelyd. Ved,utydråigt,af Forfladerne faas derimod,9
+273105_001710,clavicula dextra til costa,utfdeligt,", derpaa følges en",9
+273105_001710,I Axillen er Tonen,uty,,3
+273105_001710,,deligm utydeligr,ng. mod Bagfladerne. Paa,15
+273105_001711,og høres enkelte (,vtydeligt,) crepiterende Lyde.,9
+273105_001711,) crepiterende Lyde.,utydeligt,Glandlerne nærmest naturlige. Rp.,9
+273105_001711,Glandlerne nærmest naturlige. Rp.,uty,,3
+273105_001711,,deligt unydeligt,c.,15
+273105_001711,c.,utydeligt,1 Th. hv. 2,9
+273105_001711,Th. hv. 2 Time,utydeligt,. Tep.,9
+273105_001711,. Tep.,utyåeligt,Ingen Tegn til Pleuritis.,9
+273105_001711,"et lidende forpint Ansigtsudtryk,",utydeligt,hoster mg.,9
+273105_001711,hoster mg.,utydeligt,hoster ikke igennem da,9
+273105_001712,ikke været Kølig. 2,uty,,3
+273105_001712,,yeligt utydeligt,P. er meget hurtigere,15
+273105_001712,Dæmpning paa Bagfl. men,utyxelift,Dæmpning paa h. Forflade.,9
+273105_001712,I aften ordinered. tinct,uty,,3
+273105_001712,,deligz qtydeligt,gtt. 5,15
+273105_001712,gtt. 5,utydeligt,. 9/12 39.6/38.4 Resp.,9
+273105_001712,været urolig. Hun hoster,utydeligt,". Opbringer rigelig Slim,",9
+273105_001712,tør. Resp. 44. Hun,,,0
+273105_001712,,utydel,,6
+273105_001712,,igt utydeligt uty,,15
+273105_001712,,deligt utydeligt,"i Dag, kun til",15
+273105_001713,Dæmpning paa h. Forflades,e uty,,4
+273105_001713,,deligt utvdeligt,. Crepiterende Rallelyd nedad,15
+273105_001713,nedad paa begge Forflader,uty,,3
+273105_001713,,beltgr utydeligt,paa h. Side og,15
+273106_001694,h. infrascapularis er der,utydeligt,Percussionstone og Resp. er,9
+273106_001695,Stenose (Kun svage Sideind,utydeligt,) Døde Kl. 16,9
+273107_001864,argent. Pensling Sol. Chlorat,å utwdeligt,Gurgling Mixt. hydrarg. gni.,10
+273107_001864,"ikke døset, spist 1/2",utydebigv,ligesom,9
+273107_001864,ligesom,uty,,3
+273107_001864,,deligt utydeligt,I Fauces stærk Rødme,15
+273107_001864,v. Side. Tg. ikke,utydeligt,suspect ingen Snue. Intet,9
+273107_001864,ingen Snue. Intet Exanthem.,utydeligt,normal. ikke ikterisk.,9
+273107_001865,der er en Del,uty,,3
+273107_001865,,deligt utykeligb,Pt. I,15
+273107_001865,Pt. I,utydeligt,Næsebor ses en enkelt,9
+273108_001537,været noget uroligt og,utydalift,Feber. Det blev kortaandet,9
+273108_001537,Ing. Rallelyd paa Forflader.,utydeligt,Indtrækning Jugulum og af,9
+273108_001538,1/4 indl. Kl. 7,utydeligt,m t = 7/4,9
+273108_001553,have haft Leddesm. el.,utydeligt,el. ondt i Halsen.,9
+273108_001553,Hoste. Døser en Del.,utydeligt,Ret stærkt Hoster noget,9
+273108_001553,Ret stærkt Hoster noget,utydellgt,Tp. 38.3 P. lille,9
+273108_001553,fauces spredte Belægninger paa,utydeligt,". Tonsiller, der er",9
+273108_001553,middelstore Gl. sv. Intet,utyåeligt,el. Snue. Nogen Rachitis.,9
+273108_001554,"30. Abd. stærkt udspændt,",,,0
+273108_001554,,utydeligt uty,,12
+273108_001554,,deligr utydeliht,. Extr. naturlige. Intet,15
+273108_001554,skildt Aff. Mixt. camphorata.,utydeligt,Decoct. chinæ. c. Senega,9
+273108_001554,Senega 1 Barneskef. skiftevis,utydeligt,T. Penslig. med Lapis.,9
+273108_001554,Penslig. med Lapis. Kl.,utydeligt,20 Serum antidiphtericum (Nr.,9
+273108_001555,paa Hænder og Fødder.,utydeligt,"meget, sveder en Del.",9
+273108_001555,Ligger tilsyneladn. slap hen,utyøelilt,skal dog være urolig.,9
+273108_001555,ikke hæs og nogen,utydeligt,tilfælde,9
+273108_001555,tilfælde,utp,,3
+273108_001555,,deligt utydeligt,er paa,15
+273108_001555,er paa,utydrl,og,6
+273108_001555,og,t oæ utydeligu,af og til,12
+273108_001555,af og til,utybeligt,ned i,9
+273108_001555,ned i,utydeligt,. Puls c 160,9
+273108_001555,"navnlig paa højre Tonsil,",utydeligt ikke utideligt < m,ikke,24
+273108_001555,ikke,lstærke patiente,< middelstærke.,15
+273108_001556,,utydeligt,Albrecht Nejendam Cont. I,9
+273108_001556,(25/4) Dæmpning som igaar,uty,,3
+273108_001556,,deligt utdderigt,Gjenlyd bag paa forøges.,15
+273108_001556,41-1/ Var stærkt urolig.,utydeligt,bøjede Nakken ned,9
+273108_001556,bøjede Nakken ned,utydeligt,Synes at have haft,9
+273108_001557,I Sygdomsbilledet iaftes,utydeligt,"navnlig fremtrædende Uro, meget",9
+273109_000081,"Syg i 6 Dage,",utyduligt,meget og havde stærk,9
+273109_000081,"Pt. er lille, mager,",utydeligt,og,9
+273109_000081,og,utydeligt,"Tp. 37,9. Pulsen regelmæssig,",9
+273109_000081,er purulent slim uden,utydeligt,Tungen,9
+273109_000081,Tungen,dtydeligt,"med Oidium, lidt Rødme",9
+273109_000081,"Oidium, lidt Rødme og",mtydeligj,"af fauces, et Par",9
+273109_000081,"Glandelsvulst, intet Øreflod. Pt.",utydeligt,stærkt paa,9
+273109_000081,stærkt paa,utydeligt,og Hovedet (er hjemme,9
+273110_001527,24/3 97 Damp. tinct.,utydeligt,5 Dr.,9
+273110_001527,5 Dr.,utyteligt,Brystthe. Mixt. camph. 1,9
+273110_001527,fri efter Operationen Saaret,utydeligt,med Chlorzink Forbandtes m.,9
+273110_001528,stærk. Kl 11 Repetet.,utydelict,Seruminject. dan. f. (Nr.,9
+273110_001529,dels svippede op. Var,utydeligt,det,9
+273110_001529,det,utydepigt,af Dagen havde Knapt,9
+273111_001370,ved Fødslen 4 1/4,utydeligt,", kortforinden han blev",9
+273111_001370,han blev syg 5,utydeliqt,. Han er blevet,9
+273111_001371,har ikke give noget,uty,,3
+273111_001371,,deligt utydeligt,fra sig efter Indlæggelsen.,15
+273111_001371,meget bleg. Ingen tydelig,utydeligt,. Ingen Indtrækning af,9
+273111_001371,incip Pneumon. lobul. hæmor.,utydekigt,in primis pulm sin.,9
+273111_001374,ved Fødslen 4 ¼,utydeligt,vejede i Mandags (for,9
+273111_001374,Dage siden) 4 ½,uttdeligt,. Har faaet halvt,9
+273111_001375,h. Øje et Ulcus,utydeligt,. Rp. Inject,9
+273111_001375,. Rp. Inject,utydeligt,antidift danic fort. cbctm,9
+273111_001376,Ingen særl. tilf. Intet,utydeligt,Purulent Snue. I fauces,9
+273111_001376,ikke tynd. Rp. Borvandsudsl,utydeligt,af Øjnene Kult. 19/7,9
+273111_001376,i Fauces findes nærmest,utydhkigt,kun paa Uvula og,9
+273111_001376,meget tynde. Snue uforandr.,utrdeligt,afføring. Rp. ol. ricini.,9
+37554_001413,"her bronchial, men man",utydeligt,intetsteds tydelig Dæmpning. Hjærtelydene,9
+37554_001414,holdt sig uforandrede. Natten,utydecigt han døde ml 5 ½,Han døde kl 5,20
+37554_001491,"Hoste. Ingen Opkastninger. croupal,",utydeligt,"Hoste, ingen Stenose, eller",9
+37554_001491,"Hoste, ingen Stenose, eller",utydeligt,minimal Mangler Aabning paa,9
+37554_001491,Bel. paa bagerste Svælgvæg,utydeligt,i det hele c.,9
+37554_001492,Rcp. Tj. Creolini,utydeligt,Mixt. camphorat 1 Barneskef,9
+37554_001492,Barneskef hv. II Time,åtydeaigt,. vicini p. n.,9
+37554_001492,på h. femur. Ingen,ntyfeiigv,. Han har været,9
+37554_001493,hård og,utydeligt,som igår. Der har,9
+37554_001493,Hosten er ved Stuegang,utydeligt,med noget kvalt Karakter.,9
+37554_001493,synes indolente glandler uden,utydeligt,Periinfiltrat. Belægningerne i fauces,9
+37554_001493,og > middeltor h.,t utydeligt,Tonsillerne ses,10
+37554_001494,der at være nogen,utwdeligt,Tone i,9
+37554_001494,Tone i,utydeligt,. Infrascap. og Resp.,9
+37554_001494,Rp. kl 19. injectis,uty,,3
+37554_001494,,deligt utydwlixt,Ccm20 (6823 - 2/1,15
+37554_001494,med hvilke da der,uty,,3
+37554_001494,,deligt utydeligt,ikke var Stridor eller,15
+37554_001495,cyanotisk. Extremiteterne dog varme.,æ utydejigt,Affekten er der kun,10
+37554_001495,der noget saadant og,,,0
+37554_001495,,utydeligt uty,,12
+37554_001495,,deligt utydeliet,Kortaandethed bliver herefter teml.,15
+37554_001495,lidet klar Percussion og,utfdåligt,Aandelyd - der nedad,9
+37554_001495,væsenlig uforandrede (det i,utydelfgt,synes at være Uvula).,9
+37554_001496,Rp. Inject serum,utydeligt,kl 12 ½ Cc,9
+37554_001496,der kom anfald af,ucydeligr,med Indtrækninger hvorfor Kl,9
+37554_001496,Chloroformnarkose Tracheotomia sup (,utldeliwt,) Operationen forløb uden,9
+37554_001496,en couperet Vene som,dtydeligt,før Tracheas åbning ved,9
+37554_001497,kraftig. Har sovet rolig,utydeligt,. Har kun,9
+37554_001497,. Har kun,uhydlligt,lidt. Respirationen har været,9
+37554_001497,"opbragt en Del Slim,",utydeligt,Membraner. Han ligger somregel,9
+37554_001497,er noget paaskyndet og,utydeligt,Der ordineredes igaar. tinct,9
+37554_001497,er der nogen diffus,utkdeligt,Svulst. Canyle ligger godt.,9

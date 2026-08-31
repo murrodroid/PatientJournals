@@ -8,15 +8,10 @@
 | Sider målt | 118 |
 | Facit-udgave | `alt_*` (beslutning 24) |
 
-> **Sådan læses tallene.** Dækningen står ved hvert tal, fordi de linjer,
-> der ikke er målt, er de sværeste på siden — dem transskribenten selv ikke
-> kunne læse. Tallet er derfor systematisk for pænt, og forskellen bliver
-> større, jo lavere dækningen er.
->
-> Facit rummer selv fejl (beslutning 37). Én er bekræftet ved kontrol:
-> `37554_001491` skriver "for 2 Dage siden", hvor der på siden står "for 3
-> Dage siden". En enkelt uenighed mellem model og facit er altså ikke i sig
-> selv modellens fejl.
+> **Sådan læses tallene.** Facit rummer selv fejl (beslutning 37). Én er
+> bekræftet ved kontrol: `37554_001491` skriver "for 2 Dage siden", hvor der
+> på siden står "for 3 Dage siden". En enkelt uenighed mellem model og facit
+> er altså ikke i sig selv modellens fejl.
 >
 > `raa` er tallet, leverancen står ved. `arbejdstal` (uden versaler og
 > tegnsætning) er det, vi træffer valg ud fra. De øvrige varianter viser,
@@ -25,212 +20,187 @@
 
 ## Sådan er der målt
 
-Rapporten bruger ordet **forankring** hele vejen igennem, så her er hvad det
-betyder, i almindeligt sprog:
+**Hele siden sammenlignes i ét stræk, fra øverste linje til nederste.** Facits
+tekst og modellens tekst stilles op mod hinanden som to lange tekster, og der
+tælles, hvor mange enkelttegn der skal rettes, indsættes eller slettes for at
+komme fra den ene til den anden. Linjeskiftene er taget ud på begge sider, og
+ord, der er delt hen over et linjeskift, er sat sammen igen.
 
-Facits tekst søges frem i modellens tekst, én linje ad gangen, fra toppen af
-siden og nedefter. Søgningen tåler læsefejl — den leder efter det stykke
-modeltekst, der ligner facit-linjen mest, og godtager det, hvis det ikke
-afviger for meget. Er stykket fundet, er linjen *forankret*, og de to
-tekststykker kan sammenlignes tegn for tegn. Kan linjen ikke findes, går den
-helt ud af målingen, i begge tekster.
+**Der bliver ikke søgt.** Ingen linje bliver ledt op inde i modellens tekst.
+Der er kun én vej gennem siden, oppefra og ned, og hele facit er altid med.
+Det er den vigtige forskel fra de tidligere rapporter: dengang blev hver
+facit-linje søgt frem i modelsvaret, og en linje, der ikke kunne findes, faldt
+helt ud af regnestykket i begge tekster. Et gentaget ord kunne dermed sende
+søgningen langt ned på siden og tage alle de mellemliggende linjer med sig ud
+af målingen. Det kan ikke længere ske, og der findes derfor heller ikke
+længere noget tal for, hvor stor en del af siden der blev målt: svaret er
+altid hele siden.
 
-Der søges i modellens **rå tekst uden hensyn til dens linjeskift**. Derfor er
-det ligegyldigt for tallene, om modellen følger sidens linjer eller laver sine
-egne — og derfor kan vi måle bagefter, hvad den faktisk gjorde (se
-*Linjetrofasthed* nedenfor) i stedet for at gætte på forhånd.
+**Rækkefølgen tæller med.** Skriver modellen sidens linjer i en anden orden,
+end de står, koster det. Det er med vilje: rækkefølgen er data i en
+patientjournal. Hvor meget af fejlen der skyldes netop dét, står i afsnittet
+*Rækkefølge og linjer* nedenfor.
 
-Hvor facit siger `[?]` — et sted transskribenten ikke kunne læse — deles
-linjen, og de kendte stumper på hver side søges hver for sig. Det, modellen
-skrev i mellemrummet, måles ikke; der findes ingen sandhed at måle det imod.
-Men det gemmes, både fordi længden siger noget om, hvor tilbøjelig modellen er
-til at digte, og fordi det er dens bud på et sted, ingen har kunnet læse.
+**Hvor facit siger `[?]`** — et sted transskribenten ikke kunne læse — må
+modellen skrive noget, uden at det koster. Der findes jo ingen sandhed at måle
+det imod. Men fribilletten har et loft: op til 15 tegn indhold
+(mellemrum tæller ikke med) er gratis, og skriver modellen mere, koster
+overskuddet ét point pr. tegn. Loftet er der, fordi et sted uden loft ville
+lade en model springe vilkårligt langt frem i sin egen tekst gratis og dermed
+få rigtige fejl slugt af det ulæselige sted ved siden af. Det, modellen skrev
+de steder, gemmes og står nederst i rapporten.
 
-**Ordforklaring:** *tegnafstand* = hvor mange enkelttegn der skal rettes,
-indsættes eller slettes for at nå fra modellens tekst til facits. *CER* er den
-afstand delt med antallet af tegn i facit; *WER* er det samme regnet på hele
-ord, og den er derfor altid et større tal — ét forkert bogstav gør hele ordet
-forkert. *Fladet tekst* betyder, at linjeskiftene er taget ud og ord, der er
-delt hen over et linjeskift, er sat sammen igen.
+**Ordforklaring:** *tegnafstand* = antallet af enkelttegn, der skal rettes,
+indsættes eller slettes. *CER* (tegnfejl) er den afstand delt med antallet af
+tegn i facit; *WER* (ordfejl) er det samme regnet på hele ord og er derfor
+altid et større tal — ét forkert bogstav gør hele ordet forkert. *Fladet
+tekst* betyder, at linjeskiftene er taget ud og delte ord samlet igen.
 
-## Hovedtal — fladet tekst
+## Hovedtal — hele siden
 
-Målt på **97,20 % af facits tegn** (93,58 % af linjerne). De udeladte er de sværeste.
+Målt på alle 118 siders fulde tekst — 54284 tegn i alt,
+fordelt på 2586 linjer, hvoraf 297 rummer mindst ét `[?]`.
+Intet er udeladt.
 
-| Variant | Tegnfejl (CER) | Ordfejl (WER) | Tegnafstand | Facit-tegn |
-|---|---:|---:|---:|---:|
-| `raa` | 3,72 % | 19,71 % | 2350 | 63148 |
-| `uden_versaler` | 3,72 % | 19,71 % | 2350 | 63148 |
-| `uden_diakritika` | 3,72 % | 19,71 % | 2350 | 63148 |
-| `uden_tegnsaetning` | 3,92 % | 19,82 % | 2349 | 59857 |
-| `arbejdstal` | 3,92 % | 19,82 % | 2349 | 59857 |
-| `lempeligst` | 3,92 % | 19,82 % | 2349 | 59857 |
-
-Af de 297 linjer med mindst ét `[?]` kunne forankringen redde **280** ind i målingen ved at måle de kendte stumper omkring det ulæselige sted. Grundreglen er ellers, at hele linjen går ud (beslutning 38), så uden det trin ville dækningen have været væsentligt lavere.
-
-## Uden de linjer, der rummer et ulæseligt sted
-
-Hovedtallet ovenfor tager de kendte stumper med fra linjer, hvor
-transskribenten gav op — teksten på hver side af et `[?]`. Det er
-netop dér, både modellen og opdelingen er mest usikre, så det kan
-trække tallet skævt. Her er den samme måling med de linjer helt ude.
-
-Den strenge måling ser **87,84 % af facits tegn** (resten ligger på linjer med mindst ét `[?]`) og fik fat i 99,46 % af dem.
+Alle seks varianter står side om side (beslutning 26); ingen af dem må
+vælges efter, hvilken der klæder resultatet bedst. **Tegnfejl er
+beslutningstallet**, ordfejl står ved siden af som et groft mål for, hvor
+mange ord der overhovedet er ramt.
 
 | Variant | Tegnfejl (CER) | Ordfejl (WER) | Tegnafstand | Facit-tegn |
 |---|---:|---:|---:|---:|
-| `raa` | 3,72 % | 19,72 % | 2109 | 56719 |
-| `uden_versaler` | 3,72 % | 19,72 % | 2109 | 56719 |
-| `uden_diakritika` | 3,72 % | 19,72 % | 2109 | 56719 |
-| `uden_tegnsaetning` | 3,92 % | 19,77 % | 2108 | 53778 |
-| `arbejdstal` | 3,92 % | 19,77 % | 2108 | 53778 |
-| `lempeligst` | 3,92 % | 19,77 % | 2108 | 53778 |
+| `raa` | 8,46 % | 23,58 % | 5368 | 63455 |
+| `uden_versaler` | 8,46 % | 23,58 % | 5367 | 63455 |
+| `uden_diakritika` | 8,46 % | 23,58 % | 5368 | 63455 |
+| `uden_tegnsaetning` | 8,73 % | 23,21 % | 5242 | 60054 |
+| `arbejdstal` | 8,73 % | 23,21 % | 5241 | 60054 |
+| `lempeligst` | 8,73 % | 23,21 % | 5241 | 60054 |
 
-**Sammenlign de to.** Hovedtallet er 3,92 %, den strenge er 3,92 % (`arbejdstal`) — en forskel på 0,00 %.
+## Den strenge måling — uden linjer med et ulæseligt sted
 
-Hvor stor en forskel der skal til, før den betyder noget, kan aflæses
-af selvtesten: dér forvanskes alle bogstaver lige meget, så de svære
-linjer er netop IKKE sværere end resten, og alligevel skiller de to tal
-sig 0,08 procentpoint ad (7,92 % mod 7,84 % ved 10 % forvanskning). En
-forskel af den størrelse er maskineriet selv. Er forskellen flere gange
-større, kommer den fra materialet, og så siger retningen følgende:
+Hovedtallet ovenfor har alle linjer med, også dem hvor transskribenten
+gav op midt i og skrev `[?]`. Her er den samme måling, hvor hele den
+slags linje er taget ud af facit, så modellen hverken kan straffes eller
+belønnes for dem. Det er samtidig konventionen i faget: Transkribus og
+beslægtede værktøjer udelader hele linjen ved ulæselige steder, så netop
+dette tal kan sammenlignes med anden forskning.
 
-**Er den strenge lavere**, er de reddede stumper sværere end resten af
-teksten. Det er det ventede — de ligger op ad de steder, transskribenten
-selv gav op over for. Hovedtallet er da en smule for pessimistisk og kan
-bruges som det står, fordi det hviler på mest tekst.
+Den strenge måling ser **87,84 % af facits tegn**; resten ligger på linjer med mindst ét `[?]`.
 
-**Er den strenge højere, er det et advarselstegn**, og så er det den
-strenge, der gælder. Grunden er, at en reddet stump kun tæller med i
-hovedtallet, hvis den overhovedet kunne findes i modellens svar. Har
-modellen slagtet stumpen — læst noget helt andet, eller sprunget stedet
-over — kan søgningen ikke genkende den, og linjen falder UD af målingen
-i stedet for at tælle som en fejl. Tilbage bliver kun de stumper,
-modellen klarede. Hovedtallet opgør altså de vellykkede redninger og
-kommer til at se pænere ud, jo dårligere modellen faktisk læste de
-svære steder. Den strenge måling kan ikke rammes af det, fordi den slet
-ikke ser de linjer.
-
-## Pr. linje
-
-Samme tekst, men målt linje for linje efter at linjerne er parret via
-forankringen. Skrider ikke ved et afvigende linjebrud, fordi parringen
-sker på indhold og ikke på linjenummer.
+**Udeladelsen er FAST.** Den afhænger udelukkende af facit — af hvilke
+linjer transskribenten satte et `[?]` i — og er derfor nøjagtig den
+samme for alle seks varianter og for alle modeller, vi nogensinde måler.
+Det er den afgørende forskel fra den *dækning*, de tidligere rapporter
+opgjorde: dén flyttede sig, alt efter hvor meget af siden søgningen
+kunne genfinde i det enkelte modelsvar, og gav dermed mest rabat til den
+model, der afveg mest. Det væltede konklusionen 30. august. Sådan et tal
+findes ikke længere nogen steder i rapporten.
 
 | Variant | Tegnfejl (CER) | Ordfejl (WER) | Tegnafstand | Facit-tegn |
 |---|---:|---:|---:|---:|
-| `raa` | 3,84 % | 19,47 % | 2350 | 61208 |
-| `uden_versaler` | 3,84 % | 19,47 % | 2350 | 61208 |
-| `uden_diakritika` | 3,84 % | 19,47 % | 2350 | 61208 |
-| `uden_tegnsaetning` | 4,07 % | 19,58 % | 2349 | 57736 |
-| `arbejdstal` | 4,07 % | 19,58 % | 2349 | 57736 |
-| `lempeligst` | 4,07 % | 19,58 % | 2349 | 57736 |
+| `raa` | 12,74 % | 27,33 % | 7238 | 56827 |
+| `uden_versaler` | 12,74 % | 27,33 % | 7237 | 56827 |
+| `uden_diakritika` | 12,74 % | 27,33 % | 7238 | 56827 |
+| `uden_tegnsaetning` | 12,52 % | 27,12 % | 6743 | 53863 |
+| `arbejdstal` | 12,52 % | 27,12 % | 6742 | 53863 |
+| `lempeligst` | 12,52 % | 27,12 % | 6742 | 53863 |
 
-Linjer der er nøjagtig rigtige (`arbejdstal`): 988 af 2420 = 40,83 %
+**Sammenlign de to.** Hovedtallet er 8,73 %, den strenge er 12,52 % (`arbejdstal`) — en forskel på 3,79 %.
 
-## Kontrol — hele siden uden forankring
+**Er den strenge lavere**, er de svære linjer sværere end resten af
+teksten — det ventede. Hovedtallet kan bruges, som det står, fordi det
+hviler på al teksten.
 
-På de **25 sider uden et eneste `[?]`** kan hele siden
-sammenlignes direkte, uden forankring og med fuld dækning. Det er
-den eneste måling i rapporten, der ikke kan pynte på noget.
+**Er den strenge højere, gælder den strenge.** Så har modellen fået
+noget forærende af de ulæselige steder: den skrev noget dér, som slap
+gratis igennem under loftet, og det pynter kun på hovedtallet. Den
+strenge måling kan ikke rammes af det, fordi den slet ikke ser de
+linjer. Vælg derfor altid det højeste af de to, når de er uenige.
 
-| Variant | Tegnfejl (CER) | Ordfejl (WER) | Tegnafstand | Facit-tegn |
-|---|---:|---:|---:|---:|
-| `raa` | 9,78 % | 23,54 % | 1050 | 10737 |
-| `uden_versaler` | 9,78 % | 23,54 % | 1050 | 10737 |
-| `uden_diakritika` | 9,78 % | 23,54 % | 1050 | 10737 |
-| `uden_tegnsaetning` | 10,07 % | 23,55 % | 1024 | 10164 |
-| `arbejdstal` | 10,07 % | 23,55 % | 1024 | 10164 |
-| `lempeligst` | 10,07 % | 23,55 % | 1024 | 10164 |
+## Rækkefølge og linjer
 
-Kontrollen ligger på **10,07 %** mod hovedtallets **3,92 %** (`arbejdstal`) — en forskel på 6,15 %.
-
-**Ligger kontrollen væsentligt HØJERE, måler forankringen ikke alt.**
-Den ser hverken tekst, modellen har fundet på, eller tekst, den har
-sprunget over — kun det, der kunne parres. Forskellen er altså ikke
-støj, den er den del af fejlen, hovedtallet lader ligge, og den skal
-læses sammen med opdigtningstallene nedenfor.
-
-Ligger de to tæt, måler hovedtallet reelt hele teksten, og forskellen
-mellem dem er blot, at kontrollen kun dækker de nemmeste sider — dem
-helt uden ulæselige steder.
-
-## Opdigtning
-
-To signaler. Ingen af dem er et korrekthedsmål — der findes ingen sandhed
-at måle imod dér, hvor facit siger `[?]` — men de siger, om modellen
-skriver noget, den ikke har dækning for. Det tredje sted at kigge er
-kontroltallet ovenfor: det er det eneste, der tæller opdigtet tekst med
-som egentlige fejl.
-
-| Signal | Værdi |
-|---|---:|
-| Modeltekst uden modstykke i facit | 5527 tegn = 9,32 % af modellens tekst |
-| Tekst skrevet dér hvor facit siger `[?]` | 894 tegn fordelt på 92 steder |
-
-**"Uden modstykke" har et gulv og er ikke nul, selv når intet er digtet.**
-Modellen skriver noget dér, hvor facit siger `[?]`, og den skriver også de
-linjer, forankringen ikke kunne parre. Målt på facit mod facit selv ligger
-gulvet omkring 2.500 tegn for øvemængden (se `selvtest.md`). Tallet skal
-derfor læses som et tillæg til det gulv, ikke som et absolut mål for
-opdigtning.
-
-## Linjetrofasthed
-
-Svaret på det, der indtil nu har været en formodning (beslutning 35):
-laver modellen sine egne linjeskift, eller følger den sidens?
+Målingen ovenfor er streng om rækkefølgen: skriver modellen sidens
+linjer i en anden orden, tæller det som fejl på lige fod med forkert
+læste ord. Tallene her viser, hvor meget af fejlen der er af den slags.
+De regnes ved at parre hver facit-linje med den modellinje, den ligner
+mest, og se efter, hvilken orden de parrede linjer så står i.
 
 | Mål | Værdi |
 |---|---:|
-| Facit-linjer der ligger inden for én af modellens linjer | 2420 af 2420 |
-| Facit-linjer der får deres egen modellinje | 2420 af 2420 |
+| Facit-linjer i alt | 2586 |
+| Linjer med et genkendeligt modstykke hos modellen | 2510 |
+| Linjer uden modstykke (modellen sprang dem over eller læste noget helt andet) | 76 |
+| Parrede linjer, der står i forkert indbyrdes rækkefølge | 6 |
+| Linjer modellen ramte nøjagtigt | 1000 |
 
-**Sådan læses de to tal.** Er de begge lig antallet af målte linjer,
-har modellen skrevet sidens linjer, som de står — én facit-linje pr.
-modellinje. Er det FØRSTE tal højt og det andet lavt, har modellen
-samlet flere af sidens linjer i én af sine egne. Er det første tal lavt,
-løber facits linjer hen over modellens linjeskift, altså laver modellen
-sine egne brud. Ingen af delene er en fejl i sig selv, og ingen af dem
-påvirker tallene ovenfor — men svaret afgør, om linjeskiftene kan
-afleveres videre til kollegaens `PageLine`-skema, og det er værd at vide.
+"Ramte nøjagtigt" betyder ord for ord ens, når man ser bort fra
+versaler, accenter og tegnsætning.
+
+> **Forbehold — det her er vejledende tal, ikke beslutningstal.** De
+> kommer ikke fra hovedmålingen, men fra en parring af linjer lavet
+> alene til formålet. Parringen tager facit-linjerne oppefra og ned og
+> giver hver af dem den bedste ledige modellinje. Det har en kendt
+> svaghed: står der flere næsten ens linjer på siden — og det gør der
+> tit i journalmateriale, hvor de samme vitale værdier gentages — kan en
+> tidlig facit-linje nå at lægge beslag på en modellinje, der rettelig
+> hørte til en senere facit-linje. Så bliver både "uden modstykke" og
+> "forkert rækkefølge" en anelse for høje. En rigtig løsning kræver en
+> global optimal tildeling og er ikke lavet. Brug tallene til at forstå
+> tegnfejlen, ikke til at træffe beslutninger.
+
+## Opdigtning
+
+Signaler for, om modellen skriver noget, den ikke har dækning for.
+Ingen af dem er et korrekthedsmål — dér hvor facit siger `[?]`, findes
+der ingen sandhed at måle imod.
+
+| Signal | Værdi |
+|---|---:|
+| Tekst henført til de ulæselige steder (øvre grænse) | 4134 tegn fordelt på 354 steder |
+| Heraf over fribilletten, og altså talt som fejl | 168 tegn |
+| Modellens tekst i alt mod facits | 59305 mod 54284 tegn |
+
+**De 4134 tegn er en ØVRE grænse, ikke et mål for opdigtning.**
+Fribilletten er gratis indtil loftet, og målingen har derfor ingen grund
+til at holde igen: den lader gerne det ulæselige sted æde et par af
+nabordene med, når de alligevel er gratis. En del af tallet er altså
+tekst, modellen har læst helt rigtigt. Det er efterprøvet — på rigtige
+sider lægger tallet sig lige præcis op ad loftet, netop fordi den sidste
+plads bliver fyldt op med korrekt nabotekst.
+
+**Det skarpe signal er de 168 tegn over fribilletten.** Dem har
+modellen skrevet ud over, hvad et ulæseligt sted overhovedet kan dække,
+og de er talt som fejl. Er det tal stort, skriver modellen lange
+passager, hvor transskribenten kun kunne se ét ord — og så er hovedtallet
+i forvejen mildt over for den, fordi den første del af hvert sted var
+gratis.
+
+Den sidste linje er det groveste, men også det mest robuste signal:
+skriver modellen væsentligt flere tegn end der står på siden, har den
+lagt noget til; skriver den væsentligt færre, har den sprunget noget
+over. Begge dele er allerede talt med i tegnfejlen ovenfor — linjen her
+siger blot, hvilken af de to slags fejl der dominerer.
 
 ## De 10 værste sider
 
-Sorteret efter `arbejdstal`. Se dem efter med øjnene, før tallet tros —
-en enkelt side med en fejlagtig parring kan trække hele hovedtallet.
+Sorteret efter tegnfejl (`arbejdstal`). Se dem efter med øjnene, før
+tallet tros. Kolonnen *Linjer med `[?]`* siger, hvor svær siden var at
+læse i første omgang; *Linjer i forkert orden* siger, om fejlen er
+omrokering frem for forkert læsning; *Modeltegn/facittegn* siger, om
+modellen skrev for meget eller for lidt.
 
-| Side | Tegnfejl | Dækning | Linjer målt | Modeltekst uden modstykke |
+| Side | Tegnfejl | Linjer med `[?]` | Linjer i forkert orden | Modeltegn/facittegn |
 |---|---:|---:|---:|---:|
-| `273100_001258` | 6,36 % | 99,03 % | 23/23 | 34 |
-| `273108_001554` | 6,11 % | 94,90 % | 20/23 | 83 |
-| `273105_001571` | 5,95 % | 95,09 % | 22/23 | 91 |
-| `273103_001463` | 5,80 % | 97,30 % | 22/28 | 40 |
-| `273108_001557` | 5,71 % | 97,66 % | 6/6 | 32 |
-| `273100_001294` | 5,54 % | 99,21 % | 22/22 | 23 |
-| `273103_001437` | 5,54 % | 96,30 % | 24/26 | 51 |
-| `273109_000081` | 5,53 % | 94,72 % | 20/20 | 65 |
-| `37554_001498` | 5,52 % | 98,50 % | 12/14 | 28 |
-| `273103_001436` | 5,24 % | 98,09 % | 26/26 | 45 |
-
-## De 10 tyndest målte sider
-
-Lav dækning er et værre tegn end høj tegnfejl: her er der næsten ikke
-målt på siden, så dens tal betyder ikke noget. En side, hvor modellen
-sprang det meste over eller skrev noget helt andet, dukker op HER — ikke
-i listen ovenfor, hvor den tværtimod ser god ud.
-
-| Side | Dækning | Tegnfejl | Linjer målt | Modeltekst uden modstykke |
-|---|---:|---:|---:|---:|
-| `273104_001633` | 74,93 % | 4,15 % | 21/26 | 203 |
-| `273108_001555` | 89,17 % | 4,20 % | 18/18 | 114 |
-| `273110_001529` | 90,32 % | 2,40 % | 6/6 | 47 |
-| `273100_001306` | 90,59 % | 4,19 % | 21/26 | 70 |
-| `273105_001570` | 91,21 % | 3,24 % | 24/26 | 115 |
-| `273105_001708` | 92,04 % | 3,23 % | 26/28 | 114 |
-| `273105_001711` | 92,95 % | 4,06 % | 21/23 | 101 |
-| `273104_001640` | 93,14 % | 3,20 % | 23/25 | 92 |
-| `273098_001503` | 93,45 % | 3,39 % | 16/17 | 42 |
-| `273103_001467` | 93,75 % | 2,70 % | 23/25 | 90 |
+| `273105_001572` | 33,33 % | 0/4 | 0 | 99/76 |
+| `273108_001538` | 28,43 % | 1/4 | 0 | 122/93 |
+| `273106_001695` | 27,88 % | 1/5 | 0 | 128/99 |
+| `273104_001635` | 25,66 % | 0/7 | 0 | 126/103 |
+| `273100_001308` | 24,76 % | 0/3 | 0 | 114/91 |
+| `273108_001557` | 23,74 % | 1/6 | 0 | 157/128 |
+| `273110_001529` | 21,37 % | 1/6 | 0 | 160/124 |
+| `273105_001714` | 19,18 % | 0/9 | 0 | 153/130 |
+| `273100_001260` | 18,75 % | 2/8 | 0 | 197/161 |
+| `273111_001377` | 17,11 % | 0/8 | 0 | 185/162 |
 
 ## Hvad modellen skrev, hvor facit siger `[?]`
 
@@ -238,24 +208,28 @@ Skrives ud, fordi det er modellens bud på steder, transskribenten
 ikke kunne læse. Det er IKKE facit og må aldrig skrives ind i det —
 arbejdsgangen med udklip og ja/nej hører i stage 07.
 
-| Side | Facit | Modellens bud |
-|---|---|---|
-| `273098_001498` | `[?]` | utydeligt |
-| `273098_001498` | `[?]` | utydelsgt |
-| `273098_001499` | `[?]` | utydeligt |
-| `273098_001503` | `[?]` | utydeligj |
-| `273098_001503` | `[?]` | utydeligt |
-| `273098_001503` | `[?]` | utydeligt |
-| `273098_001503` | `[?]. [?]` | utydeligt. utydeuigt |
-| `273098_001509` | `[?] [?]` | utydelijt utydeligt |
-| `273098_001512` | `[?]` | utydeligt |
-| `273098_001513` | `[?]` | utydeligt |
-| `273100_001294` | `[?]` | utydeligt |
-| `273100_001295` | `[?]` | utydeliet |
-| `273100_001306` | `[?]` | utydeligt |
-| `273100_001306` | `[?]` | utydelimt |
-| `273100_001306` | `[?]` | utydeligt |
-| … | | *77 steder mere* |
+Facits egne ord på hver side af det ulæselige sted står med, så
+stedet kan findes igen på siden med det blotte øje. Den fulde liste
+ligger i gab-filen.
+
+| Side | Facit før | Modellens bud | Facit efter | Tegn |
+|---|---|---|---|---:|
+| `273098_001496` | rachitisk. Der er rigelig | gtydelige | Udflod fra Næsen, ingen | 9 |
+| `273098_001498` | noget har ikke været | utydeligt | , drikker Kun lidt, | 9 |
+| `273098_001498` | at afstødes. Foetor idag | utydelsgt | mindre. P. nogenlunde regelm. | 9 |
+| `273098_001498` | Rp. Serum dan. 10cbctm. | utydeligt | ufor. Rp. | 9 |
+| `273098_001498` | ufor. Rp. | utyrecigt | . sol. nitr. arg. | 9 |
+| `273098_001499` | varm. Pulsen er regelmæssig | utydeligt | kraftig. Døser ikke. Igår | 9 |
+| `273098_001499` | middelstærke rester af belægning | utydeligt | (infiltration) Udseendet er i | 9 |
+| `273098_001502` | Hun er varm p | utydeligt | Extremiteterne nu, køligere p | 9 |
+| `273098_001502` | gennem næsen. 2 dr | uty |  | 3 |
+| `273098_001502` |  | deligt uwydeligt | P. c 120 lille. | 15 |
+| `273098_001503` | begyndte at drikke; med | utydeligj | kl 1 Tiden begyndte | 9 |
+| `273098_001503` | Tiden begyndte hun at | utydeligt | Skrigeture med c. 10 | 9 |
+| `273098_001503` | v. Varmedunke. Ingen Kramper, | utydeligt | Opkastn. | 9 |
+| `273098_001503` | Opkastn. | utydeligt | 2 | 9 |
+| `273098_001503` | 2 | utydeligt | Aabn. og Vandladn. i | 9 |
+| … | | *339 steder mere* | | |
 
 ## Noter
 

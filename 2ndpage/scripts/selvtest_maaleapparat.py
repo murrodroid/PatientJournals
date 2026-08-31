@@ -1,6 +1,6 @@
 """Selvtest af maaleapparatet -- stage 03.
 
-Koerer maalingen mod facit selv og mod ti konstruerede forvanskninger, hvor
+Koerer maalingen mod facit selv og mod elleve konstruerede forvanskninger, hvor
 det rigtige svar er kendt paa forhaand. Ingen modelkald: der er ikke koert et
 eneste endnu, og formatet skal aftales FOER, saa tallene ikke bliver formet
 efter, hvad der ser godt ud.
@@ -11,6 +11,13 @@ maaler**. Naar vi selv har byttet 1.000 bogstaver og maaleren finder 940, er
 de 60 skaevheden, og den skal staa skrevet ved siden af hovedtallet i stedet
 for at vaere et skjult fradrag.
 
+Skrevet om 2026-08-31, da forankringen blev fjernet (se `maal.py`s docstring).
+Maalingen er nu én redigeringsafstand over hele siden, i raekkefoelge, uden
+soegning. Alt hvad selvtesten sagde om daekning, uforankrede linjer og knappen
+`MAKS_AFVIGELSE` er faldet vaek med mekanismen. Til gengaeld er den fejltype,
+der vaeltede den gamle maaling, kommet ind som sin egen forvanskning:
+`gentaget_ord`.
+
 Kun **oevemaengden** bruges. Proevemaengden er laast til den endelige
 bedoemmelse, og selvom en selvtest uden modelkald ikke kan afsloere noget om
 den, holdes vanen: proevesiderne roeres ikke, foer der skal doemmes.
@@ -20,8 +27,8 @@ Skriver:
     stages/03_maaleapparat/output/rapportformat.md
     stages/03_maaleapparat/output/gab_eksempel.csv
 
-Koerer ca. 9 minutter: de forvanskede udgaver rammer sjaeldent et ordret traef,
-saa hver stump skal findes ved naermeste-udsnit-soegning. Det er ikke haengt.
+Koerer nogle minutter: hver forvanskning er en fuld tabel-DP pr. side, og
+tabellen er sidens tegn gange modelsvarets tegn. Det er ikke haengt.
 """
 from __future__ import annotations
 
@@ -35,7 +42,7 @@ ROD = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROD / "src"))
 
 from andenside import cer  # noqa: E402
-from andenside.maal import MAKS_AFVIGELSE, maal_saet  # noqa: E402
+from andenside.maal import maal_saet  # noqa: E402
 from andenside.rapport import skriv_gab, skriv_rapport  # noqa: E402
 
 FACIT = ROD / "stages" / "02_facit" / "output" / "facit.jsonl"
@@ -46,6 +53,12 @@ MAERKE = "[?]"
 FYLD = "utydeligt"          # det en model kunne finde paa at skrive paa et [?]
 FROE = 20260822             # fast, saa to koersler giver samme forvanskning
 BOGSTAVER = "abcdefghijklmnopqrstuvwxyzæøå"
+
+# Mindste laengde for et ord, der taeller som "gentaget" i `gentaget_ord`.
+# Kortere ord er funktionsord ("ikke", "den"), og de staar paa naesten hver
+# eneste side flere gange -- de ville goere proeven til en proeve paa noget
+# andet end det, der faktisk skete paa 273107_001864.
+GENTAGET_MINDSTE_LAENGDE = 5
 
 
 def oevemaengden() -> list[dict]:
@@ -146,14 +159,85 @@ def halv_side(linjer, rng):
     return "\n".join(rene[: n // 3] + rene[2 * n // 3 :]), 0
 
 
+# --------------------------------------------------------------------------
+# Gentaget ord -- den fejltype, der vaeltede den gamle maaling
+# --------------------------------------------------------------------------
+
+def _ordkerne(raa: str) -> str:
+    """Ordet uden omgivende tegnsaetning og uden hensyn til store bogstaver."""
+    return raa.strip("".join(cer.PUNCTUATION)).lower()
+
+
+def _gentaget_ord(linjer: list[str]) -> str | None:
+    """Det laengste ord paa mindst fem tegn, der staar paa mindst to linjer.
+
+    Ord med et `[?]` i springes over: de er ikke ord, og modelteksten skriver
+    noget andet paa stedet, saa de kunne alligevel ikke findes igen dér.
+
+    Ved lige lange kandidater vaelges den, der optraeder foerst paa siden --
+    `dict` bevarer indsaettelsesordenen, og `max` tager den foerste af de
+    stoerste. Valget skal vaere fast, ellers giver to koersler hvert sit tal.
+    """
+    linjer_med: dict[str, set[int]] = {}
+    for nr, linje in enumerate(linjer):
+        for raa in linje.split():
+            if MAERKE in raa:
+                continue
+            kerne = _ordkerne(raa)
+            if len(kerne) >= GENTAGET_MINDSTE_LAENGDE:
+                linjer_med.setdefault(kerne, set()).add(nr)
+    kandidater = [k for k, hvor in linjer_med.items() if len(hvor) >= 2]
+    return max(kandidater, key=len) if kandidater else None
+
+
+def gentaget_ord(linjer, rng):
+    """Almindelig lille laesefejl paa FOERSTE forekomst af et gentaget ord.
+
+    Det er praecis mekanismen fra `273107_001864`: "ingen Snue" staar to gange
+    i facit selv. Skrev modellen den foerste forekomst en anelse forkert, fandt
+    den gamle soegning i stedet det ordrette traef nede i den ANDEN forekomst,
+    flyttede soegepunktet dertil og tabte alt derimellem -- 26 af 29 linjer.
+    Uden soegning findes der kun én vej gennem siden, og begge de to indlagte
+    bogstavfejl skal derfor vaere at finde igen.
+
+    Senere forekomster af ordet staar uroert. Findes der ikke et gentaget ord
+    paa siden, er der intet at proeve, og siden leveres som `perfekt`.
+    """
+    kerne = _gentaget_ord(linjer)
+    if kerne is None:
+        return perfekt(linjer, rng)
+
+    rene = _uden_maerker(linjer)
+    for nr, linje in enumerate(rene):
+        ord_ = linje.split()
+        for i, raa in enumerate(ord_):
+            if _ordkerne(raa) != kerne:
+                continue
+            pladser = [j for j, c in enumerate(raa) if c.isalpha()]
+            if len(pladser) < 2:
+                # Kan ikke bytte to bogstaver, saa der er ingen proeve at
+                # lave. Siden leveres urort frem for med ét enkelt bytte, saa
+                # det talte antal indlagte fejl altid passer.
+                return perfekt(linjer, rng)
+            nyt = list(raa)
+            for j in rng.sample(pladser, 2):
+                c = raa[j]
+                b = rng.choice([x for x in BOGSTAVER if x != c.lower()])
+                nyt[j] = b.upper() if c.isupper() else b
+            ord_[i] = "".join(nyt)
+            rene[nr] = " ".join(ord_)
+            return "\n".join(rene), 2
+    # Ordet fandtes i facit, men ikke som eget ord i modelteksten (et `[?]`
+    # kan have klaebet det sammen med naboen). Ingen proeve.
+    return perfekt(linjer, rng)
+
+
 FORVANSKNINGER = [
     ("facit mod sig selv", perfekt,
-     "Nul fejl i alle varianter. Sætter samtidig **gulvet** for kolonnen "
-     "\"modeltekst uden modstykke\": den er ikke nul her, selvom intet er "
-     "digtet. Det, der står, er ordet `utydeligt` dér hvor facit har `[?]` "
-     "plus teksten på de linjer, der ikke kunne forankres. Ved en rigtig "
-     "måling skal tallet læses som et tillæg til dette gulv, ikke som et "
-     "absolut mål for opdigtning."),
+     "Nul fejl i alle varianter. Det ord, \"modellen\" skriver dér hvor facit "
+     "har `[?]`, er kortere end jokerfeltets loft og skal derfor slippe helt "
+     "gratis igennem. Er tallet ikke nul her, er alt andet i tabellen "
+     "ligegyldigt."),
     ("alle ø skrevet som ö", omlyd,
      "`raa` får fejl; `uden_diakritika` og `lempeligst` skal være nul. Det er "
      "den hyppigste enkeltforveksling i materialet, og den er ortografisk "
@@ -165,30 +249,43 @@ FORVANSKNINGER = [
      "nul. Bindestregen er bevidst ladt stå — fjernes den, forsvinder "
      "orddelingen med den, og så måler prøven to ting på én gang."),
     ("hele siden som ét afsnit", et_afsnit,
-     "Samme tal som facit mod sig selv. Målingen må ikke afhænge af, om "
+     "Tæt på facit mod sig selv, men **ikke helt nul**, og resten er et målt "
+     "fund: uden linjeskift kan et ord, facit har delt hen over to linjer, "
+     "ikke samles igen, så `Infektions- sygdomme` bliver stående som to ord "
+     "(efterprøvet linje for linje). Målingen må ellers ikke afhænge af, om "
      "modellen laver sine egne linjeskift (beslutning 35)."),
     ("hvert linjebrud flyttet ét ord", forskudte_brud,
-     "Samme tal som facit mod sig selv. Uden forankringen ville alt efter "
-     "det første brud være forkert — det er hele grunden til, at linjerne "
-     "parres på indhold og ikke på linjenummer."),
+     "Samme lille rest og samme årsag: bindestregen står nu midt på en linje "
+     "i stedet for sidst, og så samles det delte ord ikke. Linjeskiftene er "
+     "taget ud på begge sider før målingen, så hvor de sad, må ellers ikke "
+     "kunne ses i tallet."),
     ("et opdigtet afsnit tilføjet", opdigtet,
-     "Tegnfejlen ser det ikke. Kun \"modeltekst uden modstykke\" gør, og den "
-     "springer fra gulvet på ~2.500 tegn til ~7.500. Det er derfor det tal "
-     "skal stå ved siden af hovedtallet i enhver rapport."),
+     "Her ses forskellen fra de gamle rapporter tydeligst: det opdigtede "
+     "afsnit koster nu ét point pr. indsat tegn i selve tegnfejlen. Under "
+     "forankringen var afsnittet gratis, fordi det ikke havde nogen "
+     "facit-linje at blive parret med."),
     ("2 % af bogstaverne byttet", to_procent,
      "Målt tegnafstand skal ligge tæt på antallet af indlagte fejl — se "
      "næste tabel for hvor tæt."),
     ("10 % af bogstaverne byttet", ti_procent,
-     "Samme, men her begynder dækningen at falde: de hårdest forvanskede "
-     "linjer kan ikke forankres."),
+     "Samme prøve, ti gange så hårdt. Med så mange fejl tæt på hinanden "
+     "begynder redigeringsafstanden at kunne finde en billigere vej end vores "
+     "egne ombytninger, og det skal kunne ses i næste tabel."),
     ("den midterste tredjedel sprunget over", halv_side,
-     "Dækningen skal falde til omkring to tredjedele. **Tegnfejlen bliver "
-     "IKKE nul**, og det er et målt fund, ikke en forventning — se afsnittet "
-     "\"Falske forankringer\" nedenfor for hvad der faktisk sker."),
+     "Den sprungne tredjedel koster nu direkte: hvert tegn, modellen ikke "
+     "skrev, er en sletning. Tegnfejlen skal derfor ligge omkring en "
+     "tredjedel. Under forankringen faldt de manglende linjer helt ud af "
+     "regnestykket og kostede næsten ingenting."),
+    ("et gentaget ord læst en anelse forkert", gentaget_ord,
+     "Prøven på netop dét, der væltede den gamle måling. To bogstaver byttet "
+     "i **første** forekomst af et ord, der står på mindst to linjer i facit; "
+     "de senere forekomster står urørt. Begge fejl skal findes igen. Antallet "
+     "af sider, der overhovedet har sådan et ord, står under tabellen — er "
+     "det lavt, er prøven svag."),
 ]
 
 
-def koer(poster: list[dict], forvansk, *, maks_afvigelse: float = MAKS_AFVIGELSE):
+def koer(poster: list[dict], forvansk):
     """Returnerer (maaling, antal indlagte tegnfejl)."""
     rng = random.Random(FROE)
     modeller, sande = {}, 0
@@ -196,11 +293,61 @@ def koer(poster: list[dict], forvansk, *, maks_afvigelse: float = MAKS_AFVIGELSE
         tekst, antal = forvansk(post["alt_linjer"], rng)
         modeller[post["image_name"]] = tekst
         sande += antal
-    return maal_saet(poster, modeller, maks_afvigelse=maks_afvigelse), sande
+    return maal_saet(poster, modeller), sande
 
 
 def _pct(x: float) -> str:
     return f"{x * 100:.2f}".replace(".", ",") + " %"
+
+
+# --------------------------------------------------------------------------
+# Jokerfeltets egen skaevhed: fejl, der lander paa et `[?]`, slipper gratis
+# --------------------------------------------------------------------------
+
+def _perfekt_med_joker(linjer: list[str]) -> tuple[str, list[tuple[int, int]]]:
+    """Samme tekst som `perfekt`, plus hvor i den jokerfelterne ligger.
+
+    Intervallerne er de tegn, "modellen" skrev dér hvor facit har `[?]`. En
+    indlagt fejl inde i et af dem koster ingenting -- den slippes gratis
+    igennem, fordi der ikke findes nogen sandhed at maale den imod.
+    """
+    dele: list[str] = []
+    omraader: list[tuple[int, int]] = []
+    pos = 0
+    for nr, linje in enumerate(linjer):
+        if nr:
+            dele.append("\n")
+            pos += 1
+        for i, stykke in enumerate(linje.split(MAERKE)):
+            if i:
+                omraader.append((pos, pos + len(FYLD)))
+                dele.append(FYLD)
+                pos += len(FYLD)
+            dele.append(stykke)
+            pos += len(stykke)
+    return "".join(dele), omraader
+
+
+def fejl_i_joker(poster: list[dict], andel: float) -> tuple[int, int]:
+    """(indlagte fejl i alt, heraf inde i et jokerfelt) for en tegnforvanskning.
+
+    Regnestykket gentager `_forvansk_tegn`s traek af tilfaeldighedsgeneratoren
+    tegn for tegn med samme froe og samme raekkefoelge af sider. Derfor giver
+    det NOEJAGTIG de samme ombytninger som `to_procent`/`ti_procent`, og
+    totalen skal stemme med deres. `selvtest()` tjekker det og siger fra, hvis
+    de to skrider fra hinanden.
+    """
+    rng = random.Random(FROE)
+    i_alt = i_joker = 0
+    for post in poster:
+        tekst, omraader = _perfekt_med_joker(post["alt_linjer"])
+        for i, c in enumerate(tekst):
+            if c.isalpha() and rng.random() < andel:
+                rng.choice([b for b in BOGSTAVER if b != c.lower()])
+                i_alt += 1
+                if any(a <= i < b for a, b in omraader):
+                    i_joker += 1
+    return i_alt, i_joker
 
 
 # --------------------------------------------------------------------------
@@ -218,9 +365,13 @@ def selvtest(poster: list[dict]) -> str:
         "Forvanskningerne er konstruerede, ikke repræsentative. Det er meningen:",
         "data der fremkalder en bestemt fejl er sjældent typiske.",
         "",
+        "Målingen er én redigeringsafstand over hele siden, i rækkefølge, uden",
+        "søgning. Der findes derfor ikke længere nogen dækning: hele facit er",
+        "altid i nævneren, og en linje kan ikke falde ud af regnestykket.",
+        "",
         "## Tallene",
         "",
-        "| Forvanskning | raa | uden_versaler | uden_diakritika | uden_tegnsætn. | arbejdstal | arbejdstal, strengt | Dækning | Modeltekst uden modstykke |",
+        "| Forvanskning | raa | uden_versaler | uden_diakritika | uden_tegnsætn. | arbejdstal | arbejdstal, strengt | Model-tegn af facit-tegn | Omrokerede linjer |",
         "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     resultater = []
@@ -228,12 +379,14 @@ def selvtest(poster: list[dict]) -> str:
         saet, sande = koer(poster, funktion)
         resultater.append((navn, saet, sande, forventet))
         f = saet.fladet
-        uforankret = sum(s.model_tegn_uforankret for s in saet.sider)
+        model_tegn = sum(s.model_tegn_i_alt for s in saet.sider)
+        facit_tegn = sum(s.facit_tegn_i_alt for s in saet.sider)
         ud.append(
             f"| {navn} | {_pct(f['raa'].cer)} | {_pct(f['uden_versaler'].cer)} | "
             f"{_pct(f['uden_diakritika'].cer)} | {_pct(f['uden_tegnsaetning'].cer)} | "
             f"{_pct(f['arbejdstal'].cer)} | {_pct(saet.rene['arbejdstal'].cer)} | "
-            f"{_pct(saet.daekning)} | {uforankret} tegn |"
+            f"{model_tegn} af {facit_tegn} | "
+            f"{saet.linjer_omrokeret} af {saet.linjer_i_alt} |"
         )
 
     ud += [
@@ -245,22 +398,47 @@ def selvtest(poster: list[dict]) -> str:
         "ved vi, at selve maskineriet ikke skaber en forskel, og at en forskel",
         "på rigtige data kommer fra materialet, ikke fra måden at måle på.",
         "",
+        "**Model-tegn af facit-tegn** er, om modellen overhovedet skrev lige så",
+        "meget tekst, som der stod på siden — tegn uden mellemrum. Den erstatter",
+        'den gamle kolonne "modeltekst uden modstykke", som kun gav mening,',
+        "mens der blev forankret. **Omrokerede linjer** er linjer, modellen",
+        "skrev i en anden orden end facit; den måles for sig af `orden.py`,",
+        "fordi hovedtallet er strengt om rækkefølge og ellers ville skjule,",
+        "hvor stor en del af fejlen der bare er ombytning.",
+        "",
         "### Hvad hver linje skal vise",
         "",
     ]
     for navn, _, _, forventet in resultater:
         ud.append(f"- **{navn}** — {forventet}")
 
+    med_gentaget = sum(1 for p in poster if _gentaget_ord(p["alt_linjer"]))
+    ud += [
+        "",
+        f"Af øvemængdens {len(poster)} sider har **{med_gentaget}** et ord på "
+        f"mindst {GENTAGET_MINDSTE_LAENGDE} tegn, der står på to forskellige",
+        "linjer. Kun de sider bidrager med indlagte fejl i prøven",
+        '"et gentaget ord læst en anelse forkert" — resten leveres urørt. Er',
+        "tallet lavt, er prøven tilsvarende svag, og det står her frem for at",
+        "blive gemt bag procenten.",
+    ]
+
     # Kernen: hvor meget af det, vi selv lagde ind, finder apparatet igen?
     ud += [
         "",
         "## Hvor meget apparatet finder af det, vi selv lagde ind",
         "",
-        "Den vigtigste tabel i hele selvtesten. Venstre kolonne er bogstaver, vi",
-        "selv byttede om; midterkolonnen er den tegnafstand, målingen fandt. Er de",
-        "ikke ens, er forskellen **skævheden i tallet** — og den peger altid samme",
-        "vej: målingen finder mindre, end der er, fordi de linjer den ikke kan",
-        "forankre, er de hårdest ramte.",
+        "Den vigtigste tabel i hele selvtesten. Venstre kolonne er tegn, vi selv",
+        "byttede eller fjernede; midterkolonnen er den tegnafstand, målingen",
+        "fandt. Er de ikke ens, er forskellen **skævheden i tallet**, og den skal",
+        "stå her frem for at være et skjult fradrag.",
+        "",
+        "Tallet kan ligge på begge sider af 100 %. Under 100 %: redigerings-",
+        "afstanden fandt en billigere vej end vores egne ombytninger — to fejl",
+        "ved siden af hinanden kan af og til rettes med ét greb — eller fejlen",
+        "landede inde i et jokerfelt og slap gratis igennem (se næste afsnit).",
+        "Over 100 %: en ombytning kan have gjort teksten dyrere at rette end de",
+        "enkelttegn, vi ændrede.",
         "",
         "| Forvanskning | Fejl vi lagde ind | Fejl målingen fandt | Fundet |",
         "|---|---:|---:|---:|",
@@ -269,108 +447,77 @@ def selvtest(poster: list[dict]) -> str:
         if not sande:
             continue
         fundet = saet.fladet["raa"].tegnafstand
+        ud.append(f"| {navn} | {sande} | {fundet} | {_pct(fundet / sande)} |")
+
+    # Jokerfeltets egen skaevhed -- maalt, ikke formodet.
+    ud += [
+        "",
+        "## Fejl, der forsvinder ned i et jokerfelt",
+        "",
+        "Hvor facit siger `[?]`, må modellen skrive hvad som helst op til",
+        "jokerfeltets loft, uden at det koster. Det er en aftalt fribillet — der",
+        "findes ingen sandhed at måle stedet imod — men den er samtidig",
+        "målingens egen skævhed: en indlagt fejl, der tilfældigvis rammer inde i",
+        "det ord, \"modellen\" skrev på et `[?]`, kan ikke findes igen.",
+        "",
+        "Her er den talt op i stedet for antaget. Optællingen gentager de samme",
+        "ombytninger tegn for tegn og ser efter, hvor de landede.",
+        "",
+        "| Forvanskning | Indlagte fejl | Heraf inde i et jokerfelt | Andel |",
+        "|---|---:|---:|---:|",
+    ]
+    joker_tal = {}
+    for navn, andel in (("2 % af bogstaverne byttet", 0.02),
+                        ("10 % af bogstaverne byttet", 0.10)):
+        i_alt, i_joker = fejl_i_joker(poster, andel)
+        joker_tal[navn] = (i_alt, i_joker)
         ud.append(
-            f"| {navn} | {sande} | {fundet} | "
-            f"{_pct(fundet / sande) if sande else '—'} |"
+            f"| {navn} | {i_alt} | {i_joker} | "
+            f"{_pct(i_joker / i_alt) if i_alt else '—'} |"
         )
+
+    # Optaellingen skal stemme med selve forvanskningen, ellers maaler den
+    # noget andet end den giver sig ud for.
+    for navn, saet, sande, _ in resultater:
+        if navn in joker_tal and joker_tal[navn][0] != sande:
+            raise AssertionError(
+                f"{navn}: optaellingen fandt {joker_tal[navn][0]} indlagte fejl, "
+                f"forvanskningen lagde {sande} ind"
+            )
+
     ud += [
         "",
-        "Tallet kan ikke nå 100 %. Tre grunde, alle kendte:",
+        "De øvrige forvanskninger kan ikke ramme et jokerfelt. Omlyd, små",
+        "bogstaver og fjernet tegnsætning rører ikke det ord, der står på et",
+        "`[?]` — det har hverken ø, versaler eller tegnsætning — og det",
+        "gentagne ord vælges udtrykkeligt blandt ord uden `[?]` i.",
         "",
-        "1. **Uforankrede linjer falder ud** — de hårdest forvanskede først.",
-        "2. **Stumper under fem tegn bruges ikke** til forankring, så teksten",
-        "   omkring et `[?]` er ikke altid med.",
-        "3. **Levenshtein kan være billigere end vores ombytninger** — to fejl",
-        "   ved siden af hinanden kan af og til rettes med ét greb.",
-        "",
-        "Det er derfor, dækningen skal stå ved hvert tal. Et tal på 5 % tegnfejl",
-        "målt på 88 % af teksten er ikke det samme som 5 % på det hele.",
+        "Tallet er et loft for, hvad fribilletten koster i selvtesten, ikke et",
+        "skøn over rigtige data. En rigtig model skriver noget andet og længere",
+        "på et ulæseligt sted, og hvad den så gør, kan kun ses i gab-filen.",
     ]
 
-    # Falske forankringer -- efterprøvet, ikke formodet.
-    ud += [
-        "",
-        "## Falske forankringer",
-        "",
-        "Springer modellen en del af siden over, bliver tegnfejlen ikke nul,",
-        "selvom hvert eneste ord, den faktisk skrev, er rigtigt. Første forklaring var",
-        "en formodning; her er hvad der faktisk sker, efterprøvet linje for linje",
-        "på forvanskningen \"den midterste tredjedel sprunget over\":",
-        "",
-        "**1. En manglende linje forankrer sig i en linje, der ligner.** Facits",
-        "`Hendes tilstand er i løbet af natten bleven` findes ikke i modellen, men",
-        "`I løbet af natten` gør — og stumpen lander dér. `Tungen` lander i",
-        "`Lunge`. `ingen Appetit, ligget hen og døset,` lander i `Det ligger hen",
-        "og døser,`.",
-        "",
-        "**2. Og det skader de EFTERFØLGENDE linjer.** Det var ikke med i den",
-        "første forklaring, og det er den vigtigere halvdel. Forankringen går fra",
-        "venstre mod højre, så et falsk træf flytter søgepunktet frem forbi det",
-        "sted, hvor de næste linjer i virkeligheden står. De finder så kun en",
-        "afskåret rest af sig selv: `begge Lunger overalt en Mængde fugtige` blev",
-        "målt mod `r overalt en Mængde fugtige`, selvom modellen havde skrevet",
-        "hele linjen rigtigt.",
-        "",
-        "Prisen er lille på dette materiale — 181 tegn fordelt på 27 af de 118",
-        "sider — men den vokser med, hvor meget modellen springer over. Derfor:",
-        "**en side med lav dækning skal ses efter med øjnene**, ikke bare tros.",
-        "Rapporten har sin egen liste over de tyndest målte sider netop derfor.",
-    ]
-
-    # Knappen.
-    ud += [
-        "",
-        "## Knappen `MAKS_AFVIGELSE`",
-        "",
-        "Hvor meget en stump må afvige og stadig regnes for fundet. Tabellen står",
-        "her, fordi knappen kan bruges til at pynte: sættes den lavere, falder",
-        "dækningen, og de linjer der bliver tilbage, er de letteste. Tegnfejlen ser",
-        "bedre ud og måler mindre og mindre repræsentativt materiale.",
-        "",
-        'Målt på forvanskningen "10 % af bogstaverne byttet".',
-        "",
-        "| MAKS_AFVIGELSE | raa | Dækning | Linjer målt | Fundet af de indlagte fejl |",
-        "|---:|---:|---:|---:|---:|",
-    ]
-    for graense in (0.2, 0.4, 0.6):
-        saet, sande = koer(poster, ti_procent, maks_afvigelse=graense)
-        maalt = sum(s.linjer_maalt for s in saet.sider)
-        i_alt = sum(s.linjer_i_alt for s in saet.sider)
-        fundet = saet.fladet["raa"].tegnafstand
-        ud.append(
-            f"| {str(graense).replace('.', ',')} | {_pct(saet.fladet['raa'].cer)} | "
-            f"{_pct(saet.daekning)} | {maalt} af {i_alt} | {_pct(fundet / sande)} |"
-        )
-    ud += [
-        "",
-        f"Projektets værdi er **{str(MAKS_AFVIGELSE).replace('.', ',')}**. Den er sat",
-        "rundhåndet med vilje. Læg mærke til, at den strengeste indstilling giver den",
-        "*laveste* tegnfejl — den ser bedst ud og er mest misvisende.",
-    ]
-
-    # Hvad forankringen henter hjem.
+    # Jokerfelterne, naar modellen skriver præcis det rigtige overalt ellers.
     saet, _ = koer(poster, perfekt)
     svaere = sum(s.svaere_linjer for s in saet.sider)
-    reddet = sum(s.svaere_linjer_reddet for s in saet.sider)
     linjer = sum(s.linjer_i_alt for s in saet.sider)
     ud += [
         "",
-        "## Hvad forankringen henter hjem",
-        "",
-        "Beslutning 38 skærer hele linjen fra, når den rummer et `[?]`.",
-        "Forankringen henter de kendte stumper på linjen tilbage i målingen.",
+        "## De ulæselige steder i øvemængden",
         "",
         "| Mål | Værdi |",
         "|---|---:|",
         f"| Linjer i øvemængden | {linjer} |",
         f"| Heraf med mindst ét `[?]` | {svaere} = {_pct(svaere / linjer)} |",
-        f"| Svære linjer forankringen redder | {reddet} = {_pct(reddet / svaere)} af dem |",
-        f"| Dækning med forankring | {_pct(saet.daekning)} |",
-        f"| Gab fundet (modellens bud på et `[?]`) | {len(saet.gab)} |",
+        f"| Jokerfelter i alt | {len(saet.gab)} |",
+        f"| Tegn \"modellen\" lagde i dem | {saet.joker_tegn_i_alt} |",
+        f"| Tegn ud over loftet (det der kostede) | {saet.joker_overskud} |",
         "",
-        "**Bemærk at dette er en øvre grænse.** Her er \"modellen\" facit selv, så",
-        "hver stump findes ordret. En rigtig model læser dårligere, og færre",
-        "stumper vil kunne forankres. Det rigtige tal kommer først i stage 05.",
+        "Målt på \"facit mod sig selv\", altså med det korte ord `utydeligt` på",
+        "hvert `[?]`. Det ligger under loftet og koster derfor ingenting. En",
+        "rigtig model kan skrive mere, og så begynder overskuddet at tælle —",
+        "det tal er derfor ikke en forudsigelse, men et udgangspunkt at måle",
+        "de rigtige kørsler op imod.",
     ]
     return "\n".join(ud) + "\n"
 

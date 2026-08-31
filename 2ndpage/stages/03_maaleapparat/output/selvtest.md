@@ -7,20 +7,25 @@ er kendt på forhånd. Kør igen med `scripts/selvtest_maaleapparat.py`.
 Forvanskningerne er konstruerede, ikke repræsentative. Det er meningen:
 data der fremkalder en bestemt fejl er sjældent typiske.
 
+Målingen er én redigeringsafstand over hele siden, i rækkefølge, uden
+søgning. Der findes derfor ikke længere nogen dækning: hele facit er
+altid i nævneren, og en linje kan ikke falde ud af regnestykket.
+
 ## Tallene
 
-| Forvanskning | raa | uden_versaler | uden_diakritika | uden_tegnsætn. | arbejdstal | arbejdstal, strengt | Dækning | Modeltekst uden modstykke |
+| Forvanskning | raa | uden_versaler | uden_diakritika | uden_tegnsætn. | arbejdstal | arbejdstal, strengt | Model-tegn af facit-tegn | Omrokerede linjer |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| facit mod sig selv | 0,00 % | 0,00 % | 0,00 % | 0,00 % | 0,00 % | 0,00 % | 97,58 % | 2519 tegn |
-| alle ø skrevet som ö | 0,75 % | 0,75 % | 0,00 % | 0,79 % | 0,79 % | 0,80 % | 97,58 % | 2519 tegn |
-| alt med små bogstaver | 5,30 % | 0,00 % | 5,30 % | 5,59 % | 0,00 % | 0,00 % | 97,58 % | 2519 tegn |
-| al tegnsætning fjernet | 5,04 % | 5,04 % | 5,04 % | 0,10 % | 0,10 % | 0,00 % | 97,55 % | 2447 tegn |
-| hele siden som ét afsnit | 0,00 % | 0,00 % | 0,00 % | 0,00 % | 0,00 % | 0,00 % | 97,58 % | 2519 tegn |
-| hvert linjebrud flyttet ét ord | 0,00 % | 0,00 % | 0,00 % | 0,00 % | 0,00 % | 0,00 % | 97,58 % | 2519 tegn |
-| et opdigtet afsnit tilføjet | 0,00 % | 0,00 % | 0,00 % | 0,00 % | 0,00 % | 0,00 % | 97,58 % | 7475 tegn |
-| 2 % af bogstaverne byttet | 1,51 % | 1,51 % | 1,51 % | 1,59 % | 1,59 % | 1,56 % | 97,25 % | 2735 tegn |
-| 10 % af bogstaverne byttet | 7,50 % | 7,50 % | 7,50 % | 7,92 % | 7,92 % | 7,84 % | 97,16 % | 2916 tegn |
-| den midterste tredjedel sprunget over | 0,45 % | 0,44 % | 0,45 % | 0,42 % | 0,40 % | 0,36 % | 61,38 % | 3900 tegn |
+| facit mod sig selv | 0,01 % | 0,01 % | 0,01 % | 0,00 % | 0,00 % | 3,21 % | 56591 af 54284 | 3 af 2586 |
+| alle ø skrevet som ö | 0,76 % | 0,76 % | 0,01 % | 0,79 % | 0,79 % | 4,01 % | 56591 af 54284 | 3 af 2586 |
+| alt med små bogstaver | 5,36 % | 0,02 % | 5,36 % | 5,65 % | 0,00 % | 3,22 % | 56591 af 54284 | 3 af 2586 |
+| al tegnsætning fjernet | 5,16 % | 5,16 % | 5,16 % | 0,00 % | 0,00 % | 3,21 % | 53331 af 54284 | 3 af 2586 |
+| hele siden som ét afsnit | 0,58 % | 0,58 % | 0,58 % | 0,30 % | 0,30 % | 3,49 % | 56591 af 54284 | 0 af 2586 |
+| hvert linjebrud flyttet ét ord | 0,52 % | 0,52 % | 0,52 % | 0,27 % | 0,27 % | 3,46 % | 56591 af 54284 | 21 af 2586 |
+| et opdigtet afsnit tilføjet | 8,75 % | 8,74 % | 8,75 % | 9,03 % | 9,02 % | 13,33 % | 61547 af 54284 | 3 af 2586 |
+| 2 % af bogstaverne byttet | 1,50 % | 1,50 % | 1,50 % | 1,58 % | 1,58 % | 4,76 % | 56591 af 54284 | 3 af 2586 |
+| 10 % af bogstaverne byttet | 7,55 % | 7,55 % | 7,55 % | 7,97 % | 7,97 % | 11,11 % | 56591 af 54284 | 5 af 2586 |
+| den midterste tredjedel sprunget over | 32,73 % | 32,69 % | 32,73 % | 32,70 % | 32,65 % | 32,29 % | 37690 af 54284 | 27 af 2586 |
+| et gentaget ord læst en anelse forkert | 0,30 % | 0,30 % | 0,30 % | 0,31 % | 0,31 % | 3,54 % | 56591 af 54284 | 5 af 2586 |
 
 Kolonnen **arbejdstal, strengt** er den samme måling med linjer, der
 rummer et `[?]`, helt ude (beslutning 44). Her i selvtesten forvanskes
@@ -29,104 +34,94 @@ sværere end de andre — de to tal bør derfor ligge tæt. Gør de det,
 ved vi, at selve maskineriet ikke skaber en forskel, og at en forskel
 på rigtige data kommer fra materialet, ikke fra måden at måle på.
 
+**Model-tegn af facit-tegn** er, om modellen overhovedet skrev lige så
+meget tekst, som der stod på siden — tegn uden mellemrum. Den erstatter
+den gamle kolonne "modeltekst uden modstykke", som kun gav mening,
+mens der blev forankret. **Omrokerede linjer** er linjer, modellen
+skrev i en anden orden end facit; den måles for sig af `orden.py`,
+fordi hovedtallet er strengt om rækkefølge og ellers ville skjule,
+hvor stor en del af fejlen der bare er ombytning.
+
 ### Hvad hver linje skal vise
 
-- **facit mod sig selv** — Nul fejl i alle varianter. Sætter samtidig **gulvet** for kolonnen "modeltekst uden modstykke": den er ikke nul her, selvom intet er digtet. Det, der står, er ordet `utydeligt` dér hvor facit har `[?]` plus teksten på de linjer, der ikke kunne forankres. Ved en rigtig måling skal tallet læses som et tillæg til dette gulv, ikke som et absolut mål for opdigtning.
+- **facit mod sig selv** — Nul fejl i alle varianter. Det ord, "modellen" skriver dér hvor facit har `[?]`, er kortere end jokerfeltets loft og skal derfor slippe helt gratis igennem. Er tallet ikke nul her, er alt andet i tabellen ligegyldigt.
 - **alle ø skrevet som ö** — `raa` får fejl; `uden_diakritika` og `lempeligst` skal være nul. Det er den hyppigste enkeltforveksling i materialet, og den er ortografisk støj, ikke en læsefejl.
 - **alt med små bogstaver** — `raa` får fejl; `uden_versaler` og `arbejdstal` skal være nul.
 - **al tegnsætning fjernet** — `raa` får fejl; `uden_tegnsaetning` og `arbejdstal` skal være tæt på nul. Bindestregen er bevidst ladt stå — fjernes den, forsvinder orddelingen med den, og så måler prøven to ting på én gang.
-- **hele siden som ét afsnit** — Samme tal som facit mod sig selv. Målingen må ikke afhænge af, om modellen laver sine egne linjeskift (beslutning 35).
-- **hvert linjebrud flyttet ét ord** — Samme tal som facit mod sig selv. Uden forankringen ville alt efter det første brud være forkert — det er hele grunden til, at linjerne parres på indhold og ikke på linjenummer.
-- **et opdigtet afsnit tilføjet** — Tegnfejlen ser det ikke. Kun "modeltekst uden modstykke" gør, og den springer fra gulvet på ~2.500 tegn til ~7.500. Det er derfor det tal skal stå ved siden af hovedtallet i enhver rapport.
+- **hele siden som ét afsnit** — Tæt på facit mod sig selv, men **ikke helt nul**, og resten er et målt fund: uden linjeskift kan et ord, facit har delt hen over to linjer, ikke samles igen, så `Infektions- sygdomme` bliver stående som to ord (efterprøvet linje for linje). Målingen må ellers ikke afhænge af, om modellen laver sine egne linjeskift (beslutning 35).
+- **hvert linjebrud flyttet ét ord** — Samme lille rest og samme årsag: bindestregen står nu midt på en linje i stedet for sidst, og så samles det delte ord ikke. Linjeskiftene er taget ud på begge sider før målingen, så hvor de sad, må ellers ikke kunne ses i tallet.
+- **et opdigtet afsnit tilføjet** — Her ses forskellen fra de gamle rapporter tydeligst: det opdigtede afsnit koster nu ét point pr. indsat tegn i selve tegnfejlen. Under forankringen var afsnittet gratis, fordi det ikke havde nogen facit-linje at blive parret med.
 - **2 % af bogstaverne byttet** — Målt tegnafstand skal ligge tæt på antallet af indlagte fejl — se næste tabel for hvor tæt.
-- **10 % af bogstaverne byttet** — Samme, men her begynder dækningen at falde: de hårdest forvanskede linjer kan ikke forankres.
-- **den midterste tredjedel sprunget over** — Dækningen skal falde til omkring to tredjedele. **Tegnfejlen bliver IKKE nul**, og det er et målt fund, ikke en forventning — se afsnittet "Falske forankringer" nedenfor for hvad der faktisk sker.
+- **10 % af bogstaverne byttet** — Samme prøve, ti gange så hårdt. Med så mange fejl tæt på hinanden begynder redigeringsafstanden at kunne finde en billigere vej end vores egne ombytninger, og det skal kunne ses i næste tabel.
+- **den midterste tredjedel sprunget over** — Den sprungne tredjedel koster nu direkte: hvert tegn, modellen ikke skrev, er en sletning. Tegnfejlen skal derfor ligge omkring en tredjedel. Under forankringen faldt de manglende linjer helt ud af regnestykket og kostede næsten ingenting.
+- **et gentaget ord læst en anelse forkert** — Prøven på netop dét, der væltede den gamle måling. To bogstaver byttet i **første** forekomst af et ord, der står på mindst to linjer i facit; de senere forekomster står urørt. Begge fejl skal findes igen. Antallet af sider, der overhovedet har sådan et ord, står under tabellen — er det lavt, er prøven svag.
+
+Af øvemængdens 118 sider har **94** et ord på mindst 5 tegn, der står på to forskellige
+linjer. Kun de sider bidrager med indlagte fejl i prøven
+"et gentaget ord læst en anelse forkert" — resten leveres urørt. Er
+tallet lavt, er prøven tilsvarende svag, og det står her frem for at
+blive gemt bag procenten.
 
 ## Hvor meget apparatet finder af det, vi selv lagde ind
 
-Den vigtigste tabel i hele selvtesten. Venstre kolonne er bogstaver, vi
-selv byttede om; midterkolonnen er den tegnafstand, målingen fandt. Er de
-ikke ens, er forskellen **skævheden i tallet** — og den peger altid samme
-vej: målingen finder mindre, end der er, fordi de linjer den ikke kan
-forankre, er de hårdest ramte.
+Den vigtigste tabel i hele selvtesten. Venstre kolonne er tegn, vi selv
+byttede eller fjernede; midterkolonnen er den tegnafstand, målingen
+fandt. Er de ikke ens, er forskellen **skævheden i tallet**, og den skal
+stå her frem for at være et skjult fradrag.
+
+Tallet kan ligge på begge sider af 100 %. Under 100 %: redigerings-
+afstanden fandt en billigere vej end vores egne ombytninger — to fejl
+ved siden af hinanden kan af og til rettes med ét greb — eller fejlen
+landede inde i et jokerfelt og slap gratis igennem (se næste afsnit).
+Over 100 %: en ombytning kan have gjort teksten dyrere at rette end de
+enkelttegn, vi ændrede.
 
 | Forvanskning | Fejl vi lagde ind | Fejl målingen fandt | Fundet |
 |---|---:|---:|---:|
-| alle ø skrevet som ö | 477 | 477 | 100,00 % |
-| alt med små bogstaver | 3388 | 3360 | 99,17 % |
-| al tegnsætning fjernet | 3260 | 3192 | 97,91 % |
+| alle ø skrevet som ö | 477 | 482 | 101,05 % |
+| alt med små bogstaver | 3388 | 3402 | 100,41 % |
+| al tegnsætning fjernet | 3260 | 3273 | 100,40 % |
 | 2 % af bogstaverne byttet | 1015 | 953 | 93,89 % |
-| 10 % af bogstaverne byttet | 5087 | 4737 | 93,12 % |
+| 10 % af bogstaverne byttet | 5087 | 4790 | 94,16 % |
+| et gentaget ord læst en anelse forkert | 188 | 193 | 102,66 % |
 
-Tallet kan ikke nå 100 %. Tre grunde, alle kendte:
+## Fejl, der forsvinder ned i et jokerfelt
 
-1. **Uforankrede linjer falder ud** — de hårdest forvanskede først.
-2. **Stumper under fem tegn bruges ikke** til forankring, så teksten
-   omkring et `[?]` er ikke altid med.
-3. **Levenshtein kan være billigere end vores ombytninger** — to fejl
-   ved siden af hinanden kan af og til rettes med ét greb.
+Hvor facit siger `[?]`, må modellen skrive hvad som helst op til
+jokerfeltets loft, uden at det koster. Det er en aftalt fribillet — der
+findes ingen sandhed at måle stedet imod — men den er samtidig
+målingens egen skævhed: en indlagt fejl, der tilfældigvis rammer inde i
+det ord, "modellen" skrev på et `[?]`, kan ikke findes igen.
 
-Det er derfor, dækningen skal stå ved hvert tal. Et tal på 5 % tegnfejl
-målt på 88 % af teksten er ikke det samme som 5 % på det hele.
+Her er den talt op i stedet for antaget. Optællingen gentager de samme
+ombytninger tegn for tegn og ser efter, hvor de landede.
 
-## Falske forankringer
+| Forvanskning | Indlagte fejl | Heraf inde i et jokerfelt | Andel |
+|---|---:|---:|---:|
+| 2 % af bogstaverne byttet | 1015 | 67 | 6,60 % |
+| 10 % af bogstaverne byttet | 5087 | 302 | 5,94 % |
 
-Springer modellen en del af siden over, bliver tegnfejlen ikke nul,
-selvom hvert eneste ord, den faktisk skrev, er rigtigt. Første forklaring var
-en formodning; her er hvad der faktisk sker, efterprøvet linje for linje
-på forvanskningen "den midterste tredjedel sprunget over":
+De øvrige forvanskninger kan ikke ramme et jokerfelt. Omlyd, små
+bogstaver og fjernet tegnsætning rører ikke det ord, der står på et
+`[?]` — det har hverken ø, versaler eller tegnsætning — og det
+gentagne ord vælges udtrykkeligt blandt ord uden `[?]` i.
 
-**1. En manglende linje forankrer sig i en linje, der ligner.** Facits
-`Hendes tilstand er i løbet af natten bleven` findes ikke i modellen, men
-`I løbet af natten` gør — og stumpen lander dér. `Tungen` lander i
-`Lunge`. `ingen Appetit, ligget hen og døset,` lander i `Det ligger hen
-og døser,`.
+Tallet er et loft for, hvad fribilletten koster i selvtesten, ikke et
+skøn over rigtige data. En rigtig model skriver noget andet og længere
+på et ulæseligt sted, og hvad den så gør, kan kun ses i gab-filen.
 
-**2. Og det skader de EFTERFØLGENDE linjer.** Det var ikke med i den
-første forklaring, og det er den vigtigere halvdel. Forankringen går fra
-venstre mod højre, så et falsk træf flytter søgepunktet frem forbi det
-sted, hvor de næste linjer i virkeligheden står. De finder så kun en
-afskåret rest af sig selv: `begge Lunger overalt en Mængde fugtige` blev
-målt mod `r overalt en Mængde fugtige`, selvom modellen havde skrevet
-hele linjen rigtigt.
-
-Prisen er lille på dette materiale — 181 tegn fordelt på 27 af de 118
-sider — men den vokser med, hvor meget modellen springer over. Derfor:
-**en side med lav dækning skal ses efter med øjnene**, ikke bare tros.
-Rapporten har sin egen liste over de tyndest målte sider netop derfor.
-
-## Knappen `MAKS_AFVIGELSE`
-
-Hvor meget en stump må afvige og stadig regnes for fundet. Tabellen står
-her, fordi knappen kan bruges til at pynte: sættes den lavere, falder
-dækningen, og de linjer der bliver tilbage, er de letteste. Tegnfejlen ser
-bedre ud og måler mindre og mindre repræsentativt materiale.
-
-Målt på forvanskningen "10 % af bogstaverne byttet".
-
-| MAKS_AFVIGELSE | raa | Dækning | Linjer målt | Fundet af de indlagte fejl |
-|---:|---:|---:|---:|---:|
-| 0,2 | 7,13 % | 94,90 % | 2347 af 2586 | 86,40 % |
-| 0,4 | 7,50 % | 97,16 % | 2420 af 2586 | 93,12 % |
-| 0,6 | 7,55 % | 97,32 % | 2425 af 2586 | 93,85 % |
-
-Projektets værdi er **0,4**. Den er sat
-rundhåndet med vilje. Læg mærke til, at den strengeste indstilling giver den
-*laveste* tegnfejl — den ser bedst ud og er mest misvisende.
-
-## Hvad forankringen henter hjem
-
-Beslutning 38 skærer hele linjen fra, når den rummer et `[?]`.
-Forankringen henter de kendte stumper på linjen tilbage i målingen.
+## De ulæselige steder i øvemængden
 
 | Mål | Værdi |
 |---|---:|
 | Linjer i øvemængden | 2586 |
 | Heraf med mindst ét `[?]` | 297 = 11,48 % |
-| Svære linjer forankringen redder | 281 = 94,61 % af dem |
-| Dækning med forankring | 97,58 % |
-| Gab fundet (modellens bud på et `[?]`) | 95 |
+| Jokerfelter i alt | 354 |
+| Tegn "modellen" lagde i dem | 3811 |
+| Tegn ud over loftet (det der kostede) | 0 |
 
-**Bemærk at dette er en øvre grænse.** Her er "modellen" facit selv, så
-hver stump findes ordret. En rigtig model læser dårligere, og færre
-stumper vil kunne forankres. Det rigtige tal kommer først i stage 05.
+Målt på "facit mod sig selv", altså med det korte ord `utydeligt` på
+hvert `[?]`. Det ligger under loftet og koster derfor ingenting. En
+rigtig model kan skrive mere, og så begynder overskuddet at tælle —
+det tal er derfor ikke en forudsigelse, men et udgangspunkt at måle
+de rigtige kørsler op imod.

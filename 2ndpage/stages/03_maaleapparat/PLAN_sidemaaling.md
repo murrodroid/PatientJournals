@@ -1,8 +1,25 @@
 # Plan: forankringen erstattes af én sidemåling
 
-**Status: alle fem åbne spørgsmål afklaret 2026-08-30. Klar til trin 1.
-Ikke påbegyndt.**
-Skrevet 2026-08-30 efter en grill-session. Der grilles videre, før noget køres.
+**Status 2026-08-31: alle seks trin gennemført.** Afventer gennemgang ved lead.
+Skrevet 2026-08-30 efter en grill-session; de fem åbne spørgsmål blev afklaret
+samme dag.
+
+Fire ting gik anderledes end planen forudsatte. De står udførligt i
+`diary/2026-08-31-sidemaaling.md`; kort:
+
+1. **`pr_linje` og `fuldside` blev FJERNET, ikke bygget om** — planen sagde
+   "bygges om". `pr_linje` krævede en linjeparring, og parringen VAR
+   forankringen; `fuldside` var kontrol MOD forankringen og er nu blevet det
+   samme tal som hovedtallet.
+2. **Den strenge måling måtte bygges på en ny mekanisme.** Uden forankring
+   findes der intet modstykke til en svær linje at udelade på modelsiden.
+   Hele linjen erstattes derfor af ét jokermærke med linjens egen længde som
+   loft. Loftet er en knap, og den er målt frem for valgt —
+   `output/jokerloft.md`.
+3. **Beslutning 35 kan ikke længere besvares.** Se det åbne punkt nederst.
+4. **En reel fejl blev fundet undervejs:** orddelingsreglen blev kun brugt på
+   facit, ikke på modelteksten, så en side uden en eneste læsefejl målte 2
+   tegn galt. Fanget af testen "facit mod sig selv".
 
 ## Hvorfor
 
@@ -58,7 +75,7 @@ Følger af det:
 Hvert trin kan kommenteres for sig. Rækkefølgen er bindende — trin 2 kan ikke
 prøves af uden trin 1.
 
-### Trin 1 — måleoperationen alene, uden at røre noget bestående
+### Trin 1 — måleoperationen alene, uden at røre noget bestående — **GJORT**
 
 Ny funktion i `cer.py` eller et nyt modul: editeringsafstand mellem to
 strenge, hvor facit-siden kan indeholde jokermærker der matcher vilkårligt
@@ -71,7 +88,7 @@ Testes for sig mod konstruerede tilfælde, herunder netop det gentagne ord fra
 
 Rører intet bestående. Kan kasseres uden følger.
 
-### Trin 2 — kør begge målinger på dagens seks gemte kørsler
+### Trin 2 — kør begge målinger på dagens seks gemte kørsler — **GJORT**
 
 Ingen modelkald; svarene ligger gemt. Sammenlign de to måleapparaters tal og
 rangorden.
@@ -80,7 +97,7 @@ Formålet er ikke at vælge — valget er truffet — men at vide **hvor meget**
 uenige, før de gamle tal kasseres. Er de enige overalt undtagen på den ene
 side, er det et resultat i sig selv.
 
-### Trin 3 — indsæt den nye måling i `maal.py`
+### Trin 3 — indsæt den nye måling i `maal.py` — **GJORT** (commit `ab21ade`)
 
 `forankr()` fjernes. `SideMaaling` og `SaetMaaling` mister felterne om
 dækning og forankring. Det er en ægte forenkling — de fleste af de nuværende
@@ -93,7 +110,7 @@ Skal bevares, fordi de er kontraktbundne eller efterspurgte:
 - **De seks varianter** (`raa` … `lempeligst`) — beslutning 26, alle
   rapporteres side om side.
 
-### Trin 4 — rapporten skrives om
+### Trin 4 — rapporten skrives om — **GJORT** (commit `ab21ade`)
 
 Afsnittet om dækning udgår. Afsnittet om den strenge måling **bevares** (se
 spørgsmål 2), men skal skrive tydeligt, at dens "dækning" er en fast
@@ -107,7 +124,7 @@ Afsnittet "Sådan er der målt" skal beskrive den nye metode i almindeligt
 sprog. Det skal kunne læses uden `CONTEXT.md` ved hånden — det krav gjaldt
 også den gamle rapport.
 
-### Trin 5 — selvtesten køres om
+### Trin 5 — selvtesten køres om — **GJORT**
 
 `scripts/selvtest_maaleapparat.py` ødelægger facit med vilje og måler, hvor
 meget apparatet finder igen. Skævheden var 93,1 % med forankring. Den skal
@@ -116,7 +133,7 @@ den fejltype, der væltede den gamle måling, og selvtesten indeholdt den ikke.
 
 Tager omkring ni minutter. Ingen modelkald.
 
-### Trin 6 — dagens seks varianter måles forfra
+### Trin 6 — dagens seks varianter måles forfra — **GJORT**
 
 Gratis; svarene ligger gemt. Først dér ved vi, hvad wordpicking-forsøget
 faktisk viste.
