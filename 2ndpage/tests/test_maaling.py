@@ -1,12 +1,14 @@
-"""Testkontrakt for maalingen af en hel side og et helt saet.
+"""Testkontrakt for maaleapparatet efter forankringen blev fjernet.
 
-Stagens kontrakt kraever: nul fejl naar facit sammenlignes med sig selv, et
-kendt forud udregnet tal paa konstruerede forvanskninger, en test pr. variant,
-en test af orddelingssamlingen, og en test af at to koersler paa samme data
-giver noejagtig samme rapport.
+Hele siden maales nu i ét straek, i raekkefoelge, uden soegning. Det aendrer
+hvad der overhovedet KAN gaa galt, og testene her er skrevet efter de nye
+faldgruber -- ikke oversat fra de gamle.
 
-Forvanskningerne er konstrueret, ikke repraesentative. Det er meningen -- data
-der fremkalder en bestemt fejl er sjaeldent typiske.
+De to vigtigste staar i afsnittet "Ingen rabat". Det gamle apparat maalte kun
+de linjer, det kunne finde, og en variant der fik modellen til at afvige mest
+tabte netop de svaere linjer ud af maalingen og saa dermed BEDRE ud. Den faelde
+vendte en rangorden to gange paa én dag. Den maa ikke kunne komme igen, og
+testene her siger hvorfor med tal.
 """
 from __future__ import annotations
 
@@ -17,8 +19,7 @@ import pytest
 
 from andenside import cer
 from andenside.facit import saml_orddeling
-from andenside.maal import SaetMaaling, deler_ord, flad, maal_side
-from andenside.rapport import skriv_rapport
+from andenside.maal import _tegn, deler_ord, flad, maal_saet, maal_side, streng_facit
 
 FACIT = Path(__file__).resolve().parents[1] / "stages" / "02_facit" / "output" / "facit.jsonl"
 
@@ -44,14 +45,12 @@ def test_facit_mod_sig_selv_giver_nul_fejl_i_alle_varianter():
     for navn in cer.VARIANTER:
         assert m.fladet[navn].tegnafstand == 0, navn
         assert m.fladet[navn].ordafstand == 0, navn
-        assert m.pr_linje[navn].tegnafstand == 0, navn
-    assert m.daekning == 1.0
-    assert m.linjer_maalt == m.linjer_i_alt
+        assert m.rene[navn].tegnafstand == 0, navn
 
 
-def test_ulaeseligt_sted_koster_ikke_naar_stumperne_paa_begge_sider_findes():
+def test_ulaeseligt_sted_koster_ikke_naar_modellen_gaetter_kort():
     """Modellen skriver noget, hvor facit siger [?]. Det maa hverken taelle
-    for eller imod -- kun stumperne omkring maales."""
+    for eller imod, saa laenge gaettet holder sig inden for loftet."""
     facit = ["Der er rigelig [?] Udflod af egen art", "Barnet er kraftigt."]
     model = som_model(["Der er rigelig blodig Udflod af egen art", "Barnet er kraftigt."])
     m = maal_side("prøve", facit, model)
@@ -59,36 +58,83 @@ def test_ulaeseligt_sted_koster_ikke_naar_stumperne_paa_begge_sider_findes():
     assert m.fladet["raa"].tegnafstand == 0
     assert len(m.gab) == 1
     assert m.gab[0].model_tekst.strip() == "blodig"
-    assert m.svaere_linjer_reddet == 1
+
+
+def test_gabet_baerer_facits_egne_ord_omkring_stedet():
+    """Modelteksten alene er tit ét ord og kan staa hvor som helst paa siden.
+    Uden facits naboord kan et menneske ikke finde stedet igen."""
+    facit = ["Der er rigelig [?] Udflod af egen art"]
+    m = maal_side("prøve", facit, "Der er rigelig blodig Udflod af egen art")
+
+    assert m.gab[0].facit_foer == "Der er rigelig"
+    assert m.gab[0].facit_efter == "Udflod af egen art"
 
 
 # --------------------------------------------------------------------------
-# Beslutning 38: uforankret linje ud af maalingen -- paa BEGGE sider
+# Ingen rabat -- de to vigtigste tests i filen
 # --------------------------------------------------------------------------
 
-def test_uforankret_linje_falder_ud_af_baade_facit_og_model():
-    """Grundreglen. Faldt linjen kun ud af facit, ville modellens tekst paa
-    stedet blive talt som indsat og straffe den for noget, vi ikke maaler."""
-    facit = list(SIDE)
-    model = som_model([l for l in SIDE if l != "da hun fik Brystkatarrh."])
+def test_udeladt_linje_koster_hele_linjen_i_stedet_for_at_falde_ud():
+    """DEN afgoerende forskel fra forankringen.
+
+    Modellen springer en hel, fuldt laesbar linje over. Forankringen kunne
+    ikke finde den, og en linje der ikke blev fundet, gik HELT ud af
+    maalingen -- altsaa gratis. Her skal den koste sine egne tegn.
+    """
+    facit = ["Rask indtil for 8 Dage siden", "da hun fik Brystkatarrh.", "Ingen Snue."]
+    uden_midten = som_model(["Rask indtil for 8 Dage siden", "Ingen Snue."])
+
+    m = maal_side("prøve", facit, uden_midten)
+
+    # Den udeladte linje er 24 tegn plus det mellemrum, den var adskilt med.
+    assert m.fladet["raa"].tegnafstand == len("da hun fik Brystkatarrh.") + 1
+    # ... og hele facit staar stadig i naevneren.
+    assert m.fladet["raa"].facit_tegn == len(flad(facit, deler_ord(facit)))
+
+
+def test_hvor_meget_der_maales_paa_afhaenger_ikke_af_modellens_svar():
+    """Naevneren skal vaere en egenskab ved FACIT alene.
+
+    Det var praecis her, det gamle apparat svigtede: jo mere en variant fik
+    modellen til at afvige, jo mere tekst faldt ud af maalingen, og jo bedre
+    saa varianten ud. To vidt forskellige svar paa samme side skal give
+    naevneren uaendret -- baade i hovedtallet og i den strenge maaling.
+    """
+    facit = ["Rask indtil for 8 Dage siden", "da hun fik [?] Brystkatarrh.", "Ingen Snue."]
+    god = som_model(facit)
+    elendig = "Aldeles andet indhold, som intet har med siden at goere."
+
+    a = maal_side("prøve", facit, god)
+    b = maal_side("prøve", facit, elendig)
+
+    for navn in cer.VARIANTER:
+        assert a.fladet[navn].facit_tegn == b.fladet[navn].facit_tegn, navn
+        assert a.rene[navn].facit_tegn == b.rene[navn].facit_tegn, navn
+    assert a.rene_tegn_i_alt == b.rene_tegn_i_alt
+    # Og det daarlige svar skal saa OGSAA koste mere, ikke mindre.
+    assert b.fladet["raa"].tegnafstand > a.fladet["raa"].tegnafstand
+
+
+def test_gentaget_vending_paa_siden_vaelter_ikke_maalingen():
+    """Regressionen fra `273107_001864`, maalt gennem hele apparatet.
+
+    "ingen Snue" staar to gange i FACIT selv. Forankringen soegte linje 1 frem,
+    fandt det ordrette traef nede i den sidste linje, flyttede soegepunktet
+    dertil, og alle mellemliggende linjer var derefter uden for raekkevidde --
+    26 af 29 tabt. Her er der kun én vej gennem siden.
+    """
+    mellem = [f"Linje {nr} med almindelig journaltekst." for nr in range(2, 12)]
+    facit = ["Ingen Snue."] + mellem + ["Tg. ikke suspect ingen Snue."]
+    model = som_model(["Ingen Hoste."] + mellem + ["G. ikke suspect ingen Snue."])
+
     m = maal_side("prøve", facit, model)
 
-    assert m.linjer_maalt == len(SIDE) - 1
-    assert m.fladet["raa"].tegnafstand == 0
-    assert m.daekning < 1.0
-    assert "Brystkatarrh" not in m.linjer[1].model_maalt
-
-
-def test_daekningen_falder_med_de_linjer_der_ikke_kunne_forankres():
-    facit = list(SIDE)
-    model = som_model(SIDE[:2])
-    m = maal_side("prøve", facit, model)
-    assert 0 < m.daekning < 0.5
-    assert m.linjer_maalt == 2
+    # Kun de to faktiske laesefejl: "Snue"->"Hoste" (5 tegn) og "Tg."->"G." (1).
+    assert m.fladet["raa"].tegnafstand == 6
 
 
 # --------------------------------------------------------------------------
-# Kendte, forud udregnede tal paa konstruerede forvanskninger
+# De seks varianters filtre
 # --------------------------------------------------------------------------
 
 def test_tysk_omlyd_koster_praecis_et_tegn_raat_og_nul_uden_diakritika():
@@ -155,108 +201,117 @@ def test_fladning_er_enig_med_facits_egen_over_hele_facit():
         )
 
 
+def test_modellens_egne_linjeskift_er_uden_betydning_for_hovedtallet():
+    """Modellen maa gerne bryde linjerne anderledes end siden. Hovedtallet
+    maales paa den fladede tekst og skal vaere det samme."""
+    med_skift = maal_side("prøve", SIDE, som_model(SIDE))
+    uden_skift = maal_side("prøve", SIDE, flad(SIDE, deler_ord(SIDE)))
+
+    assert med_skift.fladet["raa"].tegnafstand == uden_skift.fladet["raa"].tegnafstand
+
+
 # --------------------------------------------------------------------------
-# Maalingen maa ikke afhaenge af, om modellen foelger sidens linjeskift
+# Den strenge maaling (beslutning 44): linjer med [?] slet ikke med
 # --------------------------------------------------------------------------
 
-def test_model_uden_linjeskift_giver_samme_fladede_tal():
-    """Beslutning 35: vi VED ikke, om modellen laver sine egne linjeskift.
-    Skriver den hele siden som ét afsnit, skal tallet vaere det samme."""
-    med = maal_side("prøve", SIDE, som_model(SIDE))
-    uden = maal_side("prøve", SIDE, " ".join(SIDE))
+def test_streng_maaling_udelader_hele_linjen_med_ulaeseligt_sted():
+    facit = ["Ingen Snue.", "Der er rigelig [?] Udflod.", "Barnet er kraftigt."]
+    rene = ["Ingen Snue.", "Barnet er kraftigt."]
 
-    assert uden.fladet["arbejdstal"].tegnafstand == med.fladet["arbejdstal"].tegnafstand
-    assert uden.linjer_maalt == med.linjer_maalt
+    m = maal_side("prøve", facit, som_model(facit))
+
+    # Ét tegn mindre end de rene linjer hver for sig: maerket tager sine egne
+    # afgraensende mellemrum med, naar det bliver til et jokerfelt. Det er
+    # tilsigtet og dokumenteret i `sidemaaling._forbered_facit` -- jokeren
+    # daekker stedet MED mellemrummene, saa modellen kan skrive dem igen uden
+    # at betale. Prisen er ét tegn i naevneren pr. maerke.
+    assert m.rene["raa"].facit_tegn == len(flad(rene, deler_ord(rene))) - 1
+    assert m.rene["raa"].facit_tegn < m.fladet["raa"].facit_tegn
 
 
-def test_forskudte_linjebrud_skrider_ikke():
-    """Flytter modellen hvert linjebrud ét ord, skal parringen holde. Uden
-    forankring ville alt efter det foerste brud vaere forkert."""
-    forskudt = [
-        "Rask indtil for 8 Dage siden da",
-        "hun fik Brystkatarrh. Ingen",
-        "tidligere Infektions-",
-        "sygdomme. Barnet er",
-        "kraftigt, velnæret.",
+def test_streng_maaling_ser_stadig_fejl_paa_de_rene_linjer():
+    """Udeladelsen maa ramme de svaere linjer -- ikke fejlene paa de nemme.
+
+    Modellens tekst paa den udeladte linje holder sig praecis inden for dens
+    loft (linjens eget indhold, 15 tegn), saa den slipper gratis. Tilbage staar
+    kun fejlen paa en ren linje, og den SKAL koste. Kunne jokeren sluge videre
+    ind i naboteksten, ville "Snue" forsvinde gratis -- og det er praecis den
+    slags mildhed, tallet ikke maa have.
+    """
+    facit = [
+        "Barnet er kraftigt og velnaeret ved indlaeggelsen.",
+        "Der er [?] Udflod.",
+        "Ingen Snue, Tungen belagt, Halsen uden belaegninger.",
     ]
-    m = maal_side("prøve", SIDE, som_model(forskudt))
-    assert m.fladet["arbejdstal"].tegnafstand == 0
-    assert m.linjer_maalt == len(SIDE)
+    model = som_model([
+        "Barnet er kraftigt og velnaeret ved indlaeggelsen.",
+        "Der er tyk Udflod.",
+        "Ingen Hoste, Tungen belagt, Halsen uden belaegninger.",
+    ])
+
+    m = maal_side("prøve", facit, model)
+
+    # "Snue" -> "Hoste" er fire redigeringer, ikke fem: S->H, n->o, indsaet s,
+    # u->t, og e staar. Efterregnet med `cer.levenshtein`, ikke talt i hovedet.
+    assert m.rene["raa"].tegnafstand == 4
 
 
-def test_linjetrofasthed_maales_i_stedet_for_at_antages():
-    """Svaret paa beslutning 35 skal vaere et tal, ikke en formodning."""
-    tro = maal_side("prøve", SIDE, som_model(SIDE))
-    assert tro.uden_linjeskift_indeni == len(SIDE)
-    assert tro.egen_modellinje == len(SIDE)
+def test_streng_maaling_lader_den_udeladte_linjes_modeltekst_slippe_gratis():
+    """Linjen er ude af naevneren, saa modellens modstykke til den skal ogsaa
+    vaere ude af taelleren. Ellers ville hele den udeladte linjes tekst staa
+    som indsaettelser og goere den strenge maaling meningsloes."""
+    facit = ["Ingen Snue.", "Der er rigelig [?] Udflod af egen art.", "Barnet er kraftigt."]
 
-    ét_afsnit = maal_side("prøve", SIDE, " ".join(SIDE))
-    assert ét_afsnit.egen_modellinje == 1
+    m = maal_side("prøve", facit, som_model(facit))
+
+    assert m.rene["raa"].tegnafstand == 0
+
+
+def test_side_uden_rene_linjer_giver_en_tom_streng_maaling_ikke_et_krak():
+    m = maal_side("prøve", ["Alt er [?] her."], "Alt er ulaeseligt her.")
+
+    assert m.rene["raa"].facit_tegn == 0
+    assert m.rene["raa"].cer == 0.0
+
+
+def test_streng_facit_giver_et_loft_pr_udeladt_linje():
+    facit = ["Ingen Snue.", "Der er [?] Udflod.", "Barnet [?] kraftigt."]
+    tekst, lofter = streng_facit(facit)
+
+    assert tekst.count("[?]") == 2
+    assert len(lofter) == 2
+    # Loftet er linjens EGET indhold -- hverken mere eller mindre. De 15 tegn
+    # fra `JOKER_LOFT` maa ikke laegges oveni: de er udledt af ordlaengden i
+    # materialet og er maalet for et `[?]` inde i en linje, mens linjens egen
+    # laengde er den tilsvarende udledning for en hel linje. Laegges de sammen,
+    # taelles samme begrundelse to gange, og den strenge maaling bliver
+    # maerkbart mildere, end den giver sig ud for.
+    assert lofter == [_tegn("Der er [?] Udflod."), _tegn("Barnet [?] kraftigt.")]
 
 
 # --------------------------------------------------------------------------
-# Opdigtning
+# Raekkefoelgen som sit eget tal
 # --------------------------------------------------------------------------
 
-def test_opdigtet_afsnit_dukker_op_som_uforankret_modeltekst():
-    """Tegnfejlen ser den ikke -- den maaler kun det forankrede. Derfor SKAL
-    dette tal staa ved siden af i rapporten."""
-    model = som_model(SIDE + ["Patienten blev udskrevet rask den tolvte juni."])
-    m = maal_side("prøve", SIDE, model)
+def test_ombyttede_linjer_taelles_som_omrokering_og_koster_i_hovedtallet():
+    """Begge dele er meningen. Maalingen er streng om raekkefoelgen, fordi
+    journalen laeses kronologisk -- og omrokeringen opgoeres ved siden af, saa
+    det kan SES, at fejlen var orden og ikke laesning."""
+    facit = ["Foerste linje her.", "Anden linje her.", "Tredje linje her."]
+    byttet = som_model(["Tredje linje her.", "Anden linje her.", "Foerste linje her."])
 
-    assert m.fladet["raa"].tegnafstand == 0
-    assert m.model_tegn_uforankret > 30
+    m = maal_side("prøve", facit, byttet)
 
-
-def test_fuldsidekontrol_koeres_kun_paa_sider_uden_maerker():
-    uden = maal_side("prøve", SIDE, som_model(SIDE))
-    assert uden.fuldside is not None
-    assert uden.fuldside["raa"].tegnafstand == 0
-
-    med = maal_side("prøve", ["Der er rigelig [?] Udflod"], "Der er rigelig blodig Udflod")
-    assert med.fuldside is None
-
-
-def test_fuldsidekontrollen_ser_det_forankringen_ikke_ser():
-    """Kontrollens hele formaal: paa en side uden maerker taeller opdigtet
-    tekst med som indsaettelser, saa forankringen ikke kan pynte ubemaerket."""
-    model = som_model(SIDE + ["Patienten blev udskrevet rask den tolvte juni."])
-    m = maal_side("prøve", SIDE, model)
-
-    assert m.fladet["raa"].tegnafstand == 0
-    assert m.fuldside["raa"].tegnafstand > 30
+    assert m.omrokering.antal_flyttede > 0
+    assert m.omrokering.linjer_identiske == 3  # alle tre er laest rigtigt
+    assert m.fladet["raa"].tegnafstand > 0     # men de staar forkert
 
 
 # --------------------------------------------------------------------------
-# Determinisme
+# Determinisme og saet-haandtering
 # --------------------------------------------------------------------------
-
-def test_to_koersler_giver_noejagtig_samme_rapport():
-    """Maengde- og ordbogs-iteration har foer givet ikke-reproducerbare
-    resultater i andre projekter. Rapporten skal vaere tegn for tegn ens."""
-    poster = [
-        {"image_name": "b", "alt_linjer": SIDE},
-        {"image_name": "a", "alt_linjer": ["Der er rigelig [?] Udflod af egen art"]},
-    ]
-    modeller = {"b": som_model(SIDE), "a": "Der er rigelig blodig Udflod af egen art"}
-
-    from andenside.maal import maal_saet
-
-    def koer() -> str:
-        return skriv_rapport(
-            maal_saet(poster, modeller),
-            titel="Prøve",
-            model="ingen",
-            promptversion="0",
-            dato="2026-08-22",
-        )
-
-    assert koer() == koer()
-
 
 def test_sider_kommer_i_sorteret_raekkefoelge():
-    from andenside.maal import maal_saet
-
     poster = [
         {"image_name": "c", "alt_linjer": SIDE},
         {"image_name": "a", "alt_linjer": SIDE},
@@ -270,207 +325,137 @@ def test_sider_kommer_i_sorteret_raekkefoelge():
 def test_side_uden_modelsvar_springes_over_i_stedet_for_at_taelle_som_nul():
     """En side uden svar er en manglende maaling, ikke en perfekt eller en
     elendig. Kom den med som nul tegn, ville tallet blive meningsloest."""
-    from andenside.maal import maal_saet
-
     poster = [{"image_name": "a", "alt_linjer": SIDE}, {"image_name": "b", "alt_linjer": SIDE}]
     saet = maal_saet(poster, {"a": som_model(SIDE)})
     assert [s.image_name for s in saet.sider] == ["a"]
+
+
+def test_to_koersler_giver_noejagtig_samme_tal():
+    """Maengde- og ordbogs-iteration har foer givet ikke-reproducerbare
+    resultater i andre projekter."""
+    poster = [
+        {"image_name": "b", "alt_linjer": SIDE},
+        {"image_name": "a", "alt_linjer": ["Der er rigelig [?] Udflod af egen art"]},
+    ]
+    modeller = {"b": som_model(SIDE), "a": "Der er rigelig blodig Udflod af egen art"}
+
+    def koer():
+        s = maal_saet(poster, modeller)
+        return (
+            [(n, m.tegnafstand, m.facit_tegn) for n, m in sorted(s.fladet.items())],
+            [(navn, g.model_tekst) for navn, g in s.gab],
+        )
+
+    assert koer() == koer()
+
+
+@pytest.mark.parametrize("navn", sorted(cer.VARIANTER))
+def test_hver_variant_maales_paa_baade_hovedtal_og_streng(navn: str):
+    """Beslutning 26: alle seks staar side om side, og ingen af dem maa
+    vaelges efter, hvilken der klaeder resultatet bedst."""
+    saet = maal_saet([{"image_name": "a", "alt_linjer": SIDE}], {"a": som_model(SIDE)})
+
+    assert navn in saet.fladet
+    assert navn in saet.rene
+
+
+def test_den_faste_udeladelse_er_den_samme_uanset_modelsvar():
+    """`andel_af_facit_i_rene` er den strenge maalings udeladelse. Den maa kun
+    afhaenge af facit -- er den variantafhaengig, er den glidende rabat
+    tilbage under et nyt navn."""
+    poster = [{"image_name": "a", "alt_linjer": ["Ingen Snue.", "Der er [?] Udflod."]}]
+
+    god = maal_saet(poster, {"a": som_model(poster[0]["alt_linjer"])})
+    daarlig = maal_saet(poster, {"a": "Noget helt andet."})
+
+    assert god.andel_af_facit_i_rene == daarlig.andel_af_facit_i_rene
 
 
 # --------------------------------------------------------------------------
 # Rapporten
 # --------------------------------------------------------------------------
 
-def test_rapporten_naevner_daekning_og_at_facit_rummer_fejl():
-    """De to forbehold er obligatoriske. Uden dem er tallet misvisende,
-    uanset hvor korrekt det er regnet ud."""
-    from andenside.maal import maal_saet
+def _proeverapport() -> str:
+    from andenside.rapport import skriv_rapport
 
-    saet = maal_saet([{"image_name": "a", "alt_linjer": SIDE}], {"a": som_model(SIDE)})
-    tekst = skriv_rapport(saet, titel="Prøve", model="m", promptversion="1", dato="2026-08-22")
+    poster = [
+        {"image_name": "a", "alt_linjer": SIDE},
+        {"image_name": "b", "alt_linjer": ["Der er rigelig [?] Udflod af egen art"]},
+    ]
+    modeller = {"a": som_model(SIDE), "b": "Der er rigelig blodig Udflod af egen art"}
+    return skriv_rapport(
+        maal_saet(poster, modeller),
+        titel="Prøve",
+        model="ingen",
+        promptversion="0",
+        dato="2026-08-31",
+    )
 
-    assert "Dækningen står ved hvert tal" in tekst
-    assert "Facit rummer selv fejl" in tekst
-    assert "37554_001491" in tekst
-    for navn in cer.VARIANTER:
-        assert f"`{navn}`" in tekst
+
+def test_rapporten_bruger_ikke_forankringens_begreber_om_hovedtallet():
+    """Ordene forsvandt sammen med mekanismen. Dukker de op igen som
+    beskrivelse af hovedtallet, er den glidende rabat tilbage under et nyt
+    navn -- og det var den, der vendte en rangorden to gange paa én dag.
+
+    "Dækning" og "rabat" maa kun staa i den strenge maalings afsnit, hvor de
+    udtrykkeligt forklares som noget, der IKKE laengere findes.
+    """
+    tekst = _proeverapport()
+
+    assert "forankr" not in tekst.lower()
+    assert "uforankret" not in tekst.lower()
+
+    afsnit = tekst.split("## ")
+    for a in afsnit:
+        if a.startswith("Hovedtal"):
+            assert "dækning" not in a.lower()
+            assert "rabat" not in a.lower()
+            break
+    else:
+        raise AssertionError("rapporten har intet hovedtals-afsnit")
+
+
+def test_rapporten_forklarer_maalingen_foer_den_viser_det_foerste_tal():
+    """Kravet gjaldt ogsaa den gamle rapport: den skal kunne laeses uden
+    CONTEXT.md ved haanden."""
+    tekst = _proeverapport()
+
+    forklaring = tekst.index("Sådan er der målt")
+    hovedtal = tekst.index("## Hovedtal")
+    assert forklaring < hovedtal
+    # De tre ting en laeser skal have for at forstaa tallet.
+    assert "søg" in tekst[forklaring:hovedtal].lower()
+    assert "rækkefølge" in tekst[forklaring:hovedtal].lower()
+    assert "[?]" in tekst[forklaring:hovedtal]
+
+
+@pytest.mark.parametrize("navn", sorted(cer.VARIANTER))
+def test_hver_variant_har_sin_egen_raekke_i_tabellen(navn: str):
+    assert f"`{navn}`" in _proeverapport()
+
+
+def test_raekkefoelge_afsnittet_baerer_sit_forbehold():
+    """Tallene kommer fra en linjeparring med kendt svaghed, ikke fra
+    hovedmaalingen. Staar de uden forbehold, bliver de laest som
+    beslutningstal."""
+    tekst = _proeverapport()
+
+    afsnit = [a for a in tekst.split("## ") if a.startswith("Rækkefølge")]
+    assert afsnit, "rapporten har intet afsnit om rækkefølge"
+    assert "vejledende" in afsnit[0].lower()
 
 
 def test_tomt_saet_giver_en_rapport_i_stedet_for_at_gaa_i_stykker():
+    from andenside.rapport import skriv_rapport
+
     tekst = skriv_rapport(
-        SaetMaaling(sider=()), titel="Tom", model="m", promptversion="1", dato="2026-08-22"
+        maal_saet([], {}), titel="Tom", model="ingen", promptversion="0",
+        dato="2026-08-31",
     )
-    assert "Sider målt | 0" in tekst
+    assert "Tom" in tekst
 
 
-@pytest.mark.parametrize("navn", list(cer.VARIANTER))
-def test_hver_variant_har_sin_egen_raekke_i_tabellen(navn: str):
-    from andenside.maal import maal_saet
-
-    saet = maal_saet([{"image_name": "a", "alt_linjer": SIDE}], {"a": som_model(SIDE)})
-    tekst = skriv_rapport(saet, titel="Prøve", model="m", promptversion="1", dato="2026-08-22")
-    assert tekst.count(f"| `{navn}` |") >= 2  # fladet OG pr. linje
-
-
-def test_side_med_lav_daekning_udpeges_selvom_dens_tegnfejl_er_flot():
-    """Faelden i enhver kvalitetsrapport: en side hvor naesten intet kunne
-    maales, faar et pænt tal og lander i bunden af 'de vaerste'. Den skal
-    staa oeverst i sin EGEN liste."""
-    from andenside.maal import maal_saet
-
-    poster = [
-        {"image_name": "tynd", "alt_linjer": SIDE},
-        {"image_name": "fyldig", "alt_linjer": SIDE},
-    ]
-    modeller = {
-        # Kun foerste linje genkendelig -- resten sprunget over. Nul tegnfejl
-        # paa det maalte, men saa godt som intet er maalt.
-        "tynd": som_model(SIDE[:1]),
-        # Hele siden med, men med fejl i.
-        "fyldig": som_model([l.replace("e", "o") for l in SIDE]),
-    }
-    tekst = skriv_rapport(
-        maal_saet(poster, modeller), titel="Prøve", model="m",
-        promptversion="1", dato="2026-08-22",
-    )
-
-    tyndest_afsnit = tekst.split("tyndest målte sider")[1]
-    assert tyndest_afsnit.index("`tynd`") < tyndest_afsnit.index("`fyldig`")
-
-    vaerste_afsnit = tekst.split("værste sider")[1].split("tyndest målte")[0]
-    assert vaerste_afsnit.index("`fyldig`") < vaerste_afsnit.index("`tynd`")
-
-
-def test_falsk_forankring_skader_ogsaa_den_naeste_linje():
-    """Kendt begraensning, pinnet med vilje (CONTEXT.md 2026-08-22, senere).
-
-    Forankringen gaar fra venstre mod hoejre. Et falsk traef flytter derfor
-    soegepunktet frem forbi det sted, hvor NAESTE linje i virkeligheden staar,
-    saa den kun finder en afskaaret rest af sig selv -- selvom modellen skrev
-    den helt rigtigt. Her: den korte facit-linje `Lunge` findes ikke som en
-    linje i modellen, men bogstaverne staar inde i `Lunger` paa naeste linje,
-    og saa aeder forankringen dét ord op.
-
-    Raekkefoelgen fjernes IKKE for at undgaa det: uden den kunne en gentaget
-    vending forankre bagud og give et gab med negativ laengde. Prisen for at
-    fjerne fejlen ville vaere en stoerre fejl. Testen staar her, saa
-    begraensningen ikke kan aendre sig ubemaerket -- og saa den, der en dag
-    laver den om, kan se hvad den kostede.
-    """
-    facit = ["Lunge", "begge Lunger overalt en Mængde fugtige"]
-    model = som_model(["Tungen er tør og belagt", "begge Lunger overalt en Mængde fugtige"])
-    m = maal_side("prøve", facit, model)
-
-    assert m.linjer[0].forankret          # falsk traef paa "Lunge" inde i "Lunger"
-    assert m.linjer[1].model_maalt == "r overalt en Mængde fugtige"
-    assert m.fladet["raa"].tegnafstand == 11
-
-    # Uden den korte, vildledende linje er der ingen fejl at finde.
-    uden = maal_side("prøve", facit[1:], model)
-    assert uden.fladet["raa"].tegnafstand == 0
-
-
-def test_rapporten_forklarer_forankring_foer_den_bruger_ordet():
-    """Rapporten skal kunne staa alene. Ordet 'forankring' baerer hele
-    maalingen, og en laeser, der ikke har CONTEXT.md ved haanden, skal kunne
-    forstaa tallene alligevel."""
-    from andenside.maal import maal_saet
-
-    saet = maal_saet([{"image_name": "a", "alt_linjer": SIDE}], {"a": som_model(SIDE)})
-    tekst = skriv_rapport(saet, titel="Prøve", model="m", promptversion="1", dato="2026-08-22")
-
-    forklaring = tekst.index("Sådan er der målt")
-    assert forklaring < tekst.index("## Hovedtal")
-    for ord in ("tegnafstand", "CER", "WER", "Fladet tekst"):
-        assert ord in tekst[forklaring:], ord
-
-
-# --------------------------------------------------------------------------
-# Den strenge maaling: linjer med ulaeselige steder slet ikke med
-# (lead 2026-08-23 -- de reddede stumper kan give en skaevhed, og den skal
-#  kunne ses som et tal ved siden af hovedtallet)
-# --------------------------------------------------------------------------
-
-def test_streng_maaling_udelader_hele_linjen_med_ulaeseligt_sted():
-    """Hovedtallet maaler de kendte stumper omkring et [?]. Den strenge
-    maaling gaar den anden vej og lader linjen helt ude. Fejl paa den linje
-    maa derfor kun optraede i hovedtallet, aldrig i den strenge."""
-    facit = ["Der er rigelig [?] Udflod af egen art", "Barnet er kraftigt."]
-    # Modellen laeser den SVAERE linje forkert og den rene rigtigt.
-    model = som_model(["Der er rigelig blodig Udflad af egen art", "Barnet er kraftigt."])
-    m = maal_side("prøve", facit, model)
-
-    assert m.fladet["raa"].tegnafstand == 1      # 'o' -> 'a' i Udflod
-    assert m.rene["raa"].tegnafstand == 0        # den svaere linje er slet ikke med
-    assert m.rene_linjer_i_alt == 1
-    assert m.rene_linjer_maalt == 1
-
-
-def test_streng_maaling_ser_stadig_fejl_paa_de_rene_linjer():
-    """Den maa ikke bare vaere nul hele tiden."""
-    facit = ["Der er rigelig [?] Udflod", "Barnet er kraftigt."]
-    model = som_model(["Der er rigelig blodig Udflod", "Barnet er kraftigi."])
-    m = maal_side("prøve", facit, model)
-
-    assert m.rene["raa"].tegnafstand == 1
-    assert m.fladet["raa"].tegnafstand == 1
-
-
-def test_side_uden_rene_linjer_giver_en_tom_streng_maaling_ikke_et_krak():
-    facit = ["Der er rigelig [?] Udflod", "[?] i Trachea"]
-    m = maal_side("prøve", facit, "Der er rigelig blodig Udflod\nnoget i Trachea")
-
-    assert m.rene_linjer_i_alt == 0
-    assert m.rene["raa"].facit_tegn == 0
-    assert m.rene["raa"].cer == 0.0
-
-
-def test_rene_daekning_og_andel_af_facit_er_to_forskellige_tal():
-    """Det ene siger 'hvor meget af det vi maaler paa, fik vi fat i', det
-    andet 'hvor meget af siden ser den strenge maaling overhovedet'. De maa
-    ikke forveksles -- den anden er den, der afsloerer prisen."""
-    from andenside.maal import maal_saet
-
-    poster = [{"image_name": "a", "alt_linjer": [
-        "Der er rigelig [?] Udflod af en helt egen art og farve",
-        "Barnet er kraftigt og velnæret.",
-    ]}]
-    modeller = {"a": som_model([
-        "Der er rigelig blodig Udflod af en helt egen art og farve",
-        "Barnet er kraftigt og velnæret.",
-    ])}
-    saet = maal_saet(poster, modeller)
-
-    assert saet.rene_daekning == 1.0            # den rene linje blev fundet helt
-    assert saet.andel_af_facit_i_rene < 0.6     # men den er under halvdelen af siden
-
-
-def test_rapporten_stiller_den_strenge_maaling_op_mod_hovedtallet():
-    """lead 2026-08-23: skaevheden fra de reddede stumper skal kunne SES,
-    ikke bare vaere en mulighed man goer sig klart. Derfor staar den strenge
-    maaling lige efter hovedtallet, med forskellen skrevet ud."""
-    from andenside.maal import maal_saet
-
-    poster = [{"image_name": "a", "alt_linjer": [
-        "Der er rigelig [?] Udflod af egen art",
-        "Barnet er kraftigt og velnæret.",
-    ]}]
-    modeller = {"a": som_model([
-        "Der er rigelig blodig Udflad af egen art",
-        "Barnet er kraftigt og velnæret.",
-    ])}
-    tekst = skriv_rapport(
-        maal_saet(poster, modeller), titel="Prøve", model="m",
-        promptversion="1", dato="2026-08-23",
-    )
-
-    hoved = tekst.index("## Hovedtal")
-    streng = tekst.index("## Uden de linjer, der rummer et ulæseligt sted")
-    assert hoved < streng < tekst.index("## Pr. linje")
-    assert "Sammenlign de to" in tekst
-    # Forskellen skal staa som et tal, ikke kun som et forbehold.
-    assert "en forskel på" in tekst
-    # lead 2026-08-23: et hoejere strengt tal skal forklares, ikke blot
-    # konstateres -- ellers kan laeseren ikke vide, hvorfor det er alvorligt.
-    assert "advarselstegn" in tekst
-    assert "falder UD af målingen" in tekst
+def test_to_koersler_giver_noejagtig_samme_rapport():
+    """Maengde- og ordbogs-iteration har foer givet ikke-reproducerbare
+    resultater i andre projekter. Rapporten skal vaere tegn for tegn ens."""
+    assert _proeverapport() == _proeverapport()

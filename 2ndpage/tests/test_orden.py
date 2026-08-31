@@ -104,3 +104,40 @@ def test_determinisme_ved_uafgjort_parring():
     assert foerste == anden
     assert foerste.antal_flyttede == 0
     assert foerste.model_positioner == (0, 1, 2)
+
+
+# --------------------------------------------------------------------------
+# Helt korrekte linjer
+# --------------------------------------------------------------------------
+#
+# Under forankringen kom "andel linjer der er noejagtig rigtige" fra
+# `Maaltal.andel_identiske`, hvor ét stykke var én parret linje. Sidemaalingen
+# maaler hele siden i ét straek, saa dér er ét stykke én SIDE -- og andelen
+# ville blive "andel perfekte sider", et andet og naesten altid nul-tal.
+# Linjeparringen her er det eneste sted, tallet stadig kan komme fra.
+
+
+def test_identiske_linjer_taelles_kun_naar_teksten_er_ens():
+    facit = ["Ingen Snue.", "Temperatur 39,5.", "Patienten har sovet."]
+    model = ["Ingen Snue.", "Temperatur 38,5.", "Patienten har sovet."]
+
+    resultat = maal_omrokering(facit, model)
+
+    assert resultat.linjer_parret == 3
+    assert resultat.linjer_identiske == 2
+
+
+def test_identiske_linjer_ser_bort_fra_versaler_og_tegnsaetning():
+    """Parringen sammenligner normaliseret tekst, og tallet skal foelge
+    parringen -- ellers ville en linje kunne vaere parret og 'ikke identisk'
+    paa en forskel, parringen selv har set bort fra."""
+    resultat = maal_omrokering(["Ingen Snue."], ["ingen snue"])
+
+    assert resultat.linjer_identiske == 1
+
+
+def test_uparret_linje_er_ikke_identisk():
+    resultat = maal_omrokering(["Ingen Snue."], ["Aldeles andet indhold her."])
+
+    assert resultat.linjer_parret == 0
+    assert resultat.linjer_identiske == 0

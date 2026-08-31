@@ -138,6 +138,12 @@ class Omrokering:
     linjer_parret: int      # facit-linjer der fik en modellinje
     linjer_uparret: int     # facit-linjer uden rimeligt modstykke
     model_positioner: tuple[int, ...]  # parrede linjers position i modellen, i facit-raekkefoelge
+    # Parrede linjer, hvor modellens tekst er ens med facits efter samme
+    # normalisering, parringen selv bruger. Under forankringen kom "andel
+    # noejagtig rigtige linjer" fra `Maaltal.andel_identiske`, hvor ét stykke
+    # var én parret linje. Sidemaalingen maaler hele siden i ét straek, saa dér
+    # er ét stykke én SIDE -- et andet tal. Her er det oprindelige.
+    linjer_identiske: int = 0
 
 
 def maal_omrokering(
@@ -156,9 +162,16 @@ def maal_omrokering(
     par = _par_linjer(facit_linjer, model_linjer, maks_afvigelse)
     positioner = [idx for idx in par if idx is not None]
     lis = _laengste_voksende_delfoelge(positioner)
+    identiske = sum(
+        1
+        for facit_linje, idx in zip(facit_linjer, par)
+        if idx is not None
+        and _normaliseret(facit_linje) == _normaliseret(model_linjer[idx])
+    )
     return Omrokering(
         antal_flyttede=len(positioner) - lis,
         linjer_parret=len(positioner),
         linjer_uparret=len(par) - len(positioner),
         model_positioner=tuple(positioner),
+        linjer_identiske=identiske,
     )

@@ -1,14 +1,18 @@
 """Rapportformatet -- én maaling skrevet ud, saa den kan laeses af et menneske.
 
 Formatet er aftalt FOER foerste modelkald, saa tallene ikke bliver formet
-efter, hvad der ser godt ud. To ting er obligatoriske og maa ikke kunne
-slaas fra:
+efter, hvad der ser godt ud.
 
-1. **Daekningen staar ved hvert eneste tal.** De linjer, vi ikke maaler, er
-   ikke tilfaeldige -- det er de svaereste linjer paa siden, og det er derfor,
-   transskribenten ikke kunne laese dem. Tallet er systematisk for pænt.
-2. **Facit rummer selv fejl** (beslutning 37). Én er bekraeftet. En enkelt
-   uenighed mellem model og facit er derfor ikke automatisk modellens fejl.
+Den store aendring 2026-08-31: forankringen er vaek (se `maal.py`s docstring).
+Dermed er ogsaa **daekning** og **rabat** vaek som begreber. Hele facit er
+altid i naevneren, saa der findes ikke laengere et "maalt paa X % af tegnene"
+at saette ved hvert tal, ingen liste over "tyndest maalte sider", og ingen
+fuldside-kontrol -- kontrollen og det, den kontrollerede, er blevet det samme
+tal. Skriver nogen de ord ind igen, er det en fejl, ikke en udeladelse.
+
+Ét obligatorisk forbehold staar tilbage: **facit rummer selv fejl**
+(beslutning 37). Én er bekraeftet. En enkelt uenighed mellem model og facit er
+derfor ikke automatisk modellens fejl.
 
 Rapporten udpeger desuden de vaerste enkeltsider, saa de kan ses efter med
 oejnene frem for kun at indgaa i et gennemsnit.
@@ -17,19 +21,15 @@ from __future__ import annotations
 
 from andenside import cer
 from andenside.maal import SaetMaaling, SideMaaling
+from andenside.sidemaaling import JOKER_LOFT
 
 VAERSTE_SIDER = 10
 GAB_I_RAPPORTEN = 15
 
-FORBEHOLD = """> **Sådan læses tallene.** Dækningen står ved hvert tal, fordi de linjer,
-> der ikke er målt, er de sværeste på siden — dem transskribenten selv ikke
-> kunne læse. Tallet er derfor systematisk for pænt, og forskellen bliver
-> større, jo lavere dækningen er.
->
-> Facit rummer selv fejl (beslutning 37). Én er bekræftet ved kontrol:
-> `37554_001491` skriver "for 2 Dage siden", hvor der på siden står "for 3
-> Dage siden". En enkelt uenighed mellem model og facit er altså ikke i sig
-> selv modellens fejl.
+FORBEHOLD = """> **Sådan læses tallene.** Facit rummer selv fejl (beslutning 37). Én er
+> bekræftet ved kontrol: `37554_001491` skriver "for 2 Dage siden", hvor der
+> på siden står "for 3 Dage siden". En enkelt uenighed mellem model og facit
+> er altså ikke i sig selv modellens fejl.
 >
 > `raa` er tallet, leverancen står ved. `arbejdstal` (uden versaler og
 > tegnsætning) er det, vi træffer valg ud fra. De øvrige varianter viser,
@@ -37,35 +37,43 @@ FORBEHOLD = """> **Sådan læses tallene.** Dækningen står ved hvert tal, ford
 > ingen af dem må vælges, fordi den klæder resultatet."""
 
 
-SAADAN_MAALES_DER = """## Sådan er der målt
+SAADAN_MAALES_DER = f"""## Sådan er der målt
 
-Rapporten bruger ordet **forankring** hele vejen igennem, så her er hvad det
-betyder, i almindeligt sprog:
+**Hele siden sammenlignes i ét stræk, fra øverste linje til nederste.** Facits
+tekst og modellens tekst stilles op mod hinanden som to lange tekster, og der
+tælles, hvor mange enkelttegn der skal rettes, indsættes eller slettes for at
+komme fra den ene til den anden. Linjeskiftene er taget ud på begge sider, og
+ord, der er delt hen over et linjeskift, er sat sammen igen.
 
-Facits tekst søges frem i modellens tekst, én linje ad gangen, fra toppen af
-siden og nedefter. Søgningen tåler læsefejl — den leder efter det stykke
-modeltekst, der ligner facit-linjen mest, og godtager det, hvis det ikke
-afviger for meget. Er stykket fundet, er linjen *forankret*, og de to
-tekststykker kan sammenlignes tegn for tegn. Kan linjen ikke findes, går den
-helt ud af målingen, i begge tekster.
+**Der bliver ikke søgt.** Ingen linje bliver ledt op inde i modellens tekst.
+Der er kun én vej gennem siden, oppefra og ned, og hele facit er altid med.
+Det er den vigtige forskel fra de tidligere rapporter: dengang blev hver
+facit-linje søgt frem i modelsvaret, og en linje, der ikke kunne findes, faldt
+helt ud af regnestykket i begge tekster. Et gentaget ord kunne dermed sende
+søgningen langt ned på siden og tage alle de mellemliggende linjer med sig ud
+af målingen. Det kan ikke længere ske, og der findes derfor heller ikke
+længere noget tal for, hvor stor en del af siden der blev målt: svaret er
+altid hele siden.
 
-Der søges i modellens **rå tekst uden hensyn til dens linjeskift**. Derfor er
-det ligegyldigt for tallene, om modellen følger sidens linjer eller laver sine
-egne — og derfor kan vi måle bagefter, hvad den faktisk gjorde (se
-*Linjetrofasthed* nedenfor) i stedet for at gætte på forhånd.
+**Rækkefølgen tæller med.** Skriver modellen sidens linjer i en anden orden,
+end de står, koster det. Det er med vilje: rækkefølgen er data i en
+patientjournal. Hvor meget af fejlen der skyldes netop dét, står i afsnittet
+*Rækkefølge og linjer* nedenfor.
 
-Hvor facit siger `[?]` — et sted transskribenten ikke kunne læse — deles
-linjen, og de kendte stumper på hver side søges hver for sig. Det, modellen
-skrev i mellemrummet, måles ikke; der findes ingen sandhed at måle det imod.
-Men det gemmes, både fordi længden siger noget om, hvor tilbøjelig modellen er
-til at digte, og fordi det er dens bud på et sted, ingen har kunnet læse.
+**Hvor facit siger `[?]`** — et sted transskribenten ikke kunne læse — må
+modellen skrive noget, uden at det koster. Der findes jo ingen sandhed at måle
+det imod. Men fribilletten har et loft: op til {JOKER_LOFT} tegn indhold
+(mellemrum tæller ikke med) er gratis, og skriver modellen mere, koster
+overskuddet ét point pr. tegn. Loftet er der, fordi et sted uden loft ville
+lade en model springe vilkårligt langt frem i sin egen tekst gratis og dermed
+få rigtige fejl slugt af det ulæselige sted ved siden af. Det, modellen skrev
+de steder, gemmes og står nederst i rapporten.
 
-**Ordforklaring:** *tegnafstand* = hvor mange enkelttegn der skal rettes,
-indsættes eller slettes for at nå fra modellens tekst til facits. *CER* er den
-afstand delt med antallet af tegn i facit; *WER* er det samme regnet på hele
-ord, og den er derfor altid et større tal — ét forkert bogstav gør hele ordet
-forkert. *Fladet tekst* betyder, at linjeskiftene er taget ud og ord, der er
-delt hen over et linjeskift, er sat sammen igen."""
+**Ordforklaring:** *tegnafstand* = antallet af enkelttegn, der skal rettes,
+indsættes eller slettes. *CER* (tegnfejl) er den afstand delt med antallet af
+tegn i facit; *WER* (ordfejl) er det samme regnet på hele ord og er derfor
+altid et større tal — ét forkert bogstav gør hele ordet forkert. *Fladet
+tekst* betyder, at linjeskiftene er taget ud og delte ord samlet igen."""
 
 
 def _pct(x: float) -> str:
@@ -86,10 +94,19 @@ def _varianttabel(maal: dict[str, cer.Maaltal]) -> list[str]:
 
 
 def _sidelinje(side: SideMaaling) -> str:
+    """Én raekke i tabellen over de vaerste sider.
+
+    Kolonnerne er valgt, saa en daarlig side kan afkodes uden at slaa op:
+    tegnfejlen, hvor mange af sidens linjer der rummer et ulaeseligt sted, hvor
+    mange linjer modellen skrev i forkert orden, og om den overhovedet skrev
+    lige saa meget tekst, som der stod paa siden.
+    """
     m = side.fladet["arbejdstal"]
     return (
-        f"| `{side.image_name}` | {_pct(m.cer)} | {_pct(side.daekning)} | "
-        f"{side.linjer_maalt}/{side.linjer_i_alt} | {side.model_tegn_uforankret} |"
+        f"| `{side.image_name}` | {_pct(m.cer)} | "
+        f"{side.svaere_linjer}/{side.linjer_i_alt} | "
+        f"{side.omrokering.antal_flyttede} | "
+        f"{side.model_tegn_i_alt}/{side.facit_tegn_i_alt} |"
     )
 
 
@@ -109,20 +126,23 @@ def skriv_rapport(
     er kun meningsfulde sammen med, hvad der frembragte dem.
     """
     fladet = saet.fladet
-    pr_linje = saet.pr_linje
+    streng = saet.rene
     sider = saet.sider
 
     # Opsummeringer regnes ét sted, saa de samme tal ikke kan komme til at
     # staa forskelligt i to afsnit af samme rapport.
     model_i_alt = sum(s.model_tegn_i_alt for s in sider)
-    uforankret = sum(s.model_tegn_uforankret for s in sider)
-    gab = saet.gab
-    gabtegn = sum(len("".join(g.model_tekst.split())) for _, g in gab)
+    facit_i_alt = sum(s.facit_tegn_i_alt for s in sider)
     svaere = sum(s.svaere_linjer for s in sider)
-    reddet = sum(s.svaere_linjer_reddet for s in sider)
-    uden_skift = sum(s.uden_linjeskift_indeni for s in sider)
-    egen = sum(s.egen_modellinje for s in sider)
-    maalte_linjer = sum(s.linjer_maalt for s in sider)
+    gab = saet.gab
+    jokertegn = saet.joker_tegn_i_alt
+    overskud = saet.joker_overskud
+
+    linjer_i_alt = saet.linjer_i_alt
+    parret = saet.linjer_parret
+    uparret = linjer_i_alt - parret
+    flyttede = saet.linjer_omrokeret
+    identiske = saet.identiske_linjer
 
     ud: list[str] = [
         f"# {titel}",
@@ -133,168 +153,135 @@ def skriv_rapport(
         f"| Promptversion | `{promptversion}` |",
         f"| Dato | {dato} |",
         f"| Sider målt | {len(sider)} |",
-        f"| Facit-udgave | `alt_*` (beslutning 24) |",
+        "| Facit-udgave | `alt_*` (beslutning 24) |",
         "",
         FORBEHOLD,
         "",
         SAADAN_MAALES_DER,
         "",
-        "## Hovedtal — fladet tekst",
+        "## Hovedtal — hele siden",
         "",
-        f"Målt på **{_pct(saet.daekning)} af facits tegn** "
-        f"({_pct(saet.linjedaekning)} af linjerne). "
-        "De udeladte er de sværeste.",
+        f"Målt på alle {len(sider)} siders fulde tekst — {facit_i_alt} tegn i alt,",
+        f"fordelt på {linjer_i_alt} linjer, hvoraf {svaere} rummer mindst ét `[?]`.",
+        "Intet er udeladt.",
+        "",
+        "Alle seks varianter står side om side (beslutning 26); ingen af dem må",
+        "vælges efter, hvilken der klæder resultatet bedst. **Tegnfejl er",
+        "beslutningstallet**, ordfejl står ved siden af som et groft mål for, hvor",
+        "mange ord der overhovedet er ramt.",
         "",
     ]
     ud += _varianttabel(fladet)
-    ud += [
-        "",
-        f"Af de {svaere} linjer med mindst ét `[?]` kunne forankringen redde "
-        f"**{reddet}** ind i målingen ved at måle de kendte stumper omkring "
-        "det ulæselige sted. Grundreglen er ellers, at hele linjen går ud "
-        "(beslutning 38), så uden det trin ville dækningen have været "
-        "væsentligt lavere.",
-    ]
 
-    # Den strenge maaling ved siden af hovedtallet. Staar HER, lige efter det,
-    # fordi den er svaret paa "er hovedtallet skaevt?" -- ikke et sidetal.
-    streng = saet.rene
+    # Den strenge maaling staar HER, lige efter hovedtallet, fordi den er
+    # svaret paa "er hovedtallet skaevt?" -- ikke et sidetal.
     ud += [
         "",
-        "## Uden de linjer, der rummer et ulæseligt sted",
+        "## Den strenge måling — uden linjer med et ulæseligt sted",
         "",
-        "Hovedtallet ovenfor tager de kendte stumper med fra linjer, hvor",
-        "transskribenten gav op — teksten på hver side af et `[?]`. Det er",
-        "netop dér, både modellen og opdelingen er mest usikre, så det kan",
-        "trække tallet skævt. Her er den samme måling med de linjer helt ude.",
+        "Hovedtallet ovenfor har alle linjer med, også dem hvor transskribenten",
+        "gav op midt i og skrev `[?]`. Her er den samme måling, hvor hele den",
+        "slags linje er taget ud af facit, så modellen hverken kan straffes eller",
+        "belønnes for dem. Det er samtidig konventionen i faget: Transkribus og",
+        "beslægtede værktøjer udelader hele linjen ved ulæselige steder, så netop",
+        "dette tal kan sammenlignes med anden forskning.",
         "",
-        f"Den strenge måling ser **{_pct(saet.andel_af_facit_i_rene)} af facits tegn** "
-        f"(resten ligger på linjer med mindst ét `[?]`) og fik fat i "
-        f"{_pct(saet.rene_daekning)} af dem.",
+        f"Den strenge måling ser **{_pct(saet.andel_af_facit_i_rene)} af facits "
+        "tegn**; resten ligger på linjer med mindst ét `[?]`.",
+        "",
+        "**Udeladelsen er FAST.** Den afhænger udelukkende af facit — af hvilke",
+        "linjer transskribenten satte et `[?]` i — og er derfor nøjagtig den",
+        "samme for alle seks varianter og for alle modeller, vi nogensinde måler.",
+        "Det er den afgørende forskel fra den *dækning*, de tidligere rapporter",
+        "opgjorde: dén flyttede sig, alt efter hvor meget af siden søgningen",
+        "kunne genfinde i det enkelte modelsvar, og gav dermed mest rabat til den",
+        "model, der afveg mest. Det væltede konklusionen 30. august. Sådan et tal",
+        "findes ikke længere nogen steder i rapporten.",
         "",
     ]
     ud += _varianttabel(streng)
-    ud += [
-        "",
-        f"**Sammenlign de to.** Hovedtallet er {_pct(fladet['arbejdstal'].cer)}, "
-        f"den strenge er {_pct(streng['arbejdstal'].cer)} (`arbejdstal`) — "
-        f"en forskel på {_pct(abs(streng['arbejdstal'].cer - fladet['arbejdstal'].cer))}.",
-        "",
-        "Hvor stor en forskel der skal til, før den betyder noget, kan aflæses",
-        "af selvtesten: dér forvanskes alle bogstaver lige meget, så de svære",
-        "linjer er netop IKKE sværere end resten, og alligevel skiller de to tal",
-        "sig 0,08 procentpoint ad (7,92 % mod 7,84 % ved 10 % forvanskning). En",
-        "forskel af den størrelse er maskineriet selv. Er forskellen flere gange",
-        "større, kommer den fra materialet, og så siger retningen følgende:",
-        "",
-        "**Er den strenge lavere**, er de reddede stumper sværere end resten af",
-        "teksten. Det er det ventede — de ligger op ad de steder, transskribenten",
-        "selv gav op over for. Hovedtallet er da en smule for pessimistisk og kan",
-        "bruges som det står, fordi det hviler på mest tekst.",
-        "",
-        "**Er den strenge højere, er det et advarselstegn**, og så er det den",
-        "strenge, der gælder. Grunden er, at en reddet stump kun tæller med i",
-        "hovedtallet, hvis den overhovedet kunne findes i modellens svar. Har",
-        "modellen slagtet stumpen — læst noget helt andet, eller sprunget stedet",
-        "over — kan søgningen ikke genkende den, og linjen falder UD af målingen",
-        "i stedet for at tælle som en fejl. Tilbage bliver kun de stumper,",
-        "modellen klarede. Hovedtallet opgør altså de vellykkede redninger og",
-        "kommer til at se pænere ud, jo dårligere modellen faktisk læste de",
-        "svære steder. Den strenge måling kan ikke rammes af det, fordi den slet",
-        "ikke ser de linjer.",
-    ]
 
+    hoved_cer = fladet["arbejdstal"].cer
+    streng_cer = streng["arbejdstal"].cer
     ud += [
         "",
-        "## Pr. linje",
+        f"**Sammenlign de to.** Hovedtallet er {_pct(hoved_cer)}, den strenge er "
+        f"{_pct(streng_cer)} (`arbejdstal`) — en forskel på "
+        f"{_pct(abs(streng_cer - hoved_cer))}.",
         "",
-        "Samme tekst, men målt linje for linje efter at linjerne er parret via",
-        "forankringen. Skrider ikke ved et afvigende linjebrud, fordi parringen",
-        "sker på indhold og ikke på linjenummer.",
+        "**Er den strenge lavere**, er de svære linjer sværere end resten af",
+        "teksten — det ventede. Hovedtallet kan bruges, som det står, fordi det",
+        "hviler på al teksten.",
         "",
-    ]
-    ud += _varianttabel(pr_linje)
-    ud += [
+        "**Er den strenge højere, gælder den strenge.** Så har modellen fået",
+        "noget forærende af de ulæselige steder: den skrev noget dér, som slap",
+        "gratis igennem under loftet, og det pynter kun på hovedtallet. Den",
+        "strenge måling kan ikke rammes af det, fordi den slet ikke ser de",
+        "linjer. Vælg derfor altid det højeste af de to, når de er uenige.",
         "",
-        f"Linjer der er nøjagtig rigtige (`arbejdstal`): "
-        f"{pr_linje['arbejdstal'].stykker_identiske} af "
-        f"{pr_linje['arbejdstal'].stykker_maalt} = "
-        f"{_pct(pr_linje['arbejdstal'].andel_identiske)}",
-    ]
-
-    # Kontroltallet. Uden det kan man ikke vide, om forankringen pynter.
-    kontrol = saet.sider_med_fuldsidekontrol
-    ud += ["", "## Kontrol — hele siden uden forankring", ""]
-    if kontrol:
-        her = saet.fuldside["arbejdstal"].cer
-        der = fladet["arbejdstal"].cer
-        forskel = her - der
-        ud += [
-            f"På de **{kontrol} sider uden et eneste `[?]`** kan hele siden",
-            "sammenlignes direkte, uden forankring og med fuld dækning. Det er",
-            "den eneste måling i rapporten, der ikke kan pynte på noget.",
-            "",
-        ]
-        ud += _varianttabel(saet.fuldside)
-        ud += [
-            "",
-            f"Kontrollen ligger på **{_pct(her)}** mod hovedtallets **{_pct(der)}** "
-            f"(`arbejdstal`) — en forskel på {_pct(abs(forskel))}.",
-            "",
-            "**Ligger kontrollen væsentligt HØJERE, måler forankringen ikke alt.**",
-            "Den ser hverken tekst, modellen har fundet på, eller tekst, den har",
-            "sprunget over — kun det, der kunne parres. Forskellen er altså ikke",
-            "støj, den er den del af fejlen, hovedtallet lader ligge, og den skal",
-            "læses sammen med opdigtningstallene nedenfor.",
-            "",
-            "Ligger de to tæt, måler hovedtallet reelt hele teksten, og forskellen",
-            "mellem dem er blot, at kontrollen kun dækker de nemmeste sider — dem",
-            "helt uden ulæselige steder.",
-        ]
-    else:
-        ud += ["Ingen af de målte sider er helt uden `[?]`, så kontrollen kan ikke køres."]
-
-    ud += [
+        "## Rækkefølge og linjer",
         "",
-        "## Opdigtning",
-        "",
-        "To signaler. Ingen af dem er et korrekthedsmål — der findes ingen sandhed",
-        "at måle imod dér, hvor facit siger `[?]` — men de siger, om modellen",
-        "skriver noget, den ikke har dækning for. Det tredje sted at kigge er",
-        "kontroltallet ovenfor: det er det eneste, der tæller opdigtet tekst med",
-        "som egentlige fejl.",
-        "",
-        "| Signal | Værdi |",
-        "|---|---:|",
-        f"| Modeltekst uden modstykke i facit | {uforankret} tegn "
-        f"= {_pct(uforankret / model_i_alt if model_i_alt else 0)} af modellens tekst |",
-        f"| Tekst skrevet dér hvor facit siger `[?]` | {gabtegn} tegn fordelt på {len(gab)} steder |",
-        "",
-        "**\"Uden modstykke\" har et gulv og er ikke nul, selv når intet er digtet.**",
-        "Modellen skriver noget dér, hvor facit siger `[?]`, og den skriver også de",
-        "linjer, forankringen ikke kunne parre. Målt på facit mod facit selv ligger",
-        "gulvet omkring 2.500 tegn for øvemængden (se `selvtest.md`). Tallet skal",
-        "derfor læses som et tillæg til det gulv, ikke som et absolut mål for",
-        "opdigtning.",
-        "",
-        "## Linjetrofasthed",
-        "",
-        "Svaret på det, der indtil nu har været en formodning (beslutning 35):",
-        "laver modellen sine egne linjeskift, eller følger den sidens?",
+        "Målingen ovenfor er streng om rækkefølgen: skriver modellen sidens",
+        "linjer i en anden orden, tæller det som fejl på lige fod med forkert",
+        "læste ord. Tallene her viser, hvor meget af fejlen der er af den slags.",
+        "De regnes ved at parre hver facit-linje med den modellinje, den ligner",
+        "mest, og se efter, hvilken orden de parrede linjer så står i.",
         "",
         "| Mål | Værdi |",
         "|---|---:|",
-        f"| Facit-linjer der ligger inden for én af modellens linjer | {uden_skift} af {maalte_linjer} |",
-        f"| Facit-linjer der får deres egen modellinje | {egen} af {maalte_linjer} |",
+        f"| Facit-linjer i alt | {linjer_i_alt} |",
+        f"| Linjer med et genkendeligt modstykke hos modellen | {parret} |",
+        f"| Linjer uden modstykke (modellen sprang dem over eller læste noget helt andet) | {uparret} |",
+        f"| Parrede linjer, der står i forkert indbyrdes rækkefølge | {flyttede} |",
+        f"| Linjer modellen ramte nøjagtigt | {identiske} |",
         "",
-        "**Sådan læses de to tal.** Er de begge lig antallet af målte linjer,",
-        "har modellen skrevet sidens linjer, som de står — én facit-linje pr.",
-        "modellinje. Er det FØRSTE tal højt og det andet lavt, har modellen",
-        "samlet flere af sidens linjer i én af sine egne. Er det første tal lavt,",
-        "løber facits linjer hen over modellens linjeskift, altså laver modellen",
-        "sine egne brud. Ingen af delene er en fejl i sig selv, og ingen af dem",
-        "påvirker tallene ovenfor — men svaret afgør, om linjeskiftene kan",
-        "afleveres videre til kollegaens `PageLine`-skema, og det er værd at vide.",
+        "\"Ramte nøjagtigt\" betyder ord for ord ens, når man ser bort fra",
+        "versaler, accenter og tegnsætning.",
+        "",
+        "> **Forbehold — det her er vejledende tal, ikke beslutningstal.** De",
+        "> kommer ikke fra hovedmålingen, men fra en parring af linjer lavet",
+        "> alene til formålet. Parringen tager facit-linjerne oppefra og ned og",
+        "> giver hver af dem den bedste ledige modellinje. Det har en kendt",
+        "> svaghed: står der flere næsten ens linjer på siden — og det gør der",
+        "> tit i journalmateriale, hvor de samme vitale værdier gentages — kan en",
+        "> tidlig facit-linje nå at lægge beslag på en modellinje, der rettelig",
+        "> hørte til en senere facit-linje. Så bliver både \"uden modstykke\" og",
+        "> \"forkert rækkefølge\" en anelse for høje. En rigtig løsning kræver en",
+        "> global optimal tildeling og er ikke lavet. Brug tallene til at forstå",
+        "> tegnfejlen, ikke til at træffe beslutninger.",
+        "",
+        "## Opdigtning",
+        "",
+        "Signaler for, om modellen skriver noget, den ikke har dækning for.",
+        "Ingen af dem er et korrekthedsmål — dér hvor facit siger `[?]`, findes",
+        "der ingen sandhed at måle imod.",
+        "",
+        "| Signal | Værdi |",
+        "|---|---:|",
+        f"| Tekst henført til de ulæselige steder (øvre grænse) | {jokertegn} tegn fordelt på {len(gab)} steder |",
+        f"| Heraf over fribilletten, og altså talt som fejl | {overskud} tegn |",
+        f"| Modellens tekst i alt mod facits | {model_i_alt} mod {facit_i_alt} tegn |",
+        "",
+        f"**De {jokertegn} tegn er en ØVRE grænse, ikke et mål for opdigtning.**",
+        "Fribilletten er gratis indtil loftet, og målingen har derfor ingen grund",
+        "til at holde igen: den lader gerne det ulæselige sted æde et par af",
+        "nabordene med, når de alligevel er gratis. En del af tallet er altså",
+        "tekst, modellen har læst helt rigtigt. Det er efterprøvet — på rigtige",
+        "sider lægger tallet sig lige præcis op ad loftet, netop fordi den sidste",
+        "plads bliver fyldt op med korrekt nabotekst.",
+        "",
+        f"**Det skarpe signal er de {overskud} tegn over fribilletten.** Dem har",
+        "modellen skrevet ud over, hvad et ulæseligt sted overhovedet kan dække,",
+        f"og de er talt som fejl. Er det tal stort, skriver modellen lange",
+        "passager, hvor transskribenten kun kunne se ét ord — og så er hovedtallet",
+        "i forvejen mildt over for den, fordi den første del af hvert sted var",
+        "gratis.",
+        "",
+        "Den sidste linje er det groveste, men også det mest robuste signal:",
+        "skriver modellen væsentligt flere tegn end der står på siden, har den",
+        "lagt noget til; skriver den væsentligt færre, har den sprunget noget",
+        "over. Begge dele er allerede talt med i tegnfejlen ovenfor — linjen her",
+        "siger blot, hvilken af de to slags fejl der dominerer.",
     ]
 
     # De vaerste sider, saa de kan ses efter med oejnene.
@@ -303,38 +290,16 @@ def skriv_rapport(
         "",
         f"## De {min(VAERSTE_SIDER, len(vaerste))} værste sider",
         "",
-        "Sorteret efter `arbejdstal`. Se dem efter med øjnene, før tallet tros —",
-        "en enkelt side med en fejlagtig parring kan trække hele hovedtallet.",
+        "Sorteret efter tegnfejl (`arbejdstal`). Se dem efter med øjnene, før",
+        "tallet tros. Kolonnen *Linjer med `[?]`* siger, hvor svær siden var at",
+        "læse i første omgang; *Linjer i forkert orden* siger, om fejlen er",
+        "omrokering frem for forkert læsning; *Modeltegn/facittegn* siger, om",
+        "modellen skrev for meget eller for lidt.",
         "",
-        "| Side | Tegnfejl | Dækning | Linjer målt | Modeltekst uden modstykke |",
+        "| Side | Tegnfejl | Linjer med `[?]` | Linjer i forkert orden | Modeltegn/facittegn |",
         "|---|---:|---:|---:|---:|",
     ]
     ud += [_sidelinje(s) for s in vaerste[:VAERSTE_SIDER]]
-
-    # Listen ovenfor kan ikke staa alene. En side, hvor kun en fjerdedel af
-    # teksten kunne forankres, faar et flot tegnfejlstal -- der er jo naesten
-    # ikke maalt paa den -- og lander i BUNDEN af listen, hvor ingen kigger.
-    # Lav daekning er et vaerre tegn end hoej tegnfejl, fordi den betyder, at
-    # tallet for siden ikke betyder noget.
-    tyndest = sorted(sider, key=lambda s: (s.daekning, s.image_name))
-    ud += [
-        "",
-        f"## De {min(VAERSTE_SIDER, len(tyndest))} tyndest målte sider",
-        "",
-        "Lav dækning er et værre tegn end høj tegnfejl: her er der næsten ikke",
-        "målt på siden, så dens tal betyder ikke noget. En side, hvor modellen",
-        "sprang det meste over eller skrev noget helt andet, dukker op HER — ikke",
-        "i listen ovenfor, hvor den tværtimod ser god ud.",
-        "",
-        "| Side | Dækning | Tegnfejl | Linjer målt | Modeltekst uden modstykke |",
-        "|---|---:|---:|---:|---:|",
-    ]
-    for side in tyndest[:VAERSTE_SIDER]:
-        m = side.fladet["arbejdstal"]
-        ud.append(
-            f"| `{side.image_name}` | {_pct(side.daekning)} | {_pct(m.cer)} | "
-            f"{side.linjer_maalt}/{side.linjer_i_alt} | {side.model_tegn_uforankret} |"
-        )
 
     if gab:
         ud += [
@@ -345,14 +310,21 @@ def skriv_rapport(
             "ikke kunne læse. Det er IKKE facit og må aldrig skrives ind i det —",
             "arbejdsgangen med udklip og ja/nej hører i stage 07.",
             "",
-            "| Side | Facit | Modellens bud |",
-            "|---|---|---|",
+            "Facits egne ord på hver side af det ulæselige sted står med, så",
+            "stedet kan findes igen på siden med det blotte øje. Den fulde liste",
+            "ligger i gab-filen.",
+            "",
+            "| Side | Facit før | Modellens bud | Facit efter | Tegn |",
+            "|---|---|---|---|---:|",
         ]
         for navn, g in gab[:GAB_I_RAPPORTEN]:
             bud = " ".join(g.model_tekst.split()) or "*(intet)*"
-            ud.append(f"| `{navn}` | `{g.facit_mellem}` | {bud} |")
+            ud.append(
+                f"| `{navn}` | {g.facit_foer} | {bud} | {g.facit_efter} | "
+                f"{g.indholdstegn} |"
+            )
         if len(gab) > GAB_I_RAPPORTEN:
-            ud.append(f"| … | | *{len(gab) - GAB_I_RAPPORTEN} steder mere* |")
+            ud.append(f"| … | | *{len(gab) - GAB_I_RAPPORTEN} steder mere* | | |")
 
     if noter:
         ud += ["", "## Noter", "", noter]
@@ -374,14 +346,14 @@ def skriv_gab(saet: SaetMaaling) -> str:
     Raekkefoelgen foelger sidernes navne og derefter positionen paa siden, saa
     to koersler giver samme fil.
     """
-    linjer = ["side,facit_mellem,model_tekst,model_start,model_slut"]
+    linjer = ["side,facit_foer,model_tekst,facit_efter,indholdstegn"]
     for navn, g in saet.gab:
         felter = [
             navn,
-            g.facit_mellem,
+            g.facit_foer,
             " ".join(g.model_tekst.split()),
-            str(g.model_start),
-            str(g.model_slut),
+            g.facit_efter,
+            str(g.indholdstegn),
         ]
         linjer.append(",".join(_csv_felt(f) for f in felter))
     return "\n".join(linjer) + "\n"

@@ -1,361 +1,68 @@
-"""Maaleapparatet: forankring af facit i modellens tekst, og tallene der falder ud.
+"""Maaleapparatet: ÉN sammenligning af hele siden, i raekkefoelge, uden soegning.
 
-Hele stagen hviler paa ÉN handling -- find facits kendte tekst i modellens
-tekst -- og laeser tre ting af resultatet (rod-CONTEXT.md 2026-08-21):
+Indtil 2026-08-31 hvilede stagen paa `forankr()`: hver facit-linje blev SOEGT
+frem i modellens tekst, fra sidste traef og fremefter. Den mekanisme er fjernet.
+Paa `273107_001864` staar "ingen Snue" to gange i facit selv; soegningen efter
+linje 1 foretrak det ordrette traef nede i linje 26, flyttede soegepunktet
+dertil, og de 24 mellemliggende linjer var derefter uden for raekkevidde. 26 af
+29 linjer tabt -- nok til at vende hele wordpicking-forsoegets rangorden. Stage
+03 blev laast med den udtrykkelige betingelse, at den genaabnes, hvis der viser
+sig et hul ved de foerste rigtige tal. Hullet var der.
 
-    forankr(facit_linje, modeltekst) -> stumper, gab
+Her sammenlignes facits fulde tekst med modellens fulde tekst i ét straek, fra
+top til bund. Selve maaleoperationen ligger i `sidemaaling.py`; dette modul
+laegger facit til rette, koerer de seks varianter, og samler tallene.
 
-- De fundne **stumper** er kendt sandhed og maales (tegn- og ordfejl).
-- **Gabet** mellem to fundne stumper er det, modellen skrev, hvor facit siger
-  `[?]`. Dets laengde er hallucinations-signalet.
-- Samme gab er modellens bud paa stedet, hvis det senere skal forelaegges.
+## Hvad der foelger af det
 
-Grundreglen er stadig beslutning 38: kan en linje ikke forankres, gaar HELE
-linjen ud af maalingen. Forankringen er en forbedring oven paa den, med en
-defineret vej tilbage -- ikke en anden maade at maale paa.
+- **Der er kun én vej gennem siden.** Et gentaget ord kan ikke flytte noget.
+- **"Daekning" og "rabat" findes ikke laengere.** Hele facit er altid i
+  naevneren. Dermed forsvinder ogsaa den faelde, der fik den forkerte
+  konklusion igennem to gange paa én dag: et hovedtal maalt paa kun de fundne
+  linjer gav rabat til netop den variant, der afveg mest.
+- **Gabene falder mere direkte ud end foer.** Et gab er den modeltekst, der
+  blev stillet op mod et `[?]`-jokerfelt -- ikke laengere noget, der skal
+  udledes af to fundne stumper. Gab-filen er kontraktbundet (rod-CONTEXT
+  2026-08-21) og er samtidig arbejdslisten over steder, facit maaske kan
+  rettes.
 
-## Valg, der ikke stod i kontrakten, men foelger af den
+## Tre ting, der IKKE er en simpel oversaettelse
 
-De to vigtigste staar her; de oevrige tre (orddelingen afgjort paa facits
-linjer, fuldside-kontrollen, og at linjetrofasthed maales frem for antages)
-er dokumenteret ved den kode, der baerer dem. Alle fem er beslutning 39-43 i
-rod-CONTEXT.md.
+**Den strenge maaling** (beslutning 44) udelader hele linjer med et `[?]`.
+Uden forankringen findes der ingen "modellens modstykke til denne linje" at
+udelade paa modelsiden. Derfor: hele linjen erstattes af ét jokermaerke, som
+faar lov at sluge lige saa meget, som linjen selv indeholdt, plus
+standardloftet. Maalingen bliver dermed den samme ene gennemgang af siden, blot
+med de svaere linjer gjort gratis. Naevneren falder med netop de linjers tegn --
+en FAST udeladelse, ens for alle varianter, ikke den glidende rabat.
 
-**Soegningen taaler laesefejl inde i stumpen.** Kraevede den ordret traef,
-ville hver forankret stump per definition have nul fejl, og tallet ville
-maale, hvor tit modellen var perfekt -- ikke hvor god den er. Derfor et
-naermeste-udsnit-soeg med en oevre graense for afvigelsen (`MAKS_AFVIGELSE`).
-Graensen er en knap: saettes den lavere, falder daekningen, og de tilbagevaerende
-linjer er de letteste -- altsaa et pænere og mere misvisende tal. Derfor er
-den sat rundhaandet, og `selvtest.md` viser, hvordan tallene flytter sig med den.
+**`pr_linje` er fjernet, ikke bygget om.** Den summerede en maaling pr. parret
+linje, og parringen VAR forankringen. Den kunne genskabes fra `orden.py`s
+linjeparring, men saa ville et hovedtal arve den parrings kendte svaghed
+(graadigt venstre-mod-hoejre valg mellem naesten ens linjer). Planen af
+2026-08-30 skrev "bygges om"; det er fravalgt med aabne oejne.
 
-**Linjeparringen ER forankringen.** Kontraktens punkt 3 kraever, at linjerne
-parres, foer de sammenlignes, saa maalingen ikke skrider efter det foerste
-afvigende linjebrud. Det sker gratis her: hver facit-linje soeges i modellens
-raa tekst uden hensyn til dens linjeskift. Om modellen saa foelger sidens
-linjer eller laver sine egne -- den ubeviste antagelse i beslutning 35 --
-bliver et resultat, vi maaler (`uden_linjeskift_indeni`, `egen_modellinje`),
-i stedet for noget maalingen afhaenger af.
+**`fuldside` er fjernet, ikke bygget om.** Den sammenlignede hele siden direkte
+paa sider helt uden `[?]` -- som kontrol MOD forankringen. Nu er hele siden
+altid maalt direkte, saa kontrollen og det den kontrollerede er blevet det
+samme tal. At beholde den ville vaere at rapportere hovedtallet to gange.
+
+Linjetrofastheden (beslutning 35, og forudsaetningen for at aflevere
+`PageLine`-poster videre) maales nu af `orden.py`: hvor mange facit-linjer der
+har et genkendeligt modstykke, og hvor mange der staar i en anden raekkefoelge.
 """
 from __future__ import annotations
 
-import re
-from bisect import bisect_left
-from dataclasses import dataclass, field
-from functools import lru_cache
+from dataclasses import dataclass
 
-from andenside import cer
+from andenside import cer, orden, sidemaaling
 from andenside.facit import saml_orddeling
+from andenside.sidemaaling import MAERKE
 
-MAERKE = "[?]"
-
-# Stumper under fem tegn bruges ikke til forankring (122 af de 647 i facit).
-# De kan forankre hvor som helst og ville give falsk tryghed.
-MINDSTE_STUMP = 5
-
-# Hvor meget en stump maa afvige og stadig regnes for fundet, som andel af
-# stumpens laengde. 0,4 er rundhaandet med vilje: den, der saenker den, goer
-# tallet pænere ved at smide de svaereste linjer ud.
-MAKS_AFVIGELSE = 0.4
-
-# Foerste soegning sker i et vindue lige efter forrige stump. Rammer den ikke,
-# soeges resten af siden igennem. Vinduet er ren fart -- ikke en regel om, hvor
-# teksten maa staa: rammer vinduet ved siden af, finder trin 3 traeffet
-# alligevel. Det koster kun tid, aldrig et fund.
-VINDUE_EKSTRA = 80
-
-
-# --------------------------------------------------------------------------
-# Soegeform: en foldet udgave af teksten med vej tilbage til de raa positioner
-# --------------------------------------------------------------------------
-
-@lru_cache(maxsize=100_000)
-def _fold(tegn: str) -> str:
-    """Ét tegn foldet. Cachet, fordi `strip_diacritics` kalder
-    `unicodedata.normalize` to gange pr. tegn -- og hele siden foldes én gang
-    pr. facit-linje, saa de faa hundrede forskellige tegn i materialet ellers
-    bliver slaaet op millioner af gange."""
-    return cer.strip_diacritics(tegn.lower())
-
-
-@lru_cache(maxsize=512)
-def _soegeform(tekst: str) -> tuple[str, tuple[int, ...]]:
-    """Folder versaler, tyske omlyde og mellemrum, og husker hvor hvert tegn
-    kom fra i den raa tekst.
-
-    Cachet paa teksten: sidens modeltekst er den samme for alle sidens linjer,
-    og uden cachen foldes den forfra hver gang.
-
-    Tegnsaetning bevares her, selvom `lempeligst`-varianten kaster den vaek.
-    Grunden er positionerne: droppes kommaet i ", og Canylen", begynder det
-    fundne udsnit foerst ved o'et, og kommaet havner i gabet ved siden af --
-    hvor det ville blive laest som noget, modellen fandt paa. Soegningen taaler
-    alligevel forskelle, saa den har ikke brug for filteret.
-    """
-    ud: list[str] = []
-    kort: list[int] = []
-    sidst_var_mellemrum = True
-    for i, tegn in enumerate(tekst):
-        if tegn.isspace():
-            if not sidst_var_mellemrum:
-                ud.append(" ")
-                kort.append(i)
-                sidst_var_mellemrum = True
-            continue
-        for c in _fold(tegn):
-            ud.append(c)
-            kort.append(i)
-        sidst_var_mellemrum = False
-    while ud and ud[-1] == " ":
-        ud.pop()
-        kort.pop()
-    return "".join(ud), tuple(kort)
-
-
-def _naermeste_udsnit(naal: str, hoestak: str) -> tuple[int, int, int]:
-    """Det udsnit af `hoestak`, der ligger taettest paa `naal`.
-
-    Returnerer `(start, slut, afstand)`. Levenshtein med fri begyndelse og
-    slutning i hoestakken: raekke 0 er nul hele vejen, saa et traef maa
-    begynde hvor som helst uden at betale for teksten foran.
-
-    Ved lige billige veje vaelges diagonal foer sletning foer indsaettelse, og
-    det tidligste slutpunkt vinder. Uden den faste raekkefoelge kunne to
-    koersler af uaendret kode give hver sit resultat.
-    """
-    n, m = len(naal), len(hoestak)
-    if n == 0:
-        return 0, 0, 0
-    if m == 0:
-        return 0, 0, n
-
-    forrige = [0] * (m + 1)
-    forrige_start = list(range(m + 1))
-    for i in range(1, n + 1):
-        nu = [i] + [0] * m
-        nu_start = [0] * (m + 1)
-        for j in range(1, m + 1):
-            diagonal = forrige[j - 1] + (naal[i - 1] != hoestak[j - 1])
-            slet = forrige[j] + 1
-            indsaet = nu[j - 1] + 1
-            bedst = min(diagonal, slet, indsaet)
-            nu[j] = bedst
-            if bedst == diagonal:
-                nu_start[j] = forrige_start[j - 1]
-            elif bedst == slet:
-                nu_start[j] = forrige_start[j]
-            else:
-                nu_start[j] = nu_start[j - 1]
-        forrige, forrige_start = nu, nu_start
-
-    slut = min(range(m + 1), key=lambda j: (forrige[j], j))
-    return forrige_start[slut], slut, forrige[slut]
-
-
-def _find_stump(naal_raa: str, hoestak_raa: str, fra: int, maks_afvigelse: float):
-    """Finder `naal_raa` i `hoestak_raa[fra:]`. Returnerer `(start, slut)` i
-    raa koordinater, eller `None` hvis afvigelsen er for stor.
-    """
-    naal, _ = _soegeform(naal_raa)
-    if not naal:
-        return None
-    hoestak, kort = _soegeform(hoestak_raa)
-    if not hoestak:
-        return None
-
-    # Hvor i soegeformen svarer `fra` til? Foerste tegn med raa position >= fra.
-    # `kort` vokser monotont, saa der kan soeges binaert.
-    start_i_soegeform = bisect_left(kort, fra)
-    rest = hoestak[start_i_soegeform:]
-    if not rest:
-        return None
-
-    graense = maks_afvigelse * len(naal)
-
-    def til_raa(a: int, b: int) -> tuple[int, int]:
-        a += start_i_soegeform
-        b += start_i_soegeform
-        raa_start = kort[a]
-        raa_slut = kort[b - 1] + 1
-        # Udsnittet kan begynde eller slutte midt i mellemrum, fordi
-        # soegeformen har slaaet dem sammen. Skær dem af, saa det maalte
-        # stykke er den tekst, der faktisk staar der.
-        while raa_start < raa_slut and hoestak_raa[raa_start].isspace():
-            raa_start += 1
-        while raa_slut > raa_start and hoestak_raa[raa_slut - 1].isspace():
-            raa_slut -= 1
-        return raa_start, raa_slut
-
-    # 1) Ordret traef er baade det hyppigste og det billigste.
-    truffet = rest.find(naal)
-    if truffet != -1:
-        return til_raa(truffet, truffet + len(naal))
-
-    # 2) Naermeste udsnit i et vindue lige efter forrige stump.
-    vindue = rest[: len(naal) + VINDUE_EKSTRA]
-    a, b, afstand = _naermeste_udsnit(naal, vindue)
-    if afstand <= graense and b > a:
-        return til_raa(a, b)
-
-    # 3) Resten af siden, hvis vinduet ikke raktes. Betales kun ved uheld.
-    if len(vindue) < len(rest):
-        a, b, afstand = _naermeste_udsnit(naal, rest)
-        if afstand <= graense and b > a:
-            return til_raa(a, b)
-    return None
-
-
-# --------------------------------------------------------------------------
-# Forankring af én facit-linje
-# --------------------------------------------------------------------------
-
-@dataclass(frozen=True)
-class Stump:
-    """Et stykke kendt facit-tekst mellem to ulaeselighedsmaerker."""
-
-    tekst: str
-    start: int          # position i facit-linjen
-    slut: int
-    for_kort: bool      # under MINDSTE_STUMP -- bruges aldrig til forankring
-    fundet: bool = False
-    model_tekst: str = ""
-    model_start: int = -1
-    model_slut: int = -1
-
-
-@dataclass(frozen=True)
-class Gab:
-    """Det modellen skrev, hvor facit siger `[?]`.
-
-    `facit_mellem` er facits egen tekst mellem de to fundne stumper -- typisk
-    `[?]`, men kan rumme en stump, der var for kort til at forankre. Den staar
-    med, saa gabet ikke laeses som rent opdigt, naar det ikke er det.
-    """
-
-    facit_mellem: str
-    model_tekst: str
-    model_start: int
-    model_slut: int
-
-
-@dataclass(frozen=True)
-class LinjeFund:
-    nr: int
-    facit: str
-    stumper: tuple[Stump, ...] = ()
-    gab: tuple[Gab, ...] = ()
-
-    @property
-    def forankret(self) -> bool:
-        return any(s.fundet for s in self.stumper)
-
-    @property
-    def svaer(self) -> bool:
-        return MAERKE in self.facit
-
-    @property
-    def fundne(self) -> tuple[Stump, ...]:
-        return tuple(s for s in self.stumper if s.fundet)
-
-    @property
-    def facit_maalt(self) -> str:
-        """Facits tekst paa denne linje, som den indgaar i maalingen."""
-        return " ".join(s.tekst for s in self.fundne)
-
-    @property
-    def model_maalt(self) -> str:
-        return " ".join(s.model_tekst for s in self.fundne)
-
-    @property
-    def model_udsnit(self) -> tuple[int, int]:
-        """Linjens samlede udstraekning i modelteksten, gab iberegnet."""
-        fundne = self.fundne
-        if not fundne:
-            return (-1, -1)
-        return (fundne[0].model_start, fundne[-1].model_slut)
-
-
-def _del_i_stumper(facit_linje: str) -> list[Stump]:
-    """Deler linjen ved ulaeselighedsmaerkerne. Tomme stykker falder ud."""
-    stumper: list[Stump] = []
-    pos = 0
-    graenser = [(m.start(), m.end()) for m in re.finditer(re.escape(MAERKE), facit_linje)]
-    for start, slut in graenser + [(len(facit_linje), len(facit_linje))]:
-        raa = facit_linje[pos:start]
-        tekst = raa.strip()
-        if tekst:
-            forskydning = len(raa) - len(raa.lstrip())
-            stumper.append(
-                Stump(
-                    tekst=tekst,
-                    start=pos + forskydning,
-                    slut=pos + forskydning + len(tekst),
-                    for_kort=len(tekst) < MINDSTE_STUMP,
-                )
-            )
-        pos = slut
-    return stumper
-
-
-def forankr(
-    facit_linje: str,
-    modeltekst: str,
-    *,
-    nr: int = 0,
-    fra: int = 0,
-    maks_afvigelse: float = MAKS_AFVIGELSE,
-) -> LinjeFund:
-    """Finder facit-linjens kendte stumper i modellens tekst.
-
-    Stumperne soeges fra venstre mod hoejre, hver efter den forriges traef, saa
-    en gentaget vending ikke kan forankre bagud og lave et negativt gab.
-
-    En stump, der ikke findes, er ikke en fejl -- den er bare ikke fundet.
-    Findes ingen af linjens stumper, er linjen uforankret og gaar helt ud af
-    maalingen (beslutning 38).
-    """
-    stumper = _del_i_stumper(facit_linje)
-    resultat: list[Stump] = []
-    pos = fra
-    for stump in stumper:
-        if stump.for_kort:
-            resultat.append(stump)
-            continue
-        traef = _find_stump(stump.tekst, modeltekst, pos, maks_afvigelse)
-        if traef is None:
-            resultat.append(stump)
-            continue
-        start, slut = traef
-        resultat.append(
-            Stump(
-                tekst=stump.tekst,
-                start=stump.start,
-                slut=stump.slut,
-                for_kort=False,
-                fundet=True,
-                model_tekst=modeltekst[start:slut],
-                model_start=start,
-                model_slut=slut,
-            )
-        )
-        pos = slut
-
-    # Gab: kun mellem to stumper der BEGGE er fundet. Er der en ubrugelig
-    # stump imellem, staar dens tekst i `facit_mellem`, saa laeseren kan se,
-    # at gabet ikke er rent ulaeseligt.
-    gab: list[Gab] = []
-    fundne = [s for s in resultat if s.fundet]
-    for venstre, hoejre in zip(fundne, fundne[1:]):
-        gab.append(
-            Gab(
-                facit_mellem=facit_linje[venstre.slut : hoejre.start].strip(),
-                model_tekst=modeltekst[venstre.model_slut : hoejre.model_start],
-                model_start=venstre.model_slut,
-                model_slut=hoejre.model_start,
-            )
-        )
-
-    return LinjeFund(nr=nr, facit=facit_linje, stumper=tuple(resultat), gab=tuple(gab))
+# Hvor mange ord af facit der staar paa hver side af et gab, saa laeseren kan
+# finde stedet paa siden igen. Gabet i sig selv er tit ét ord langt og ville
+# ellers vaere umuligt at placere.
+GAB_KONTEKST_ORD = 4
 
 
 # --------------------------------------------------------------------------
@@ -408,177 +115,196 @@ def flad(linjer: list[str], delinger: list[bool]) -> str:
     return " ".join(d for d in ud if d)
 
 
+def _tegn(tekst: str) -> int:
+    """Tegn uden mellemrum -- saa layout ikke taeller med som indhold."""
+    return len("".join(tekst.split()))
+
+
+# --------------------------------------------------------------------------
+# Den strenge maaling: svaere linjer erstattes af ét jokermaerke hver
+# --------------------------------------------------------------------------
+
+def streng_facit(facit_linjer: list[str]) -> tuple[str, list[int]]:
+    """Facit, hvor hver linje med et `[?]` er erstattet af ét jokermaerke.
+
+    Returnerer den fladede tekst og ét loft pr. erstattet linje.
+
+    Loftet er linjens eget indhold, hverken mere eller mindre. Grunden til ikke
+    at give jokeren frit lejde: et loft paa uendelig lader modellen springe
+    vilkaarligt langt frem i sin egen tekst gratis, og saa kan en model, der
+    springer en hel blok over, faa sine rigtige fejl slugt af jokeren ved siden
+    af. Loftet siger: du maa skrive lige saa meget, som der stod paa den linje,
+    vi ikke kan laese.
+
+    Der laegges IKKE `JOKER_LOFT` oveni. De 15 tegn er udledt af, hvor langt ét
+    ord er i materialet, og er det rigtige maal for et `[?]` inde i en linje.
+    For en HEL linje er linjens egen laengde den tilsvarende udledning, og at
+    laegge de to sammen ville taelle den samme begrundelse to gange -- og goere
+    den strenge maaling maerkbart mildere, end den giver sig ud for.
+
+    Orddelings-beslutningerne traeffes paa de OPRINDELIGE linjer og bruges paa
+    de erstattede. En bindestreg sidst paa en erstattet linje er forsvundet med
+    linjen, saa `flad` samler alligevel ikke hen over den; beslutningen tages
+    paa forhaand for at holde reglen ét sted.
+    """
+    delinger = deler_ord(facit_linjer)
+    erstattet = [MAERKE if MAERKE in linje else linje for linje in facit_linjer]
+    lofter = [_tegn(linje) for linje in facit_linjer if MAERKE in linje]
+    return flad(erstattet, delinger), lofter
+
+
+# --------------------------------------------------------------------------
+# Fra sidemaalingens tal til de Maaltal, rapporten regner med
+# --------------------------------------------------------------------------
+
+def _som_maaltal(maal: sidemaaling.SideMaal) -> cer.Maaltal:
+    """Ét `SideMaal` som et `Maaltal`, saa sider kan laegges sammen.
+
+    `stykker` er nu SIDER, ikke linjer. Under forankringen var et stykke en
+    parret linje, og `andel_identiske` betoed "andel helt rigtige linjer". Det
+    tal findes stadig, men kommer nu fra linjeparringen i `orden.py` og staar
+    for sig i rapporten -- det maa ikke forveksles med dette.
+    """
+    return cer.Maaltal(
+        tegnafstand=maal.tegnafstand,
+        facit_tegn=maal.facit_tegn,
+        ordafstand=maal.ordafstand,
+        facit_ord=maal.facit_ord,
+        stykker_maalt=1,
+        stykker_identiske=int(maal.tegnafstand == 0),
+    )
+
+
+@dataclass(frozen=True)
+class Gab:
+    """Det modellen skrev, hvor facit siger `[?]`.
+
+    `facit_foer` og `facit_efter` er facits egne ord omkring maerket. De staar
+    med, fordi gabet skal kunne findes igen paa siden med det blotte oeje --
+    modelteksten alene er tit ét ord og kan staa hvor som helst.
+    """
+
+    facit_foer: str
+    facit_efter: str
+    model_tekst: str
+
+    @property
+    def indholdstegn(self) -> int:
+        return _tegn(self.model_tekst)
+
+
+def _gab_kontekst(facit_fladet: str) -> list[tuple[str, str]]:
+    """Facits ord lige foer og lige efter hvert jokermaerke, i raekkefoelge."""
+    ud: list[tuple[str, str]] = []
+    stykker = facit_fladet.split(MAERKE)
+    for nr in range(len(stykker) - 1):
+        foer = " ".join(stykker[nr].split()[-GAB_KONTEKST_ORD:])
+        efter = " ".join(stykker[nr + 1].split()[:GAB_KONTEKST_ORD])
+        ud.append((foer, efter))
+    return ud
+
+
 # --------------------------------------------------------------------------
 # Maaling af en hel side
 # --------------------------------------------------------------------------
 
 @dataclass(frozen=True)
 class SideMaaling:
+    """Tal for ÉN side. Hele siden er altid maalt -- der er ingen daekning."""
+
     image_name: str
-    linjer: tuple[LinjeFund, ...]
 
-    fladet: dict[str, cer.Maaltal] = field(default_factory=dict)
-    pr_linje: dict[str, cer.Maaltal] = field(default_factory=dict)
-    fuldside: dict[str, cer.Maaltal] | None = None
+    # Hovedtallet og den strenge maaling, hver i de seks varianter
+    # (beslutning 26 -- alle staar side om side, ingen vaelges efter,
+    # hvilken der klaeder resultatet bedst).
+    fladet: dict[str, cer.Maaltal]
+    rene: dict[str, cer.Maaltal]
 
-    # Den strenge maaling: linjer med et `[?]` slet ikke med.
-    rene: dict[str, cer.Maaltal] = field(default_factory=dict)
-    rene_linjer_i_alt: int = 0
-    rene_linjer_maalt: int = 0
-    rene_tegn_i_alt: int = 0
-    rene_tegn_maalt: int = 0
+    # Raekkefoelgen som sit eget tal (lead 2026-08-30). Maalingen ovenfor er
+    # streng om orden; DENNE viser, hvor meget af fejlen der er omrokering.
+    omrokering: orden.Omrokering
 
-    facit_tegn_i_alt: int = 0
-    facit_tegn_maalt: int = 0
-    linjer_i_alt: int = 0
-    linjer_maalt: int = 0
-    svaere_linjer: int = 0
-    svaere_linjer_reddet: int = 0
+    gab: tuple[Gab, ...]
+    joker_tegn_i_alt: int
+    joker_overskud: int
 
-    model_tegn_i_alt: int = 0
-    model_tegn_daekket: int = 0
-
-    uden_linjeskift_indeni: int = 0
-    egen_modellinje: int = 0
+    facit_tegn_i_alt: int
+    linjer_i_alt: int
+    svaere_linjer: int
+    rene_linjer_i_alt: int
+    rene_tegn_i_alt: int
+    model_tegn_i_alt: int
 
     @property
-    def daekning(self) -> float:
-        """Andel af facits tegn, tallene ovenfor faktisk er maalt paa.
-
-        Naevneren taeller `[?]`-maerkerne med som tre tegn hver. Det er ikke
-        rigtigt -- teksten bag et maerke har en ukendt laengde, saa ingen
-        naevner er rigtig -- men det er den forsigtige regning: den lader
-        daekningen se lidt daarligere ud, end den er, i stedet for omvendt.
-        Paa hele facit er der 498 maerker mod knap 90.000 tegn, saa det
-        flytter under to procentpoint.
-        """
-        return self.facit_tegn_maalt / self.facit_tegn_i_alt if self.facit_tegn_i_alt else 0.0
-
-    @property
-    def model_tegn_uforankret(self) -> int:
-        """Modeltekst uden modstykke i facit. Det groveste opdigtnings-signal."""
-        return max(0, self.model_tegn_i_alt - self.model_tegn_daekket)
-
-    @property
-    def gab(self) -> tuple[Gab, ...]:
-        return tuple(g for linje in self.linjer for g in linje.gab)
-
-
-def _tegn(tekst: str) -> int:
-    """Tegn uden mellemrum -- saa layout ikke taeller med som indhold."""
-    return len("".join(tekst.split()))
+    def identiske_linjer(self) -> int:
+        return self.omrokering.linjer_identiske
 
 
 def maal_side(
     image_name: str,
     facit_linjer: list[str],
     modeltekst: str,
-    *,
-    maks_afvigelse: float = MAKS_AFVIGELSE,
 ) -> SideMaaling:
-    """Maaler én side. Facits linjer forankres fortloebende i modellens tekst."""
-    fund: list[LinjeFund] = []
-    pos = 0
-    for nr, linje in enumerate(facit_linjer):
-        f = forankr(linje, modeltekst, nr=nr, fra=pos, maks_afvigelse=maks_afvigelse)
-        if f.forankret:
-            pos = f.model_udsnit[1]
-        fund.append(f)
+    """Maaler én side: hele facit mod hele modelteksten, i raekkefoelge."""
+    delinger = deler_ord(facit_linjer)
+    facit_fladet = flad(facit_linjer, delinger)
 
-    # Fladet maaling: kun de forankrede linjer, paa begge sider.
-    facit_stykker = [f.facit_maalt for f in fund if f.forankret]
-    model_stykker = [f.model_maalt for f in fund if f.forankret]
-    delinger = deler_ord(facit_stykker)
-    facit_fladet = flad(facit_stykker, delinger)
-    model_fladet = flad(model_stykker, delinger)
-
-    # Den strenge udgave (lead 2026-08-23): samme maaling, men linjer med et
-    # `[?]` er slet ikke med -- heller ikke deres kendte stumper. Findes ved
-    # siden af hovedtallet, fordi de reddede stumper netop ligger op ad de
-    # ulaeselige steder, hvor baade modellen og opdelingen er mest usikre. Er
-    # de to tal ens, tilfoerer redningen ingen skaevhed; er de forskellige,
-    # er forskellen selve skaevheden, og saa er det den strenge, der gaelder.
-    rene = [f for f in fund if f.forankret and not f.svaer]
-    rene_facit_stykker = [f.facit_maalt for f in rene]
-    rene_delinger = deler_ord(rene_facit_stykker)
-    rene_facit = flad(rene_facit_stykker, rene_delinger)
-    rene_model = flad([f.model_maalt for f in rene], rene_delinger)
+    # Orddelingen samles ogsaa paa modelsiden (beslutning 42). Uden det maales
+    # facits "Infektions-"/"sygdomme." som ét ord, mens modellens samme to
+    # linjer staar som to -- og modellen ville blive straffet for en forskel,
+    # der kun er facits egen typografi. Reglen er indholdsbaaret (bindestreg
+    # sidst paa linjen, lille bogstav paa den naeste), saa den giver samme
+    # svar, hvad enten modellen skrev ordet delt eller samlet.
+    model_fladet = saml_orddeling(modeltekst)
 
     fladet = {
-        navn: cer.maal_par(facit_fladet, model_fladet, **valg)
-        for navn, valg in cer.VARIANTER.items()
-    }
-    rene_maal = {
-        navn: cer.maal_par(rene_facit, rene_model, **valg)
+        navn: _som_maaltal(sidemaaling.maal_side(facit_fladet, model_fladet, **valg))
         for navn, valg in cer.VARIANTER.items()
     }
 
-    pr_linje: dict[str, cer.Maaltal] = {navn: cer.NUL for navn in cer.VARIANTER}
-    for f in fund:
-        if not f.forankret:
-            continue
-        for navn, valg in cer.VARIANTER.items():
-            pr_linje[navn] = pr_linje[navn] + cer.maal_par(f.facit_maalt, f.model_maalt, **valg)
+    # Den strenge maaling (beslutning 44, lead 2026-08-23): linjer med et `[?]`
+    # slet ikke med. Den var oprindeligt et vaern mod forankringens glidende
+    # rabat, og den rabat findes ikke laengere -- men den bevares, fordi netop
+    # den fremgangsmaade er konventionen i HTR (Transkribus udelader hele
+    # linjen ved ulaeselige steder). Beholdes tallet, kan vores resultater
+    # sammenlignes med anden forskning.
+    strengt, strenge_lofter = streng_facit(facit_linjer)
+    rene = {
+        navn: _som_maaltal(
+            sidemaaling.maal_side(
+                strengt, model_fladet, lofter=list(strenge_lofter), **valg
+            )
+        )
+        for navn, valg in cer.VARIANTER.items()
+    }
 
-    # Kontroltal: paa sider helt uden ulaeselighedsmaerker kan hele siden
-    # sammenlignes direkte, uden forankring. Er de to tal langt fra hinanden,
-    # pynter forankringen paa resultatet, og det skal ses.
-    fuldside = None
-    if not any(f.svaer for f in fund):
-        hele_facit = saml_orddeling("\n".join(facit_linjer))
-        hele_model = saml_orddeling(modeltekst)
-        fuldside = {
-            navn: cer.maal_par(hele_facit, hele_model, **valg)
-            for navn, valg in cer.VARIANTER.items()
-        }
+    # Gabene tages fra arbejdstallet: det er den variant, der laeses efter i
+    # haanden, og maerkerne staar samme sted i alle seks.
+    arbejds = sidemaaling.maal_side(
+        facit_fladet, model_fladet, **cer.VARIANTER["arbejdstal"]
+    )
+    kontekst = _gab_kontekst(facit_fladet)
+    gab = tuple(
+        Gab(facit_foer=foer, facit_efter=efter, model_tekst=tekst)
+        for (foer, efter), tekst in zip(kontekst, arbejds.joker_tekst)
+    )
 
-    # Linjetrofasthed: falder facit-linjen inden for én af modellens linjer,
-    # og faar hver facit-linje sin egen? Svaret paa beslutning 35, maalt.
-    linjeskift = [i for i, c in enumerate(modeltekst) if c == "\n"]
-
-    def modellinje(pos_: int) -> int:
-        return sum(1 for b in linjeskift if b < pos_)
-
-    uden_skift = 0
-    egen_linje = 0
-    forrige_modellinje = -1
-    for f in fund:
-        if not f.forankret:
-            continue
-        a, b = f.model_udsnit
-        if not any(a <= p < b for p in linjeskift):
-            uden_skift += 1
-        nu = modellinje(a)
-        if nu != forrige_modellinje:
-            egen_linje += 1
-        forrige_modellinje = nu
-
-    daekket = sum(_tegn(s.model_tekst) for f in fund for s in f.fundne)
-    daekket += sum(_tegn(g.model_tekst) for f in fund for g in f.gab)
-
-    alle_rene_linjer = [linje for f, linje in zip(fund, facit_linjer) if not f.svaer]
+    rene_linjer = [linje for linje in facit_linjer if MAERKE not in linje]
 
     return SideMaaling(
         image_name=image_name,
-        linjer=tuple(fund),
         fladet=fladet,
-        pr_linje=pr_linje,
-        fuldside=fuldside,
-        rene=rene_maal,
-        rene_linjer_i_alt=len(alle_rene_linjer),
-        rene_linjer_maalt=len(rene),
-        rene_tegn_i_alt=_tegn(flad(alle_rene_linjer, deler_ord(alle_rene_linjer))),
-        rene_tegn_maalt=_tegn(rene_facit),
+        rene=rene,
+        omrokering=orden.maal_omrokering(facit_linjer, modeltekst.split("\n")),
+        gab=gab,
+        joker_tegn_i_alt=arbejds.joker_tegn_i_alt,
+        joker_overskud=arbejds.joker_overskud,
         facit_tegn_i_alt=_tegn(saml_orddeling("\n".join(facit_linjer))),
-        facit_tegn_maalt=_tegn(facit_fladet),
-        linjer_i_alt=len(fund),
-        linjer_maalt=sum(1 for f in fund if f.forankret),
-        svaere_linjer=sum(1 for f in fund if f.svaer),
-        svaere_linjer_reddet=sum(1 for f in fund if f.svaer and f.forankret),
+        linjer_i_alt=len(facit_linjer),
+        svaere_linjer=sum(1 for linje in facit_linjer if MAERKE in linje),
+        rene_linjer_i_alt=len(rene_linjer),
+        rene_tegn_i_alt=_tegn(flad(rene_linjer, deler_ord(rene_linjer))),
         model_tegn_i_alt=_tegn(modeltekst),
-        model_tegn_daekket=daekket,
-        uden_linjeskift_indeni=uden_skift,
-        egen_modellinje=egen_linje,
     )
 
 
@@ -600,60 +326,47 @@ class SaetMaaling:
         return self._sum("fladet")
 
     @property
-    def pr_linje(self) -> dict[str, cer.Maaltal]:
-        return self._sum("pr_linje")
-
-    @property
     def rene(self) -> dict[str, cer.Maaltal]:
         """Den strenge maaling: kun linjer helt uden ulaeselige steder."""
         return self._sum("rene")
 
     @property
-    def rene_daekning(self) -> float:
-        """Andel af de RENE linjers tegn, den strenge maaling naaede.
-
-        Naevneren er kun de rene linjer -- ikke hele facit. Tallet svarer paa
-        "hvor meget af det, vi maaler paa, fik vi fat i", ikke "hvor meget af
-        siden". Hvor stor en del af siden der er skaaret fra, staar for sig.
-        """
-        i_alt = sum(s.rene_tegn_i_alt for s in self.sider)
-        maalt = sum(s.rene_tegn_maalt for s in self.sider)
-        return maalt / i_alt if i_alt else 0.0
-
-    @property
     def andel_af_facit_i_rene(self) -> float:
-        """Hvor stor en del af facits tegn den strenge maaling overhovedet
-        kan se. Resten ligger paa linjer med mindst ét `[?]`."""
+        """Hvor stor en del af facits tegn den strenge maaling overhovedet ser.
+
+        Resten ligger paa linjer med mindst ét `[?]`. Det er en FAST
+        udeladelse: den er den samme for alle varianter, fordi den kun
+        afhaenger af facit. Den maa ikke laeses som den glidende, variant-
+        afhaengige daekning, forankringen havde -- det var netop den, der
+        gav rabat til den variant, som afveg mest.
+        """
         i_alt = sum(s.facit_tegn_i_alt for s in self.sider)
         rene = sum(s.rene_tegn_i_alt for s in self.sider)
         return rene / i_alt if i_alt else 0.0
 
     @property
-    def fuldside(self) -> dict[str, cer.Maaltal]:
-        """Kontroltallet, kun over de sider der slet ingen [?] har."""
-        ud = {navn: cer.NUL for navn in cer.VARIANTER}
-        for side in self.sider:
-            if side.fuldside is None:
-                continue
-            for navn in cer.VARIANTER:
-                ud[navn] = ud[navn] + side.fuldside[navn]
-        return ud
+    def linjer_i_alt(self) -> int:
+        return sum(s.linjer_i_alt for s in self.sider)
 
     @property
-    def sider_med_fuldsidekontrol(self) -> int:
-        return sum(1 for s in self.sider if s.fuldside is not None)
+    def linjer_parret(self) -> int:
+        return sum(s.omrokering.linjer_parret for s in self.sider)
 
     @property
-    def daekning(self) -> float:
-        i_alt = sum(s.facit_tegn_i_alt for s in self.sider)
-        maalt = sum(s.facit_tegn_maalt for s in self.sider)
-        return maalt / i_alt if i_alt else 0.0
+    def linjer_omrokeret(self) -> int:
+        return sum(s.omrokering.antal_flyttede for s in self.sider)
 
     @property
-    def linjedaekning(self) -> float:
-        i_alt = sum(s.linjer_i_alt for s in self.sider)
-        maalt = sum(s.linjer_maalt for s in self.sider)
-        return maalt / i_alt if i_alt else 0.0
+    def identiske_linjer(self) -> int:
+        return sum(s.identiske_linjer for s in self.sider)
+
+    @property
+    def joker_tegn_i_alt(self) -> int:
+        return sum(s.joker_tegn_i_alt for s in self.sider)
+
+    @property
+    def joker_overskud(self) -> int:
+        return sum(s.joker_overskud for s in self.sider)
 
     @property
     def gab(self) -> tuple[tuple[str, Gab], ...]:
@@ -665,7 +378,6 @@ def maal_saet(
     modeltekster: dict[str, str],
     *,
     felt: str = "alt_linjer",
-    maks_afvigelse: float = MAKS_AFVIGELSE,
 ) -> SaetMaaling:
     """Maaler alle sider, der har baade facit og et modelsvar.
 
@@ -682,7 +394,5 @@ def maal_saet(
         navn = post["image_name"]
         if navn not in modeltekster:
             continue
-        sider.append(
-            maal_side(navn, post[felt], modeltekster[navn], maks_afvigelse=maks_afvigelse)
-        )
+        sider.append(maal_side(navn, post[felt], modeltekster[navn]))
     return SaetMaaling(sider=tuple(sider))
