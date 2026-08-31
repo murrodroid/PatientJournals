@@ -9,16 +9,22 @@ saa en maaling kan koeres om og gentages uden at koste noget.
     .venv/Scripts/python.exe scripts/maal_koersel.py 20260830_141937_beskaaret
     .venv/Scripts/python.exe scripts/maal_koersel.py --alle     # alle koersler
 
-## Laes tallene med dækningen i haanden
+## Laes tallene: hele siden er altid maalt
 
-Maaleapparatet finder facits kendte tekststumper i modellens tekst. Hvad det
-IKKE finder, kan det ikke maale paa -- og de linjer, det taber, er systematisk
-de haardest ramte. Selvtesten opgjorde skævheden til, at maalingen finder ca.
-93 % af de fejl, der faktisk er lagt ind (stage 03). En tegnfejl herfra er
-derfor et GULV, ikke et facit.
+Maaleapparatet soeger ikke laengere facits linjer frem i modellens tekst --
+det sammenligner facits fulde tekst med modellens fulde tekst i ét straek, fra
+top til bund (se modul-docstringen i `src/andenside/maal.py`). Der er derfor
+ingen "dækning" at laese tallene med haanden paa: hele facit staar altid i
+naevneren, for alle varianter, paa alle koersler.
 
-Rapporten skriver dækningen ved hvert tal af netop den grund. Et pænt tal med
-lav dækning betyder, at der er maalt paa lidt -- ikke at siden var let.
+Den ENE undtagelse er den strenge maaling (`cer_raa_streng`): den udelader
+med vilje hele linjer med et `[?]`, fordi der ikke findes noget forankret
+modstykke at maale dem mod. Hvor stor en del af facit den strenge maaling
+overhovedet ser, staar ved siden af som `andel_facit_i_streng` -- en FAST
+brøk, ens for alle varianter, ikke en glidende rabat der vokser med, hvor
+meget en variant afviger. Sammenlignes koersler paa hovedtallet, er det
+allerede den fulde side; den strenge er en ekstra, strengere maaling ved
+siden af, ikke en mere daekkende variant af hovedtallet.
 
 ## Hvad der skrives
 
@@ -38,52 +44,13 @@ ROD = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROD / "src"))
 
 from andenside.koersel import find_koersler, laes_koersel  # noqa: E402
-from andenside import cer  # noqa: E402
-from andenside.maal import maal_saet, maal_side  # noqa: E402
+from andenside.maal import maal_saet  # noqa: E402
 from andenside.rapport import skriv_gab, skriv_rapport  # noqa: E402
 from andenside.skemaer import tekst_af_svar  # noqa: E402
 from andenside.vaern import sikr_oevemaengde  # noqa: E402
 
 FACIT = ROD / "stages" / "02_facit" / "output" / "facit.jsonl"
 KOERSLER = ROD / "stages" / "05_foerste_transskription" / "output" / "koersler"
-
-
-def uden_rabat(poster: list[dict], svar: dict[str, str]) -> tuple[float, float]:
-    """Tegnfejl hvor de linjer, maalingen ikke kunne finde, taeller som fejl.
-
-    Hovedtallet maaler kun forankrede linjer. Det giver en RABAT, der vokser,
-    jo mere modellens tekst afviger: en variant, der faar modellen til at
-    skrive noget andet, taber netop de svaere linjer ud af maalingen, og de
-    tilbageblevne ser bedre ud. Rabatten er ikke lille -- paa stage 06's
-    foerste fire varianter vendte den rangordenen HELT om. Den variant, der
-    saa bedst ud paa hovedtallet (7,97 %), var daarligst her (17,48 %), fordi
-    den havde tabt dobbelt saa meget tekst ud af maalingen.
-
-    Tallet er en NEDRE graense: en linje, maalingen ikke kunne finde, er ikke
-    noedvendigvis laest forkert -- den kan bare vaere laest anderledes nok til
-    ikke at kunne genfindes. Hovedtallet er den oevre graense. Sandheden ligger
-    imellem, og afstanden mellem de to ER rabatten.
-
-    Returnerer `(fejlandel, andel_uforankret)`. Den anden fortaeller, hvor
-    meget af det foerste der er tabt tekst frem for maalte fejl.
-    """
-    facit = {p["image_name"]: p for p in poster}
-    afstand = tegn = tabt = 0
-    for side in sorted(svar):
-        if side not in facit:
-            continue
-        m = maal_side(side, facit[side]["alt_linjer"], svar[side])
-        for f in m.linjer:
-            tegn += len(f.facit)
-            if not f.forankret:
-                afstand += len(f.facit)
-                tabt += len(f.facit)
-                continue
-            afstand += cer.maal_par(f.facit_maalt, f.model_maalt,
-                                    **cer.VARIANTER["raa"]).tegnafstand
-    if not tegn:
-        return 0.0, 0.0
-    return afstand / tegn, tabt / tegn
 
 
 def _andel(m, slags: str) -> str:
@@ -164,8 +131,6 @@ def maal_en(mappe: Path) -> dict:
         saet_md = maal_saet(poster, med_md)
         cer_med_md = _andel(saet_md.fladet["raa"], "tegn")
 
-    fejl_uden_rabat, andel_tabt = uden_rabat(poster, svar)
-
     return {
         "koersel": mappe.name,
         "model": opsaetning.model,
@@ -179,11 +144,15 @@ def maal_en(mappe: Path) -> dict:
         "wer_raa": _andel(saet.fladet["raa"], "ord"),
         "cer_raa_streng": _andel(saet.rene["raa"], "tegn"),
         "cer_raa_med_metadata": cer_med_md,
-        "cer_uden_rabat": f"{fejl_uden_rabat:.4f}",
-        "andel_uforankret": f"{andel_tabt:.4f}",
-        "daekning": f"{saet.daekning:.4f}",
-        "daekning_streng": f"{saet.rene_daekning:.4f}",
-        "linjedaekning": f"{saet.linjedaekning:.4f}",
+        # Hvor stor en del af facit den strenge maaling overhovedet ser -- en
+        # FAST brøk, ens for alle varianter (se `SaetMaaling.andel_af_facit_i_rene`).
+        "andel_facit_i_streng": f"{saet.andel_af_facit_i_rene:.4f}",
+        # Linjetrofastheden (beslutning 35): hvor mange facit-linjer der har
+        # et genkendeligt modstykke, og hvor mange af dem der stod i en
+        # anden raekkefoelge.
+        "linjer_i_alt": saet.linjer_i_alt,
+        "linjer_identiske": saet.identiske_linjer,
+        "linjer_omrokeret": saet.linjer_omrokeret,
     }
 
 
@@ -195,9 +164,12 @@ def sammenlign(mapper: list[Path]) -> None:
     forskelligt materiale, og forskellen kan lige saa godt vaere sidernes som
     variantens. Her skaeres alle ned til faellesmaengden foerst.
 
-    Baade hovedtallet og tallet uden daekningens rabat vises. De kan pege hver
-    sin vej -- det gjorde de paa stage 06's foerste fire varianter -- og naar
-    de goer, er det rabatten, man ser.
+    Hovedtallet og den strenge maaling vises side om side. Reglen fra stage 03
+    (beslutning 44) gaelder stadig: den strenge udelader linjer med et `[?]`,
+    saa den boer normalt vaere LAVERE end hovedtallet. Er den i stedet
+    hoejere, har de reddede stumper omkring de ulaeselige steder pyntet paa
+    hovedtallet, og saa er det den strenge, der gaelder -- det advares der om
+    nedenfor.
     """
     koersler = []
     for mappe in mapper:
@@ -220,28 +192,34 @@ def sammenlign(mapper: list[Path]) -> None:
               + ", ".join(udeladt))
 
     print()
-    print(f"{'variant':<34} {'sider':>5} {'hovedtal':>9} {'daekning':>9} "
-          f"{'uden rabat':>11} {'uforankret':>11}")
+    print(f"{'variant':<34} {'sider':>5} {'hovedtal':>9} {'streng':>9} "
+          f"{'facit i streng':>15}")
     raekker = []
     for mappe, opsaetning, svar in koersler:
         kun = {n: t for n, t in svar.items() if n in faelles}
         saet = maal_saet(poster, kun)
-        fejl, tabt = uden_rabat(poster, kun)
         raekker.append((opsaetning.promptversion, mappe.name, len(kun),
                         float(_andel(saet.fladet["raa"], "tegn")),
-                        saet.daekning, fejl, tabt))
-    for navn, _, n, hoved, daek, fejl, tabt in sorted(raekker, key=lambda r: r[5]):
-        print(f"{navn:<34} {n:>5} {hoved:>8.2%} {daek:>9.1%} "
-              f"{fejl:>10.2%} {tabt:>10.2%}")
+                        float(_andel(saet.rene["raa"], "tegn")),
+                        saet.andel_af_facit_i_rene))
+    for navn, _, n, hoved, streng, daek_streng in sorted(
+            raekker, key=lambda r: r[3]):
+        print(f"{navn:<34} {n:>5} {hoved:>8.2%} {streng:>9.2%} "
+              f"{daek_streng:>14.1%}")
 
-    bedst_hoved = min(raekker, key=lambda r: r[3])[0]
-    bedst_rabatfri = min(raekker, key=lambda r: r[5])[0]
-    if bedst_hoved != bedst_rabatfri:
+    # Beslutning 44: den strenge maaling udelader netop de linjer, hvor et
+    # ulaeseligt sted lod en kendt stump slippe billigt igennem. Er den
+    # ALLIGEVEL hoejere end hovedtallet, har den redning pyntet paa
+    # hovedtallet, og saa er det den strenge, der gaelder (PROGRESS.md,
+    # stage 03) -- ogsaa naar to koersler stilles op mod hinanden.
+    pyntede = [navn for navn, _, _, hoved, streng, _ in raekker
+               if streng > hoved]
+    if pyntede:
         print()
-        print(f"  BEMAERK: hovedtallet peger paa {bedst_hoved!r}, men uden "
-              f"rabat vinder {bedst_rabatfri!r}.")
-        print("  Forskellen er daekningen: den foerste har tabt mere tekst ud "
-              "af maalingen.")
+        print("  BEMAERK: for " + ", ".join(pyntede) + " er den strenge "
+              "maaling HOEJERE end hovedtallet.")
+        print("  Reddede stumper omkring ulaeselige steder har pyntet paa "
+              "hovedtallet -- den strenge gaelder her.")
 
 
 def main() -> None:
@@ -285,15 +263,15 @@ def main() -> None:
             continue
         raekker.append(r)
         print(f"  model {r['model']}, {r['sider']} sider")
-        print(f"  tegnfejl raa        {float(r['cer_raa']):.2%} "
-              f"(dækning {float(r['daekning']):.1%})")
+        print(f"  tegnfejl raa        {float(r['cer_raa']):.2%}")
         print(f"  tegnfejl arbejdstal {float(r['cer_arbejdstal']):.2%}")
         print(f"  tegnfejl streng     {float(r['cer_raa_streng']):.2%} "
-              f"(dækning {float(r['daekning_streng']):.1%})")
+              f"(facit set {float(r['andel_facit_i_streng']):.1%})")
         print(f"  ordfejl raa         {float(r['wer_raa']):.2%}")
-        print(f"  linjedækning        {float(r['linjedaekning']):.1%}")
-        print(f"  tegnfejl UDEN rabat {float(r['cer_uden_rabat']):.2%} "
-              f"(heraf {float(r['andel_uforankret']):.2%} uforankret tekst)")
+        print(f"  linjer identiske    {r['linjer_identiske']}/{r['linjer_i_alt']} "
+              f"({r['linjer_identiske'] / r['linjer_i_alt']:.1%})"
+              if r["linjer_i_alt"] else "  linjer identiske    0/0")
+        print(f"  linjer omrokeret    {r['linjer_omrokeret']}")
         if r["cer_raa_med_metadata"]:
             print(f"  tegnfejl m. margendato "
                   f"{float(r['cer_raa_med_metadata']):.2%}")

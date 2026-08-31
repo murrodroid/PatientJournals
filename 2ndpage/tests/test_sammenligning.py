@@ -97,27 +97,46 @@ def test_koersler_uden_faelles_sider_stopper_i_stedet_for_at_dele_nul(
         script.sammenlign([en, to])
 
 
-def test_der_advares_naar_de_to_tal_peger_hver_sin_vej(script, facit,
-                                                       tmp_path, capsys):
-    """Hovedtallet og tallet uden rabat kan udpege hver sin vinder.
+def test_der_advares_naar_den_strenge_maaling_er_hoejere_end_hovedtallet(
+        script, monkeypatch, tmp_path, capsys):
+    """Beslutning 44: den strenge maaling udelader hele linjer med et `[?]`
+    og boer derfor normalt vaere LAVERE end hovedtallet -- den maaler mindre
+    af siden, og det, den ikke maaler, er netop det svaereste.
 
-    Sker det, er det daekningen man ser, og det skal staa der -- ellers
-    vaelger man den variant, der faar modellen til at afvige mest.
+    Er den i stedet HOEJERE, er det, fordi den svaere linje blev laest helt
+    rigtigt (den koster intet i nogen af de to maalinger), mens resten af
+    siden -- den, den strenge stadig maaler paa -- blev laest daarligt. Fjern
+    en fejlfri linje fra baade taeller og naevner, og den tilbagevaerende
+    fejlrate STIGER. Det skal opdages og siges, ikke bare passere som et
+    hvilket som helst tal.
     """
+    sider = {
+        "a_000001": ["Ingen Snue eller [?] Hoste", "Tungen er belagt"],
+    }
+    facit_fil = tmp_path / "facit.jsonl"
+    facit_fil.write_text("\n".join(
+        json.dumps({"image_name": n, "alt_linjer": l, "forside": n})
+        for n, l in sider.items()), encoding="utf-8")
+    monkeypatch.setattr(script, "FACIT", facit_fil)
+    monkeypatch.setattr(script, "sikr_oevemaengde", lambda navne: None)
+
     rod = tmp_path / "koersler"
-    # `pyntet` laeser den anden linje helt forbi: den falder ud af
-    # forankringen, og resten er fejlfri. `aerlig` laeser begge med smaa fejl.
+    # `pyntet` laeser den svaere linje helt rigtigt (jokerfeltet sluger
+    # gaettet gratis i begge maalinger) og den rene linje helt forkert.
+    # Fjernes den svaere linje fra naevneren, som den strenge maaling goer,
+    # staar kun den forkerte linje tilbage -- og raten stiger.
     pyntet = _lav_koersel(rod, "pyntet", {
-        "a_000001": "Hun har sovet godt i Nat\nintet som helst der ligner",
-        "b_000002": "Ingen Snue eller Hoste\nslet ikke nogen lighed her",
+        "a_000001": "Ingen Snue eller Snue Hoste\n"
+                    "Slet ingen lighed med originalen overhovedet",
     })
+    # `aerlig` laeser begge linjer helt rigtigt -- intet at advare om.
     aerlig = _lav_koersel(rod, "aerlig", {
-        "a_000001": "Hun har sovet godt i Nit\nog drukket noget Malk",
-        "b_000002": "Ingen Snue eller Hosti\nTungen er belogt",
+        "a_000001": "Ingen Snue eller Hoste\nTungen er belagt",
     })
 
     script.sammenlign([aerlig, pyntet])
     ud = capsys.readouterr().out
 
-    assert "BEMAERK" in ud, ud
-    assert "pyntet" in ud and "aerlig" in ud
+    bemaerk = [l for l in ud.splitlines() if "BEMAERK" in l]
+    assert bemaerk, ud
+    assert "pyntet" in bemaerk[0] and "aerlig" not in bemaerk[0]
