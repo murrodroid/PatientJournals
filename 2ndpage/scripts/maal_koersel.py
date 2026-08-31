@@ -174,7 +174,14 @@ def sammenlign(mapper: list[Path]) -> None:
     koersler = []
     for mappe in mapper:
         opsaetning, svar = laes_koersel(mappe)
-        koersler.append((mappe, opsaetning, svar))
+        # Margendatoen foldes ind, FOER varianterne stilles op mod hinanden.
+        # Kollegaens app holder den ude af `text` og i `metadata`; facit har
+        # den inline. Sammenlignes de gemte tekster raat, straffes en variant
+        # for at have laest datoen rigtigt, mens en variant der samler sine
+        # egne dele (`linjefelter`) faar den med gratis -- og saa vinder den
+        # paa udfoldningen i stedet for paa skemaet. Se `_svar_med_metadata`.
+        koersler.append((mappe, opsaetning,
+                         _svar_med_metadata(mappe, svar) or svar))
 
     faelles = set.intersection(*(set(s) for _, _, s in koersler))
     alle = set.union(*(set(s) for _, _, s in koersler))
@@ -209,17 +216,32 @@ def sammenlign(mapper: list[Path]) -> None:
 
     # Beslutning 44: den strenge maaling udelader netop de linjer, hvor et
     # ulaeseligt sted lod en kendt stump slippe billigt igennem. Er den
-    # ALLIGEVEL hoejere end hovedtallet, har den redning pyntet paa
-    # hovedtallet, og saa er det den strenge, der gaelder (PROGRESS.md,
-    # stage 03) -- ogsaa naar to koersler stilles op mod hinanden.
+    # ALLIGEVEL hoejere end hovedtallet, siger beslutning 44, at redningen har
+    # pyntet, og saa gaelder den strenge. MEN: den redning fandtes kun under
+    # forankringen, og maalt 2026-08-31 paa alle 16 gemte koersler er den
+    # strenge nu KONSEKVENT ca. 1 procentpoint hoejere -- uden undtagelse. Det
+    # har en uskyldig forklaring: hovedtallet har en fribillet ved hvert [?],
+    # den strenge har ingen, fordi den slet ikke ser de linjer. Advarslen staar
+    # derfor stadig, men siger hvad den ved, og ikke hvad den ikke ved. Se
+    # stages/03_maaleapparat/output/jokerloft.md.
     pyntede = [navn for navn, _, _, hoved, streng, _ in raekker
                if streng > hoved]
     if pyntede:
         print()
-        print("  BEMAERK: for " + ", ".join(pyntede) + " er den strenge "
-              "maaling HOEJERE end hovedtallet.")
-        print("  Reddede stumper omkring ulaeselige steder har pyntet paa "
-              "hovedtallet -- den strenge gaelder her.")
+        if len(pyntede) == len(raekker):
+            print("  Den strenge maaling er hoejere end hovedtallet for ALLE "
+                  "varianter.")
+            print("  Det er den ventede tilstand: hovedtallet har en fribillet "
+                  "ved hvert [?],")
+            print("  den strenge har ingen. Det er ikke et tegn paa, at nogen "
+                  "variant er pyntet.")
+        else:
+            print("  BEMAERK: for " + ", ".join(pyntede) + " er den strenge "
+                  "maaling hoejere end hovedtallet, men ikke for de oevrige.")
+            print("  De varianter faar mest ud af fribilletten ved [?] -- se "
+                  "efter, om de skriver")
+            print("  mere paa de ulaeselige steder end de andre. Den strenge "
+                  "gaelder for dem.")
 
 
 def main() -> None:

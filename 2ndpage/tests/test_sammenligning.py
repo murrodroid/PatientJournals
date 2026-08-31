@@ -140,3 +140,61 @@ def test_der_advares_naar_den_strenge_maaling_er_hoejere_end_hovedtallet(
     bemaerk = [l for l in ud.splitlines() if "BEMAERK" in l]
     assert bemaerk, ud
     assert "pyntet" in bemaerk[0] and "aerlig" not in bemaerk[0]
+
+
+def _laeg_skemasvar(mappe: Path, raa: dict) -> None:
+    """Det raa skemasvar ved siden af koerslen, som piloten gemmer det."""
+    (mappe / "raa_skemasvar.json").write_text(
+        json.dumps(raa), encoding="utf-8")
+
+
+def test_margendatoen_foldes_ind_foer_varianter_stilles_op_mod_hinanden(
+        script, facit, tmp_path, monkeypatch, capsys):
+    """Den fejle, RETTELSE 2 fandt: udfoldningen maa ikke afgoere forsoeget.
+
+    Kollegaens app laegger margendatoen i `metadata` og holder den UDE af
+    `text`; facit har den inline. En variant, der samler sine egne dele
+    (`linjefelter`), faar altsaa datoen med i den gemte tekst, mens
+    `beskrevet` taber den. Sammenlignes de gemte tekster raat, straffes
+    `beskrevet` for at have laest datoen RIGTIGT, og `linjefelter` vinder paa
+    udfoldningen i stedet for paa skemaet.
+
+    Begge koersler herunder har laest siden fejlfrit. Begge skal derfor maale
+    nul -- ellers maaler sammenligningen skemaets form og ikke laesningen.
+    """
+    rod = tmp_path / "koersler"
+    linje = "Hun har sovet godt i Nat"
+    resten = "og drukket noget Maelk"
+
+    # Facit har datoen INLINE -- det er hele forskellen paa de to skemaer.
+    fil = tmp_path / "facit_med_dato.jsonl"
+    fil.write_text(json.dumps({
+        "image_name": "a_000001", "forside": "a_000001",
+        "alt_linjer": [f"12 Jan {linje}", resten]}), encoding="utf-8")
+    monkeypatch.setattr(script, "FACIT", fil)
+
+    # `linjefelter` samler selv datoen ind i sin gemte tekst.
+    felter = _lav_koersel(rod, "linjefelter", {
+        "a_000001": f"12 Jan {linje}\n{resten}",
+    })
+    _laeg_skemasvar(felter, {"a_000001": {"page_lines": [
+        {"text": f"12 Jan {linje}"}, {"text": resten}]}})
+
+    # `beskrevet` laeser den samme dato, men lander den i `metadata`, saa den
+    # gemte tekst mangler den.
+    beskrevet = _lav_koersel(rod, "beskrevet", {
+        "a_000001": f"{linje}\n{resten}",
+    })
+    _laeg_skemasvar(beskrevet, {"a_000001": {"page_lines": [
+        {"metadata": "12 Jan", "text": linje}, {"text": resten}]}})
+
+    script.sammenlign([felter, beskrevet])
+    ud = capsys.readouterr().out
+
+    tal = [l.split() for l in ud.splitlines() if l.startswith(("linjefelter",
+                                                               "beskrevet"))]
+    assert len(tal) == 2, ud
+    for navn, *felt in tal:
+        assert felt[1] == "0.00%", (
+            f"{navn} maalte {felt[1]} paa en fejlfrit laest side -- "
+            "margendatoen er ikke foldet ind foer sammenligningen")
