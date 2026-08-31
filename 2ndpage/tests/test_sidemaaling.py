@@ -278,3 +278,60 @@ def test_tom_modeltekst_mod_facit_der_kun_er_et_maerke():
     assert r.tegnafstand == 0
     assert r.cer == 0.0
     assert r.joker_tegn == (0,)
+
+
+# --------------------------------------------------------------------------
+# Trin 3 kraever to ting mere af sidemaalingen
+# --------------------------------------------------------------------------
+#
+# 1) Gabet skal kunne SES, ikke kun taelles. Rod-CONTEXT 2026-08-21 binder os
+#    til at skrive gabene i en fil, og en fil med tal i stedet for tekst kan
+#    ikke foere en laeser hen til stedet. Det er samtidig arbejdslisten over
+#    steder, facit maaske kan rettes (planen, 2026-08-30).
+#
+# 2) Ét maerke skal kunne have sit eget loft. Den strenge maaling (beslutning
+#    44) udelader hele linjer med et `[?]`. Uden forankringen er den eneste vej
+#    til det at saette en joker ind, hvor linjen stod -- og den joker skal
+#    kunne sluge en hel linje, ikke 15 tegn. Faar den standardloftet, koster
+#    hver udeladt linje ~25 tegn, og den strenge maaling ville se vaerre ud end
+#    hovedtallet af rene bogholderi-grunde.
+
+
+def test_gabet_giver_teksten_modellen_skrev_ikke_kun_dens_laengde():
+    """Uden selve teksten er gab-filen ubrugelig som arbejdsliste."""
+    maal = maal_side("Patienten har [?] i dag.", "Patienten har hoved pine i dag.")
+
+    assert maal.joker_tekst == (" hoved pine ",)
+    # De tre regnskaber skal stemme indbyrdes: alle tegn, indholdstegn, tekst.
+    assert maal.joker_tegn == (len(maal.joker_tekst[0]),)
+    assert maal.joker_indhold == (len("hovedpine"),)
+
+
+def test_gabteksten_er_tom_naar_modellen_sprang_stedet_over():
+    """En model, der intet skrev paa det ulaeselige sted, skal give en tom
+    streng -- ikke mangle en post, saa gabene ikke laengere staar i samme
+    raekkefoelge som maerkerne."""
+    maal = maal_side("Patienten har [?] i dag.", "Patienten hari dag.")
+
+    assert maal.joker_tekst == ("",)
+
+
+def test_hvert_maerke_kan_faa_sit_eget_loft():
+    """Den strenge maalings udeladte linje skal kunne sluges hel."""
+    facit = "Foerste linje. [?] Sidste linje."
+    # 30 indholdstegn paa det ulaeselige sted -- det dobbelte af standardloftet.
+    model = "Foerste linje. " + "x" * 30 + " Sidste linje."
+
+    med_standardloft = maal_side(facit, model)
+    assert med_standardloft.tegnafstand == 30 - JOKER_LOFT
+
+    med_eget_loft = maal_side(facit, model, lofter=[40])
+    assert med_eget_loft.tegnafstand == 0
+
+
+def test_lofter_skal_passe_til_antallet_af_maerker():
+    """En forkert lang liste er en programmeringsfejl, ikke noget der stille
+    skal fyldes op med standardloftet -- saa ville et maerke lydloest faa et
+    andet loft end tiltaenkt."""
+    with pytest.raises(ValueError):
+        maal_side("En [?] to [?] tre", "En x to y tre", lofter=[40])

@@ -64,6 +64,17 @@ class SideMaal:
     joker_tegn: tuple[int, ...]
     # Samme felter, men kun ikke-blanktegn. Det er DEM, loftet maales paa.
     joker_indhold: tuple[int, ...]
+    # Selve teksten modellen lagde i hvert jokerfelt, i sidens raekkefoelge.
+    # Gab-filen er kontraktbundet (rod-CONTEXT 2026-08-21), og en fil med
+    # laengder i stedet for tekst kan ikke foere en laeser hen til stedet.
+    # Skrev modellen intet, staar der en tom streng -- posten falder ikke ud,
+    # for saa ville gabene holde op med at staa i maerkernes raekkefoelge.
+    joker_tekst: tuple[str, ...]
+    # Det loft, hvert enkelt maerke faktisk blev maalt med. Gemmes, fordi den
+    # strenge maaling giver udeladte linjer deres eget loft -- uden det ville
+    # `joker_overskud` regne med standardloftet og vise et overskud, der aldrig
+    # blev opkraevet.
+    joker_lofter: tuple[int, ...]
 
     @property
     def cer(self) -> float:
@@ -84,7 +95,9 @@ class SideMaal:
     @property
     def joker_overskud(self) -> int:
         """Indholdstegn ud over loftet -- den del af jokerne der faktisk kostede."""
-        return sum(max(0, n - JOKER_LOFT) for n in self.joker_indhold)
+        return sum(
+            max(0, n - loft) for n, loft in zip(self.joker_indhold, self.joker_lofter)
+        )
 
 
 # --------------------------------------------------------------------------
@@ -141,12 +154,19 @@ def _forbered_facit(
     return ref, tegn_graenser, ref_ord, ord_graenser
 
 
-def _graense_antal(laengde: int, graenser: list[int]) -> list[int]:
-    """Hvor mange jokerfelter der ligger ved hver position 0..laengde."""
-    antal = [0] * (laengde + 1)
-    for p in graenser:
-        antal[p] += 1
-    return antal
+def _lofter_ved(
+    laengde: int, graenser: list[int], lofter: list[int]
+) -> list[list[int]]:
+    """Hvilke jokerlofter der ligger ved hver position 0..laengde.
+
+    Der returneres en LISTE pr. position, ikke et antal: to maerker kan staa
+    samme sted, og de skal beholde hvert sit loft. Raekkefoelgen inden for en
+    position er maerkernes egen.
+    """
+    ud: list[list[int]] = [[] for _ in range(laengde + 1)]
+    for p, loft in zip(graenser, lofter):
+        ud[p].append(loft)
+    return ud
 
 
 # --------------------------------------------------------------------------
@@ -235,29 +255,31 @@ def _kilden_til(foer, efter, j: int, nb: list[int], loft: int = JOKER_LOFT) -> i
 # --------------------------------------------------------------------------
 
 def _tegnmaaling(
-    ref: str, graenser: list[int], hyp: str
-) -> tuple[int, list[int], list[int]]:
+    ref: str, graenser: list[int], hyp: str, lofter: list[int]
+) -> tuple[int, list[int], list[int], list[str]]:
     """Redigeringsafstand ref->hyp med jokerfelter, plus hvad hver joker slugte.
 
-    Returnerer afstanden, gabene (alle tegn) og de samme gab talt i
-    indholdstegn -- gabet skal foere en laeser hen til stedet, loftet skal
-    straffe, og de to tal maa derfor ikke vaere det samme.
+    Returnerer afstanden, gabene (alle tegn), de samme gab talt i indholdstegn,
+    og selve den slugte tekst -- gabet skal foere en laeser hen til stedet,
+    loftet skal straffe, og de to tal maa derfor ikke vaere det samme.
+
+    `lofter` er ét loft pr. maerke, i maerkernes raekkefoelge.
 
     Almindelig tabel-DP. Hver raekke gemmes som `array("i")`: en side paa 2.500
     tegn mod et svar paa 3.000 er 7,5 mio. celler, og som Python-lister ville
     tabellen fylde et par hundrede megabyte alene i heltalsobjekter.
     """
     n, m = len(ref), len(hyp)
-    antal = _graense_antal(n, graenser)
+    ved = _lofter_ved(n, graenser, lofter)
     nb = _indholdstegn(hyp)
 
     raekke: list[int] = list(range(m + 1))
-    # (ref-position, raekken foer jokeren, raekken efter). Ét lag pr. jokerfelt,
-    # i sidens raekkefoelge -- ogsaa naar to maerker staar samme sted.
-    lag: list[tuple[int, list[int], list[int]]] = []
-    for _ in range(antal[0]):
-        foer, raekke = raekke, _sluge_tegn(raekke, nb, hyp)
-        lag.append((0, foer, raekke))
+    # (ref-position, loft, raekken foer jokeren, raekken efter). Ét lag pr.
+    # jokerfelt, i sidens raekkefoelge -- ogsaa naar to maerker staar samme sted.
+    lag: list[tuple[int, int, list[int], list[int]]] = []
+    for loft in ved[0]:
+        foer, raekke = raekke, _sluge_tegn(raekke, nb, hyp, loft)
+        lag.append((0, loft, foer, raekke))
 
     tabel: list[array] = [array("i", raekke)]
     for i in range(1, n + 1):
@@ -270,9 +292,9 @@ def _tegnmaaling(
                 ny[j - 1] + 1,
                 forrige[j - 1] + (tegn != hyp[j - 1]),
             ))
-        for _ in range(antal[i]):
-            foer, ny = ny, _sluge_tegn(ny, nb, hyp)
-            lag.append((i, foer, ny))
+        for loft in ved[i]:
+            foer, ny = ny, _sluge_tegn(ny, nb, hyp, loft)
+            lag.append((i, loft, foer, ny))
         raekke = ny
         tabel.append(array("i", ny))
 
@@ -282,15 +304,17 @@ def _tegnmaaling(
     # for det er den, det normale skridt nedad blev regnet fra.
     slugt = [0] * len(graenser)
     indhold = [0] * len(graenser)
+    tekst = [""] * len(graenser)
     i, j = n, m
     aktuel = tabel[n]
     lag_nr = len(lag) - 1
     while i > 0 or j > 0:
         while lag_nr >= 0 and lag[lag_nr][0] == i:
-            _, foer, efter = lag[lag_nr]
-            jm = _kilden_til(foer, efter, j, nb)
+            _, loft, foer, efter = lag[lag_nr]
+            jm = _kilden_til(foer, efter, j, nb, loft)
             slugt[lag_nr] = j - jm
             indhold[lag_nr] = nb[j] - nb[jm]
+            tekst[lag_nr] = hyp[jm:j]
             j, aktuel = jm, foer
             lag_nr -= 1
         if i == 0 and j == 0:
@@ -303,17 +327,19 @@ def _tegnmaaling(
         else:
             j -= 1
 
-    return tabel[n][m], slugt, indhold
+    return tabel[n][m], slugt, indhold, tekst
 
 
-def _ordmaaling(ref_ord: list[str], graenser: list[int], hyp_ord: list[str]) -> int:
+def _ordmaaling(
+    ref_ord: list[str], graenser: list[int], hyp_ord: list[str], lofter: list[int]
+) -> int:
     """Samme maaling paa ord. Ingen tilbagesporing -- gabene opgoeres i tegn."""
     n, m = len(ref_ord), len(hyp_ord)
-    antal = _graense_antal(n, graenser)
+    ved = _lofter_ved(n, graenser, lofter)
 
     raekke = list(range(m + 1))
-    for _ in range(antal[0]):
-        raekke = _sluge_ord(raekke, hyp_ord)
+    for loft in ved[0]:
+        raekke = _sluge_ord(raekke, hyp_ord, loft)
     for i in range(1, n + 1):
         forrige = raekke
         ordet = ref_ord[i - 1]
@@ -324,28 +350,48 @@ def _ordmaaling(ref_ord: list[str], graenser: list[int], hyp_ord: list[str]) -> 
                 ny[j - 1] + 1,
                 forrige[j - 1] + (ordet != hyp_ord[j - 1]),
             ))
-        for _ in range(antal[i]):
-            ny = _sluge_ord(ny, hyp_ord)
+        for loft in ved[i]:
+            ny = _sluge_ord(ny, hyp_ord, loft)
         raekke = ny
     return raekke[m]
 
 
-def maal_side(facit: str, model: str, **options) -> SideMaal:
+def maal_side(
+    facit: str, model: str, *, lofter: list[int] | None = None, **options
+) -> SideMaal:
     """Maaler modellens fulde sidetekst mod facits fulde sidetekst, i raekkefoelge.
 
     `options` er dem, `cer.normalize()` tager, saa en variant maales med
     `maal_side(facit, model, **cer.VARIANTER["arbejdstal"])`.
+
+    `lofter` giver hvert `[?]` sit eget loft, i maerkernes raekkefoelge. Uden
+    det faar alle standardloftet. Den strenge maaling (beslutning 44) bruger
+    det: dér erstattes en hel linje med ulaeseligt indhold af ét maerke, og
+    det maerke skal kunne sluge linjen -- ikke 15 tegn af den.
+
+    En liste af forkert laengde er en programmeringsfejl og afvises. Fyldtes
+    den stille op med standardloftet, ville et maerke lydloest blive maalt med
+    et andet loft end det, kalderen troede.
     """
     ref, tegn_graenser, ref_ord, ord_graenser = _forbered_facit(facit, options)
     hyp = cer.normalize(model, **options)
     hyp_ord = hyp.split()
 
-    tegnafstand, slugt, indhold = _tegnmaaling(ref, tegn_graenser, hyp)
+    if lofter is None:
+        lofter = [JOKER_LOFT] * len(tegn_graenser)
+    elif len(lofter) != len(tegn_graenser):
+        raise ValueError(
+            f"{len(lofter)} lofter til {len(tegn_graenser)} jokermaerker i facit"
+        )
+
+    tegnafstand, slugt, indhold, tekst = _tegnmaaling(ref, tegn_graenser, hyp, lofter)
     return SideMaal(
         tegnafstand=tegnafstand,
         facit_tegn=len(ref),
-        ordafstand=_ordmaaling(ref_ord, ord_graenser, hyp_ord),
+        ordafstand=_ordmaaling(ref_ord, ord_graenser, hyp_ord, lofter),
         facit_ord=len(ref_ord),
         joker_tegn=tuple(slugt),
         joker_indhold=tuple(indhold),
+        joker_tekst=tuple(tekst),
+        joker_lofter=tuple(lofter),
     )
