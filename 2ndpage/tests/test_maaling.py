@@ -20,6 +20,7 @@ import pytest
 from andenside import cer
 from andenside.facit import saml_orddeling
 from andenside.maal import _tegn, deler_ord, flad, maal_saet, maal_side, streng_facit
+from andenside.sidemaaling import JOKER_LOFT
 
 FACIT = Path(__file__).resolve().parents[1] / "stages" / "02_facit" / "output" / "facit.jsonl"
 
@@ -274,19 +275,45 @@ def test_side_uden_rene_linjer_giver_en_tom_streng_maaling_ikke_et_krak():
     assert m.rene["raa"].cer == 0.0
 
 
+def test_den_strenge_maaling_straffer_ikke_et_almindeligt_ord_paa_et_ulaeseligt_sted():
+    """Et ulaeseligt sted har ingen kendt laengde -- kun et kendt maerke.
+
+    Den strenge maaling tager hele linjen ud og erstatter den med ét
+    jokermaerke, hvis loft er linjens eget indhold. Taelles `[?]` dér som tre
+    bogstavers tekst, bliver loftet tre tegn for lavt hver eneste gang, og en
+    model, der skriver et helt almindeligt ord dér hvor et menneske gav op,
+    betaler for det. Her er der ikke én laesefejl paa siden -- baade hovedtal
+    og streng maaling skal give nul.
+    """
+    facit = ["Han har sovet godt i Nat", "og drukket [?] Maelk",
+             "Tungen er belagt"]
+    model = chr(10).join(l.replace("[?]", "noget") for l in facit)
+
+    m = maal_side("prøve", facit, model)
+
+    assert m.fladet["raa"].cer == 0.0
+    assert m.rene["raa"].cer == 0.0, (
+        "den strenge maaling opkraever de tegn, ordet er laengere end "
+        "maerket `[?]` -- loftet taeller maerket som indhold")
+
+
 def test_streng_facit_giver_et_loft_pr_udeladt_linje():
     facit = ["Ingen Snue.", "Der er [?] Udflod.", "Barnet [?] kraftigt."]
     tekst, lofter = streng_facit(facit)
 
     assert tekst.count("[?]") == 2
     assert len(lofter) == 2
-    # Loftet er linjens EGET indhold -- hverken mere eller mindre. De 15 tegn
-    # fra `JOKER_LOFT` maa ikke laegges oveni: de er udledt af ordlaengden i
-    # materialet og er maalet for et `[?]` inde i en linje, mens linjens egen
-    # laengde er den tilsvarende udledning for en hel linje. Laegges de sammen,
-    # taelles samme begrundelse to gange, og den strenge maaling bliver
-    # maerkbart mildere, end den giver sig ud for.
-    assert lofter == [_tegn("Der er [?] Udflod."), _tegn("Barnet [?] kraftigt.")]
+    # Loftet er linjens EGET indhold -- `JOKER_LOFT` maa ikke laegges oveni
+    # linjen: de 15 tegn er udledt af ordlaengden i materialet, mens linjens
+    # egen laengde er den tilsvarende udledning for en hel linje, og lagt
+    # sammen taelles samme begrundelse to gange.
+    #
+    # Men maerket `[?]` er ikke selv tekst. Det staar i stedet for indhold, vi
+    # ikke kender laengden paa, saa det taeller med den rummelighed, et `[?]`
+    # faar inde i en linje -- ikke som tre bogstaver.
+    assert lofter == [_tegn("Der er " + "x" * JOKER_LOFT + " Udflod."),
+                      _tegn("Barnet " + "x" * JOKER_LOFT + " kraftigt.")]
+    assert lofter == [27, 30], "de tre tegn i `[?]` er byttet ud med de 15"
 
 
 # --------------------------------------------------------------------------

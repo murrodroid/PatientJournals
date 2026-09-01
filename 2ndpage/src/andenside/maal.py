@@ -57,7 +57,7 @@ from dataclasses import dataclass
 
 from andenside import cer, orden, sidemaaling
 from andenside.facit import saml_orddeling
-from andenside.sidemaaling import MAERKE
+from andenside.sidemaaling import JOKER_LOFT, MAERKE
 
 # Hvor mange ord af facit der staar paa hver side af et gab, saa laeseren kan
 # finde stedet paa siden igen. Gabet i sig selv er tit ét ord langt og ville
@@ -136,11 +136,18 @@ def streng_facit(facit_linjer: list[str]) -> tuple[str, list[int]]:
     af. Loftet siger: du maa skrive lige saa meget, som der stod paa den linje,
     vi ikke kan laese.
 
-    Der laegges IKKE `JOKER_LOFT` oveni. De 15 tegn er udledt af, hvor langt ét
-    ord er i materialet, og er det rigtige maal for et `[?]` inde i en linje.
-    For en HEL linje er linjens egen laengde den tilsvarende udledning, og at
-    laegge de to sammen ville taelle den samme begrundelse to gange -- og goere
-    den strenge maaling maerkbart mildere, end den giver sig ud for.
+    Der laegges IKKE `JOKER_LOFT` oveni linjen. De 15 tegn er udledt af, hvor
+    langt ét ord er i materialet, og for en HEL linje er linjens egen laengde
+    den tilsvarende udledning; laegges de to sammen, taelles samme begrundelse
+    to gange, og den strenge maaling bliver mildere, end den giver sig ud for.
+
+    Men MAERKET SELV er ikke tekst. `[?]` staar i stedet for indhold, hvis
+    laengde ingen kender -- taelles de tre tegn som tre bogstaver, er loftet
+    tre tegn for lavt hver eneste gang, og en model, der skriver et helt
+    almindeligt ord dér hvor et menneske gav op, betaler for det. Maalt
+    2026-09-01: det gav 3,21 % paa "facit mod sig selv" i selvtesten, hvor
+    kravet er nul. Maerket taeller derfor med `JOKER_LOFT` -- den samme
+    rummelighed, et `[?]` faar inde i en linje.
 
     Orddelings-beslutningerne traeffes paa de OPRINDELIGE linjer og bruges paa
     de erstattede. En bindestreg sidst paa en erstattet linje er forsvundet med
@@ -149,7 +156,8 @@ def streng_facit(facit_linjer: list[str]) -> tuple[str, list[int]]:
     """
     delinger = deler_ord(facit_linjer)
     erstattet = [MAERKE if MAERKE in linje else linje for linje in facit_linjer]
-    lofter = [_tegn(linje) for linje in facit_linjer if MAERKE in linje]
+    lofter = [_tegn(linje.replace(MAERKE, "x" * JOKER_LOFT))
+              for linje in facit_linjer if MAERKE in linje]
     return flad(erstattet, delinger), lofter
 
 

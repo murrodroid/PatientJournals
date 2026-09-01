@@ -198,3 +198,34 @@ def test_margendatoen_foldes_ind_foer_varianter_stilles_op_mod_hinanden(
         assert felt[1] == "0.00%", (
             f"{navn} maalte {felt[1]} paa en fejlfrit laest side -- "
             "margendatoen er ikke foldet ind foer sammenligningen")
+
+
+
+def test_sammenligningen_viser_hver_side_for_sig_ikke_kun_totalen(
+        script, facit, tmp_path, capsys):
+    """Én skoer side maa ikke kunne skjule, hvem der laeste bedst.
+
+    Maalt 2026-08-31 paa to koersler med NOEJAGTIG samme instruktion: ni af
+    tolv sider var ens tegn for tegn, mens én enkelt side afveg 6
+    procentpoint. Den ene side alene flyttede totalen et halvt procentpoint.
+    Skal to instruktioner stilles op mod hinanden paa saa faa sider, er
+    optaellingen af, hvem der vandt hver side, det staerke signal -- og den
+    kan kun laeses, hvis siderne staar der hver for sig.
+    """
+    rod = tmp_path / "koersler"
+    nl = chr(10)
+    # `god` laeser den foerste side perfekt; begge taber det samme paa den anden.
+    god = _lav_koersel(rod, "god", {
+        "a_000001": nl.join(["Hun har sovet godt i Nat", "og drukket noget Maelk"]),
+        "b_000002": nl.join(["Ingen Snue eller Hoste", "Tungen er belogt"]),
+    })
+    daarlig = _lav_koersel(rod, "daarlig", {
+        "a_000001": nl.join(["Hun har sovet godt i Nat", "og drukket noget Malk"]),
+        "b_000002": nl.join(["Ingen Snue eller Hoste", "Tungen er belogt"]),
+    })
+
+    script.sammenlign([god, daarlig])
+    ud = capsys.readouterr().out
+
+    assert "a_000001" in ud and "b_000002" in ud, (
+        "sammenligningen skriver kun totalen ud -- hver side skal staa for sig")

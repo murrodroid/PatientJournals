@@ -156,6 +156,48 @@ def maal_en(mappe: Path) -> dict:
     }
 
 
+def _side_for_side(koersler, poster: list[dict]) -> None:
+    """Hver sides tegnfejl for hver koersel, plus hvem der vandt siden.
+
+    Totalen alene er et skroebeligt signal paa faa sider. Maalt 2026-08-31 paa
+    to koersler med noejagtig samme instruktion: ni af tolv sider var ens tegn
+    for tegn, mens én enkelt side afveg 6 procentpoint -- og den ene side
+    flyttede totalen et halvt procentpoint. Den slags stoej er klumpet, ikke
+    jaevn, saa den kan ikke midles vaek paa tolv sider.
+
+    Optaellingen af vundne sider kan den derimod ikke vaelte: en side taeller
+    ét, uanset hvor voldsomt den svinger. Staar de to tal side om side, kan
+    det SES, om en forskel i totalen baeres af alle sider eller af én.
+    """
+    navne = [o.promptversion for _, o, _ in koersler]
+    bredde = max(12, max(len(n) for n in navne))
+    print()
+    print("Side for side (tegnfejl, `raa`):")
+    print()
+    print(f"{"side":<16}" + "".join(f"{n[:bredde]:>{bredde + 2}}" for n in navne))
+
+    vundne = [0] * len(koersler)
+    for post in sorted(poster, key=lambda p: p["image_name"]):
+        navn = post["image_name"]
+        tal = []
+        for _, _, svar in koersler:
+            saet = maal_saet([post], {navn: svar[navn]})
+            tal.append(float(_andel(saet.fladet["raa"], "tegn")))
+        bedst = min(tal)
+        # Uafgjort giver ingen point til nogen -- to koersler, der har skrevet
+        # noejagtig det samme, siger intet om, hvilken instruktion der er bedst.
+        if tal.count(bedst) == 1:
+            vundne[tal.index(bedst)] += 1
+        print(f"{navn:<16}" + "".join(
+            f"{t:>{bredde + 1}.2%}" + ("*" if t == bedst and tal.count(bedst) == 1
+                                       else " ")
+            for t in tal))
+    print()
+    print(f"{"vandt siden":<16}" + "".join(
+        f"{v:>{bredde + 2}}" for v in vundne))
+    print("  (* = bedst paa den side; uafgjorte sider giver ingen point)")
+
+
 def sammenlign(mapper: list[Path]) -> None:
     """Stiller koersler op mod hinanden paa de sider, de ALLE har.
 
@@ -213,6 +255,8 @@ def sammenlign(mapper: list[Path]) -> None:
             raekker, key=lambda r: r[3]):
         print(f"{navn:<34} {n:>5} {hoved:>8.2%} {streng:>9.2%} "
               f"{daek_streng:>14.1%}")
+
+    _side_for_side(koersler, poster)
 
     # Beslutning 44: den strenge maaling udelader netop de linjer, hvor et
     # ulaeseligt sted lod en kendt stump slippe billigt igennem. Er den
