@@ -314,3 +314,85 @@ def test_en_side_med_uenige_baand_maerkes_usikker():
                 px[x0 + dx, y] = SORT
     _, maaling = beskaer_langs_fals(img, _side(1))
     assert not maaling.sikker, "en side uden nogen ret fals blev erklaeret sikker"
+
+
+# --------------------------------------------------- snittet gennem folden
+
+def _fals_med_krumning(
+    bredde: int = 1000, hoejde: int = 1200, krumning_start: int = 800,
+    krumning: int = 45, kerne: int = 25,
+) -> Image.Image:
+    """Falsen som den faktisk ser ud: en BRED moerkning, ikke en skarp streg.
+
+    Papiret krummer ind mod folden og vender vaek fra lyset, saa det bliver
+    gradvist moerkere, laenge foer selve folden. Skriveren skrev ud i den
+    krumning. Derfor:
+
+        vores side (hvid) | vores krumning (graa) | folden (sort) |
+        naboens krumning (graa) | naboens side (hvid)
+
+    Graatonen 120 ligger under `_profil_i_baand`s taerskel paa 180 og taeller
+    altsaa som moerk -- praecis som paa de rigtige sider.
+    """
+    img = Image.new("L", (bredde, hoejde), HVID)
+    px = img.load()
+    graenser = [(krumning_start, krumning_start + krumning, 120),
+                (krumning_start + krumning, krumning_start + krumning + kerne, SORT),
+                (krumning_start + krumning + kerne,
+                 krumning_start + 2 * krumning + kerne, 120)]
+    for x0, x1, tone in graenser:
+        for y in range(hoejde):
+            for x in range(x0, min(x1, bredde)):
+                px[x, y] = tone
+    return img
+
+
+def test_ordenderne_i_krumningen_overlever():
+    """Snittet skal ligge paa den ANDEN side af foldens moerkning.
+
+    Lead fandt 2026-09-01 tolv sider, hvor snittet laa ved moerkningens
+    BEGYNDELSE og barberede de sidste bogstaver af linjerne -- dér, hvor
+    siden krummer ind i folden og skriveren skrev helt ud. Moerkningen er
+    45-70 px bred paa de sider; bufferen paa 0,5 % er 8-10 px og raekker
+    ikke.
+
+    Samme erkendelse staar allerede i `yderkant._kandidater_i_profil`:
+    kanten hoerer til i faldets BUND, ikke ved dets begyndelse.
+    """
+    img = _fals_med_krumning()
+    _saet_markoer(img, 806, 40)     # et ord, der naar ud i krumningen
+    _saet_markoer(img, 806, 1100)
+    beskaaret, _ = beskaer_langs_fals(img, _side(1))
+    assert _markoer_findes(beskaaret, 806, 40), "ordenden foroven blev skaaret af"
+    assert _markoer_findes(beskaaret, 806, 1100), "ordenden forneden blev skaaret af"
+
+
+def test_naboens_tekst_kommer_stadig_ikke_med_naar_der_skaeres_gennem_folden():
+    """Prisen for at gaa gennem folden maa ikke vaere naboens skrift.
+
+    Naboens egen tekst staar paa hans flade del, uden for hans krumning.
+    Folden slutter her ved 800+45+25+45 = 915.
+    """
+    img = _fals_med_krumning()
+    _saet_markoer(img, 950, 40)
+    beskaaret, _ = beskaer_langs_fals(img, _side(1))
+    assert not _markoer_findes(beskaaret, 950, 40), "naboens tekst kom med"
+
+
+def test_snittet_loeber_ikke_loebsk_naar_moerket_aldrig_slutter():
+    """Er hele resten af billedet moerkt, maa snittet ikke vandre ud i det.
+
+    Sker paa sider, hvor folden gaar i ét med en moerk baggrund. Uden et loft
+    ville snittet ende ved billedkanten og tage hele naboopslaget med.
+    """
+    bredde, hoejde = 1000, 1200
+    img = Image.new("L", (bredde, hoejde), HVID)
+    px = img.load()
+    for y in range(hoejde):
+        for x in range(800, bredde):
+            px[x, y] = SORT
+    graense = fals_graense(img, _side(1))
+    assert graense
+    assert max(graense) < 900, (
+        f"snittet vandrede ud i det moerke: {min(graense)}-{max(graense)}"
+    )

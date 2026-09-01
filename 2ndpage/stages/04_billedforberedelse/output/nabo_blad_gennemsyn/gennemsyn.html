@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="da">
+<head>
+<meta charset="utf-8">
+<title>Snittene — gennemsyn</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #1b1b1b; color: #e8e8e8;
+         font: 15px/1.5 system-ui, "Segoe UI", sans-serif; }
+  header { display: flex; gap: 16px; align-items: center; flex-wrap: wrap;
+           padding: 8px 14px; background: #262626; border-bottom: 1px solid #3a3a3a; }
+  header b { font-size: 17px; }
+  .tal { color: #a8a8a8; }
+  main { padding: 10px 14px 30px; }
+  #ark { display: block; border: 1px solid #444; background: #000; cursor: zoom-in; }
+  #ark.fit { max-height: calc(100vh - 200px); width: auto; }
+  #ark.fuld { width: 1100px; max-width: 100%; cursor: zoom-out; }
+  .knapper { display: flex; gap: 8px; margin: 12px 0 6px; flex-wrap: wrap; }
+  button { font: inherit; padding: 8px 14px; border-radius: 6px; border: 1px solid #555;
+           background: #333; color: #eee; cursor: pointer; }
+  button:hover { filter: brightness(1.25); }
+  button.ok    { background: #1f4620; border-color: #3a7; }
+  button.nabo  { background: #6b2020; border-color: #a33; }
+  button.nabol { background: #4a2626; border-color: #834; }
+  button.fals  { background: #6b4a10; border-color: #b83; }
+  button.falsl { background: #46351a; border-color: #863; }
+  #dom { padding: 2px 8px; border-radius: 4px; }
+  .hjaelp { color: #999; font-size: 13px; max-width: 74ch; }
+</style>
+</head>
+<body>
+<header>
+  <b id="navn">—</b>
+  <span class="tal" id="stilling"></span>
+  <span class="tal" id="fakta"></span>
+  <span id="dom"></span>
+  <span class="tal" id="talt"></span>
+  <button id="gem">Hent CSV</button>
+</header>
+
+<main>
+  <img id="ark" class="fit" alt="siden med det bortskårne tonet">
+  <div class="knapper">
+    <button class="ok"    onclick="doem('ok')">1 &nbsp;I orden</button>
+    <button class="nabo"  onclick="doem('nabo')">2 &nbsp;Naboblad, alvorligt</button>
+    <button class="nabol" onclick="doem('nabo_let')">3 &nbsp;Naboblad, uden betydning</button>
+    <button class="fals"  onclick="doem('fals')">4 &nbsp;Falsen skærer tekst</button>
+    <button class="falsl" onclick="doem('fals_let')">5 &nbsp;Falsen ind, uden betydning</button>
+    <button onclick="spring(-1)">← &nbsp;Tilbage</button>
+  </div>
+  <p class="hjaelp">
+    <b>Blåt</b> = fjernet af yderkant-snittet (nabobladet). <b>Rødt</b> = fjernet af
+    falssnittet. To ting at se efter: står der fremmed håndskrift tilbage i det
+    utonede — og skærer det røde ind i dine egne ordender, hvor siden krummer
+    ind i folden? Klik på billedet for at zoome. Svarene gemmes i browseren
+    undervejs.
+  </p>
+</main>
+
+<script src="koe.js"></script>
+<script>
+const NOEGLE = "nabo_blad_domme";
+const NAVNE = {ok: "i orden", nabo: "NABOBLAD", nabo_let: "naboblad, let",
+               fals: "FALSEN SKÆRER TEKST", fals_let: "falsen ind, let"};
+const FARVER = {ok: "#1f4620", nabo: "#6b2020", nabo_let: "#4a2626",
+                fals: "#6b4a10", fals_let: "#46351a"};
+
+// Leads egne fund 2026-09-01, meldt uden om siden. Laegges kun ind, hvor der
+// ikke allerede staar en naboblad-dom -- hans klik maa ikke overskrives.
+const FORHAAND = {
+  "273102_001072": "fals", "273102_001074": "fals", "273102_001068": "fals",
+  "273109_000082": "fals", "273102_001066": "fals", "273102_001064": "fals",
+  "273101_001100": "fals", "273100_001264": "fals", "273100_001260": "fals",
+  "273024_001127": "fals",
+  "273099_001446": "fals_let", "273100_001266": "fals_let",
+};
+
+let i = 0;
+let domme = JSON.parse(localStorage.getItem(NOEGLE) || "{}");
+
+// Den foerste udgave gemte true/false. De oversaettes én gang.
+for (const [k, v] of Object.entries(domme)) {
+  if (v === true) domme[k] = "nabo";
+  else if (v === false) domme[k] = "ok";
+}
+if (!localStorage.getItem(NOEGLE + "_forhaand")) {
+  for (const [k, v] of Object.entries(FORHAAND)) {
+    if (!domme[k] || domme[k] === "ok") domme[k] = v;
+  }
+  localStorage.setItem(NOEGLE + "_forhaand", "1");
+}
+localStorage.setItem(NOEGLE, JSON.stringify(domme));
+
+function vis() {
+  const p = KOE[i];
+  document.getElementById("ark").src = "billeder/" + p.billede + ".jpg";
+  document.getElementById("navn").textContent = p.billede;
+  document.getElementById("stilling").textContent = (i + 1) + " / " + KOE.length;
+  document.getElementById("fakta").textContent =
+    p.gruppe + " · " + p.recto_verso + " · " +
+    (p.afvigelse_px >= 0 ? "+" : "") + p.afvigelse_px + " px vs. bindet";
+  const d = document.getElementById("dom");
+  const dom = domme[p.billede];
+  d.textContent = dom ? NAVNE[dom] : "";
+  d.style.background = dom ? FARVER[dom] : "transparent";
+  const talt = {};
+  for (const v of Object.values(domme)) talt[v] = (talt[v] || 0) + 1;
+  document.getElementById("talt").textContent =
+    Object.entries(talt).filter(([k]) => k !== "ok")
+      .map(([k, n]) => NAVNE[k] + ": " + n).join(" · ") +
+    "  (" + Object.keys(domme).length + " set)";
+  for (let n = 1; n <= 3 && i + n < KOE.length; n++) {
+    new Image().src = "billeder/" + KOE[i + n].billede + ".jpg";
+  }
+}
+
+function doem(maerke) {
+  domme[KOE[i].billede] = maerke;
+  localStorage.setItem(NOEGLE, JSON.stringify(domme));
+  spring(1);
+}
+
+function spring(n) {
+  i = Math.max(0, Math.min(KOE.length - 1, i + n));
+  vis();
+}
+
+document.getElementById("ark").onclick = e => {
+  e.target.classList.toggle("fit");
+  e.target.classList.toggle("fuld");
+};
+
+document.getElementById("gem").onclick = () => {
+  const raek = ["billede,gruppe,recto_verso,bredde,afvigelse_px,ydre_baand,dom"];
+  for (const p of KOE) {
+    if (!(p.billede in domme)) continue;
+    raek.push([p.billede, p.gruppe, p.recto_verso, p.bredde, p.afvigelse_px,
+               p.ydre_baand, domme[p.billede]].join(","));
+  }
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([raek.join("\n") + "\n"], {type: "text/csv"}));
+  a.download = "snit_domme.csv";
+  a.click();
+};
+
+const TASTER = {"1": "ok", "2": "nabo", "3": "nabo_let", "4": "fals", "5": "fals_let"};
+addEventListener("keydown", e => {
+  if (e.key === "ArrowRight" || e.key === " ") { doem("ok"); e.preventDefault(); }
+  else if (e.key in TASTER) doem(TASTER[e.key]);
+  else if (e.key === "ArrowLeft") spring(-1);
+});
+
+i = Math.max(0, KOE.findIndex(p => !(p.billede in domme)));
+if (i < 0) i = 0;
+vis();
+</script>
+</body>
+</html>

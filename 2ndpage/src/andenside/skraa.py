@@ -35,6 +35,14 @@ ANTAL_BAAND = 24       # antal maalepunkter ned gennem siden
 OVERLAP = 2.5          # hvert vindues hoejde, malt i skridt mellem punkterne
 MARGEN = 0.03          # top og bund udelades -- affotograferingens skygge
 LINJE_TOLERANCE = 25   # px et baand maa afvige fra flertallets rette linje
+FOLD_TAERSKEL = 0.5    # en kolonne regnes med til folden, saa laenge saa stor
+# en del af dens pixels er moerke. Profilen er andelen af pixels under 180,
+# og inde i baeltet staar den paa 0,93-1,00 paa de rigtige sider, mens den
+# uden for ligger paa 0,00-0,20. Halvdelen ligger midt i det tomrum.
+FOLD_LOFT_ANDEL = 0.06  # hvor langt ud gennem moerkningen der hoejst gaas.
+# Maalt paa leveringen er baeltet 20-77 px bredt, altsaa 1,5-4,2 % af sidens
+# bredde. Loftet er sat over det hoejeste maalte, ikke efter smag -- og det
+# er der kun for de sider, hvor folden gaar i ét med en moerk baggrund.
 # 25, ikke mindre: maalt paa leveringens 307 sider afviger falsen 5 px fra
 # en ret linje i median og 11 px ved 90-percentilen. En tolerance paa 25
 # rummer altsaa al virkelig krumning med god margen. De sider, lead kaldte
@@ -100,8 +108,35 @@ def _profil_i_baand(graa: "np.ndarray", y0: int, y1: int, *, step: int = 3,
     return smooth((graa[y0:y1:step, :] < taerskel).mean(axis=0).tolist())
 
 
-def _kant_i_profil(profil: list[float], vindue) -> int | None:
-    """Falsens naere kant: stoerste spring opad langs soegeretningen."""
+def _ud_gennem_folden(profil: list[float], x: int, vindue, loft: int) -> int:
+    """Fra moerkningens BEGYNDELSE og ud til dens anden side.
+
+    Falsen er ikke en streg, men et baelte: papiret krummer ind mod folden og
+    vender vaek fra lyset, saa det bliver moerkt et godt stykke foer selve
+    folden -- og skriveren skrev ud i den krumning. Springet, `_kant_i_profil`
+    finder, ligger dér hvor moerkningen begynder, altsaa INDEN vores sidste
+    bogstaver. Skaeres der der, barberes ordenderne af.
+
+    Der gaas derfor udad, saa laenge kolonnen stadig er overvejende moerk, og
+    snittet lægges hvor baeltet slipper. Prisen er naboens krumning, som
+    bliver staaende -- stoej, prompten allerede beder modellen se bort fra.
+    Den modsatte fejl er en manglende stavelse i transskriptionen.
+
+    `loft` er der, fordi baeltet paa nogle sider gaar i ét med en moerk
+    baggrund. Uden det ville snittet vandre til billedkanten.
+    """
+    udad = 1 if vindue.retning == "fra_hoejre" else -1
+    sidste = x
+    for skridt in range(1, loft + 1):
+        naeste = x + udad * skridt
+        if not (0 <= naeste < len(profil)) or profil[naeste] < FOLD_TAERSKEL:
+            break
+        sidste = naeste
+    return sidste
+
+
+def _kant_i_profil(profil: list[float], vindue, *, loft: int) -> int | None:
+    """Falsens fjerne kant: stoerste spring opad, og saa ud gennem moerkningen."""
     if vindue.retning == "fra_hoejre":
         raek = range(vindue.start + 1, vindue.slut)
         forrige = -1
@@ -113,7 +148,9 @@ def _kant_i_profil(profil: list[float], vindue) -> int | None:
         spring = profil[x] - profil[x + forrige]
         if spring > bedste:
             bedste, bedste_x = spring, x
-    return bedste_x if bedste >= MIN_STIGNING else None
+    if bedste_x is None or bedste < MIN_STIGNING:
+        return None
+    return _ud_gennem_folden(profil, bedste_x, vindue, loft)
 
 
 def baandkanter(
@@ -146,7 +183,8 @@ def baandkanter(
         if yb - ya < 2:
             ud.append((midte, None))
             continue
-        ud.append((midte, _kant_i_profil(_profil_i_baand(graa, ya, yb), vindue)))
+        ud.append((midte, _kant_i_profil(_profil_i_baand(graa, ya, yb), vindue,
+                                         loft=int(img.width * FOLD_LOFT_ANDEL))))
     return ud
 
 

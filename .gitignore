@@ -224,3 +224,6 @@ validation_reports/
 service-account.json
 check_data.ipynb
 dataset_archive
+
+# Gennemsynsbilleder -- 37 MB afledte JPEGs, laves af scripts/nabo_blad_gennemsyn.py
+2ndpage/stages/04_billedforberedelse/output/nabo_blad_gennemsyn/billeder/
