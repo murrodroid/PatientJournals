@@ -15,17 +15,17 @@ altid i nævneren, og en linje kan ikke falde ud af regnestykket.
 
 | Forvanskning | raa | uden_versaler | uden_diakritika | uden_tegnsætn. | arbejdstal | arbejdstal, strengt | Model-tegn af facit-tegn | Omrokerede linjer |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| facit mod sig selv | 0,01 % | 0,01 % | 0,01 % | 0,00 % | 0,00 % | 3,21 % | 56591 af 54284 | 3 af 2586 |
-| alle ø skrevet som ö | 0,76 % | 0,76 % | 0,01 % | 0,79 % | 0,79 % | 4,01 % | 56591 af 54284 | 3 af 2586 |
-| alt med små bogstaver | 5,36 % | 0,02 % | 5,36 % | 5,65 % | 0,00 % | 3,22 % | 56591 af 54284 | 3 af 2586 |
-| al tegnsætning fjernet | 5,16 % | 5,16 % | 5,16 % | 0,00 % | 0,00 % | 3,21 % | 53331 af 54284 | 3 af 2586 |
-| hele siden som ét afsnit | 0,58 % | 0,58 % | 0,58 % | 0,30 % | 0,30 % | 3,49 % | 56591 af 54284 | 0 af 2586 |
-| hvert linjebrud flyttet ét ord | 0,52 % | 0,52 % | 0,52 % | 0,27 % | 0,27 % | 3,46 % | 56591 af 54284 | 21 af 2586 |
-| et opdigtet afsnit tilføjet | 8,75 % | 8,74 % | 8,75 % | 9,03 % | 9,02 % | 13,33 % | 61547 af 54284 | 3 af 2586 |
-| 2 % af bogstaverne byttet | 1,50 % | 1,50 % | 1,50 % | 1,58 % | 1,58 % | 4,76 % | 56591 af 54284 | 3 af 2586 |
-| 10 % af bogstaverne byttet | 7,55 % | 7,55 % | 7,55 % | 7,97 % | 7,97 % | 11,11 % | 56591 af 54284 | 5 af 2586 |
-| den midterste tredjedel sprunget over | 32,73 % | 32,69 % | 32,73 % | 32,70 % | 32,65 % | 32,29 % | 37690 af 54284 | 27 af 2586 |
-| et gentaget ord læst en anelse forkert | 0,30 % | 0,30 % | 0,30 % | 0,31 % | 0,31 % | 3,54 % | 56591 af 54284 | 5 af 2586 |
+| facit mod sig selv | 0,01 % | 0,01 % | 0,01 % | 0,00 % | 0,00 % | 0,00 % | 56591 af 54284 | 3 af 2586 |
+| alle ø skrevet som ö | 0,76 % | 0,76 % | 0,01 % | 0,79 % | 0,79 % | 0,80 % | 56591 af 54284 | 3 af 2586 |
+| alt med små bogstaver | 5,36 % | 0,02 % | 5,36 % | 5,65 % | 0,00 % | 0,01 % | 56591 af 54284 | 3 af 2586 |
+| al tegnsætning fjernet | 5,16 % | 5,16 % | 5,16 % | 0,00 % | 0,00 % | 0,00 % | 53331 af 54284 | 3 af 2586 |
+| hele siden som ét afsnit | 0,58 % | 0,58 % | 0,58 % | 0,30 % | 0,30 % | 0,28 % | 56591 af 54284 | 0 af 2586 |
+| hvert linjebrud flyttet ét ord | 0,52 % | 0,52 % | 0,52 % | 0,27 % | 0,27 % | 0,25 % | 56591 af 54284 | 21 af 2586 |
+| et opdigtet afsnit tilføjet | 8,75 % | 8,74 % | 8,75 % | 9,03 % | 9,02 % | 9,64 % | 61547 af 54284 | 3 af 2586 |
+| 2 % af bogstaverne byttet | 1,50 % | 1,50 % | 1,50 % | 1,58 % | 1,58 % | 1,55 % | 56591 af 54284 | 3 af 2586 |
+| 10 % af bogstaverne byttet | 7,55 % | 7,55 % | 7,55 % | 7,97 % | 7,97 % | 7,90 % | 56591 af 54284 | 5 af 2586 |
+| den midterste tredjedel sprunget over | 32,73 % | 32,69 % | 32,73 % | 32,70 % | 32,65 % | 31,12 % | 37690 af 54284 | 27 af 2586 |
+| et gentaget ord læst en anelse forkert | 0,30 % | 0,30 % | 0,30 % | 0,31 % | 0,31 % | 0,33 % | 56591 af 54284 | 5 af 2586 |
 
 Kolonnen **arbejdstal, strengt** er den samme måling med linjer, der
 rummer et `[?]`, helt ude (beslutning 44). Her i selvtesten forvanskes

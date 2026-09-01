@@ -98,14 +98,14 @@ findes ikke længere nogen steder i rapporten.
 
 | Variant | Tegnfejl (CER) | Ordfejl (WER) | Tegnafstand | Facit-tegn |
 |---|---:|---:|---:|---:|
-| `raa` | 12,74 % | 27,33 % | 7238 | 56827 |
-| `uden_versaler` | 12,74 % | 27,33 % | 7237 | 56827 |
-| `uden_diakritika` | 12,74 % | 27,33 % | 7238 | 56827 |
-| `uden_tegnsaetning` | 12,52 % | 27,12 % | 6743 | 53863 |
-| `arbejdstal` | 12,52 % | 27,12 % | 6742 | 53863 |
-| `lempeligst` | 12,52 % | 27,12 % | 6742 | 53863 |
+| `raa` | 8,72 % | 23,55 % | 4953 | 56827 |
+| `uden_versaler` | 8,71 % | 23,55 % | 4952 | 56827 |
+| `uden_diakritika` | 8,72 % | 23,55 % | 4953 | 56827 |
+| `uden_tegnsaetning` | 8,90 % | 23,55 % | 4792 | 53863 |
+| `arbejdstal` | 8,89 % | 23,55 % | 4790 | 53863 |
+| `lempeligst` | 8,89 % | 23,55 % | 4790 | 53863 |
 
-**Sammenlign de to.** Hovedtallet er 8,73 %, den strenge er 12,52 % (`arbejdstal`) — en forskel på 3,79 %.
+**Sammenlign de to.** Hovedtallet er 8,73 %, den strenge er 8,89 % (`arbejdstal`) — en forskel på 0,17 %.
 
 **Er den strenge lavere**, er de svære linjer sværere end resten af
 teksten — det ventede. Hovedtallet kan bruges, som det står, fordi det
