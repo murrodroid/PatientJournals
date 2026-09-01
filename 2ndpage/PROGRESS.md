@@ -21,6 +21,7 @@ Videre til næste stage kun efter menneskelig gennemgang.
 - [2026-08-30 aften](diary/2026-08-30-aften.md) — **De første modelkald i projektet**: 8 sider, to modeller, 8-9 % tegnfejl; måleapparatet koblet på en kørsel
 - [2026-08-30 research](diary/2026-08-30-research.md) — Research på prompts; wordpicking-forsøget bygget i seks varianter; vores skema havde tabt kollegaens feltbeskrivelser; to kørsler hang og fik en frist
 - [2026-08-30 forsøg](diary/2026-08-30-forsoeg.md) — **Wordpicking-forsøgets resultat**: baseline vandt, alle fire varianter tabte; ren tekst er ti gange langsommere pr. side
+- [2026-09-01 20:19](diary/2026-09-01-snit.md) — Falssnittet lagt gennem folden i stedet for ved dens begyndelse; lead dømte alle 317 sider; naboblad-research: fire idéer afprøvet og døde
 
 ## Fase 0 — Kortlægning og plan (afsluttet 2026-08-18)
 
@@ -482,3 +483,46 @@ sider i begge formater, når der først findes rigtige modelsvar at måle på.
 - [ ] Forslag til sideudvælgelse via `patient_page_counter` frem for `_fp`
 - [ ] Afklar dashboard-status og om `textpage` allerede er afprøvet
 - [ ] Efterprøvning: vores tal mod hans app på samme sider
+
+## ✅ Eksperimentlog (2026-09-01) — nabobladet i yderkanten (stage 04)
+
+**Spørgsmål:** Kan et naboblad, der bliver stående inden for yderkant-snittet,
+findes automatisk — uden at ødelægge de sider, der i dag er i orden?
+
+**Metode:** Lead bedømte alle 317 leverede sider i
+`output/nabo_blad_gennemsyn/gennemsyn.html`: 313 i orden, 1 alvorligt naboblad
+(`273104_001640`), 3 lette (`273105_001553`, `273108_001603`, `273100_001273`).
+Facit i `output/snit_domme.csv`. Seks idéer holdt op mod to tal: rammer den de
+fire, og hvad koster den på de 313. Alle forsøg kørt på alle 317 sider.
+
+**Resultater:**
+
+| Idé | Rammer de fire | Pris på de 313 |
+|---|---|---|
+| Svag kant + krav om lige-hed (MIN_FALD 1,5 / MIN_STOETTE 14 / SOEM_GULV 3,0) | ja, 40-125 px | **99 sider flytter >25 px; 97 af dem har blæk i det, der fjernes — op til 374 rækker** |
+| Bredden mod bindets median | nej — de fire ligger på +57, +44, +17, +15 px | mange gode sider ligger på +60 til +108 |
+| Bæltet uden for snittet (forsøg B fra 2026-08-29) | kan ikke måles | nabobladet ligger *inden for* snittet, så der er intet bælte |
+| Skriftens takt, som udpegning | 0,914-0,938 | de 313: median 0,930, max 0,947 — ingen adskillelse |
+| Skriftens takt, som dom over den svage kant | **kan ikke svare på 3 af 4** | 216 af 317 sider har for lidt blæk; den fjerde giver 0,063 mod 13 gode sider over 0,10 |
+| Farve, kornethed | ikke kørt | — |
+
+**Fortolkning:** Der er ikke fundet en brugbar løsning, og leads egen formodning
+fra starten holdt. Problemet er desuden mindre end antaget: **én alvorlig side ud
+af 317**. Den eneste idé, der ramte alle fire, ville barbere håndskrift af 97
+gode sider — en handel, der ikke kan laves for at redde fire. Skriftens takt var
+den eneste idé, der ikke byggede på lys, og den strandede på, at der står for
+lidt skrift ude ved yderkanten til, at en rytme kan måles.
+
+To fælder er værd at huske. `MIN_FALD`, `MIN_STOETTE` og `SOEM_GULV` er
+standardværdier i signaturerne og bindes ved indlæsning; et forsøg, der sætter
+modulets konstanter om, måler nul på alle 317 sider og ser ud som om intet
+ændrede sig. Og et mål for "er der skrift her" fangede i første udgave den mørke
+baggrund, som giver et perfekt-udseende udslag på enhver side — fjerde gang i
+dette projekt et blæk-mål strander på præcis det.
+
+**Næste spørgsmål:** Gør nabobladet overhovedet skade? Prompten beder allerede
+modellen se bort fra alt uden for siden. Ét modelkald på `273104_001640` afgør
+det. Er svaret nej, er der ingen fejl at rette — kun én side, lead har set.
+
+Detaljer: `stages/04_billedforberedelse/output/nabo_forsoeg1.csv`,
+`nabo_forsoeg2.csv`, `nabo_forsoeg3.csv`, `nabo_takt.csv`
