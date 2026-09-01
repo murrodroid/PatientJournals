@@ -17,7 +17,8 @@ ikke bestaas af et lodret snit, uanset hvor det laegges.
 import pytest
 from PIL import Image
 
-from andenside.skraa import baandkanter, beskaer_langs_fals, fals_graense
+from andenside.skraa import (GANG_SPRED, baandkanter, beskaer_langs_fals,
+                             fals_graense)
 from andenside.masterlist import Side
 
 HVID = 255
@@ -307,9 +308,14 @@ def test_en_side_med_uenige_baand_maerkes_usikker():
     # ellers udglattes den til ingenting, og hvert baand melder blot 'intet
     # fund'. Proeven skal ramme det tilfaelde, hvor ALLE baand finder noget,
     # og de bare ikke er enige.
-    for blok in range(0, hoejde, 120):
+    #
+    # ÉN blok pr. baand, ikke én pr. ti: med ti brede blokke laa der tilfaeldigt
+    # tolv baand naesten paa linje (afvigelse 24 mod en tolerance paa 25), og
+    # proeven bestod paa det haeld frem for paa sin egen praemis. Det kom frem
+    # 2026-09-01, da et andet skridt flyttede kanterne 40 px og haeldet vendte.
+    for blok in range(0, hoejde, 50):
         x0 = rng.randrange(620, 900)
-        for y in range(blok, min(blok + 120, hoejde)):
+        for y in range(blok, min(blok + 50, hoejde)):
             for dx in range(40):
                 px[x0 + dx, y] = SORT
     _, maaling = beskaer_langs_fals(img, _side(1))
@@ -320,7 +326,7 @@ def test_en_side_med_uenige_baand_maerkes_usikker():
 
 def _fals_med_krumning(
     bredde: int = 1000, hoejde: int = 1200, krumning_start: int = 800,
-    krumning: int = 45, kerne: int = 25,
+    krumning: int = 15, kerne: int = 10,
 ) -> Image.Image:
     """Falsen som den faktisk ser ud: en BRED moerkning, ikke en skarp streg.
 
@@ -333,6 +339,11 @@ def _fals_med_krumning(
 
     Graatonen 120 ligger under `_profil_i_baand`s taerskel paa 180 og taeller
     altsaa som moerk -- praecis som paa de rigtige sider.
+
+    Baeltet er 40 px paa en side paa 1000, altsaa 4 % af bredden. Det er med
+    vilje: paa de rigtige sider er det 1,5-4,2 %, og loftet i
+    `skraa.FOLD_LOFT_ANDEL` er 6 %. Et bredere baelte i proeven ville ligge
+    over loftet og dermed maale loftet i stedet for reglen.
     """
     img = Image.new("L", (bredde, hoejde), HVID)
     px = img.load()
@@ -371,10 +382,10 @@ def test_naboens_tekst_kommer_stadig_ikke_med_naar_der_skaeres_gennem_folden():
     """Prisen for at gaa gennem folden maa ikke vaere naboens skrift.
 
     Naboens egen tekst staar paa hans flade del, uden for hans krumning.
-    Folden slutter her ved 800+45+25+45 = 915.
+    Folden slutter her ved 800+15+10+15 = 840.
     """
     img = _fals_med_krumning()
-    _saet_markoer(img, 950, 40)
+    _saet_markoer(img, 880, 40)
     beskaaret, _ = beskaer_langs_fals(img, _side(1))
     assert not _markoer_findes(beskaaret, 950, 40), "naboens tekst kom med"
 
@@ -396,3 +407,70 @@ def test_snittet_loeber_ikke_loebsk_naar_moerket_aldrig_slutter():
     assert max(graense) < 900, (
         f"snittet vandrede ud i det moerke: {min(graense)}-{max(graense)}"
     )
+
+
+def test_en_blød_overgang_stopper_ikke_gangen_gennem_folden():
+    """Moerkningen begynder blødt -- gangen skal stadig naa igennem.
+
+    Springet findes dér, hvor moerkningen BEGYNDER, og dér er kolonnen kun
+    fx 20 % moerk. Et krav om, at NAESTE kolonne allerede er over halvt
+    moerk, ville stoppe gangen med det samme. Set paa 273109_000082, hvor
+    syv af 24 baand derfor slet ikke rykkede sig, mens resten gik 45-85 px.
+    """
+    bredde, hoejde = 1000, 1200
+    img = Image.new("L", (bredde, hoejde), HVID)
+    px = img.load()
+    for y in range(hoejde):
+        for x in range(800, 820):        # bloed rampe: hvid -> sort over 20 px
+            px[x, y] = int(HVID * (1 - (x - 800) / 20))
+        for x in range(820, 840):
+            px[x, y] = SORT
+        for x in range(840, 860):        # naboens krumning, spejlvendt rampe
+            px[x, y] = int(HVID * (x - 840) / 20)
+    graense = fals_graense(img, _side(1), buffer_andel=0.0)
+    assert graense
+    assert min(graense) > 845, (
+        f"gangen stoppede i rampen i stedet for at naa gennem folden: "
+        f"{min(graense)}-{max(graense)}"
+    )
+
+
+def test_et_moerkt_hjoerne_forneden_giver_ikke_snittet_en_hale():
+    """Foldens bredde aendrer sig jaevnt -- et enkelt baand maa ikke stikke af.
+
+    Forneden paa mange sider gaar folden i ét med affotograferingens skygge,
+    saa moerkningen aldrig slipper, og gangen loeber videre. Lead saa det som
+    en 'hale' paa snittet i bunden af 273102_001066, _001074 og 273024_001127,
+    hvor de nederste baand gik 100-121 px mod 60-75 px paa resten af siden.
+    """
+    img = _fals_med_krumning()                        # baelte: 800-840
+    px = img.load()
+    for y in range(1100, 1200):          # moerkt baand tvaers over bunden
+        for x in range(800, 1000):
+            px[x, y] = SORT
+    graense = fals_graense(img, _side(1), buffer_andel=0.0)
+    spredning = max(graense) - min(graense)
+    # Grænsen er den samme, koden selv tillader: foldens bredde SKAL kunne
+    # variere lidt ned gennem siden. Tallet er maalt, ikke valgt -- se
+    # `skraa.GANG_SPRED`. Halen, lead saa, var 40-60 px.
+    assert spredning <= GANG_SPRED, (
+        f"snittet fik en hale forneden: {min(graense)}-{max(graense)}"
+    )
+
+
+def test_en_side_hvor_folden_aldrig_slipper_maerkes_usikker():
+    """Kan foldens anden side ikke findes, er loftet et gaet -- sig det.
+
+    Paa fire sider (fx 273035_000244 med 17 af 24 baand paa loftet) gaar
+    folden i ét med en moerk baggrund hele siden ned. Der er intet at gaa
+    efter, og snittet endte langt inde paa naboen. Saa skaeres der som foer,
+    og siden maerkes i stedet.
+    """
+    bredde, hoejde = 1000, 1200
+    img = Image.new("L", (bredde, hoejde), HVID)
+    px = img.load()
+    for y in range(hoejde):
+        for x in range(800, bredde):
+            px[x, y] = SORT
+    _, maaling = beskaer_langs_fals(img, _side(1))
+    assert not maaling.sikker, "en side uden en findbar foldkant blev kaldt sikker"

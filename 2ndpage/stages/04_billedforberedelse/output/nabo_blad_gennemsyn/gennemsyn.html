@@ -26,6 +26,7 @@
   button.falsl { background: #46351a; border-color: #863; }
   #dom { padding: 2px 8px; border-radius: 4px; }
   .hjaelp { color: #999; font-size: 13px; max-width: 74ch; }
+  .hjaelp a { color: #7fb3e8; }
 </style>
 </head>
 <body>
@@ -48,6 +49,7 @@
     <button class="falsl" onclick="doem('fals_let')">5 &nbsp;Falsen ind, uden betydning</button>
     <button onclick="spring(-1)">← &nbsp;Tilbage</button>
   </div>
+  <p class="hjaelp" id="genveje"></p>
   <p class="hjaelp">
     <b>Blåt</b> = fjernet af yderkant-snittet (nabobladet). <b>Rødt</b> = fjernet af
     falssnittet. To ting at se efter: står der fremmed håndskrift tilbage i det
@@ -149,6 +151,21 @@ addEventListener("keydown", e => {
   else if (e.key in TASTER) doem(TASTER[e.key]);
   else if (e.key === "ArrowLeft") spring(-1);
 });
+
+// Genveje til de sider, falsrettelsen handler om, saa de ikke skal findes
+// ved at bladre gennem 317.
+const LOFT = ["273035_000244", "273025_000112", "273109_000083",
+              "273024_001127", "273048_000102"];
+function gaaTil(navn) {
+  const n = KOE.findIndex(p => p.billede === navn);
+  if (n >= 0) { i = n; vis(); }
+}
+document.getElementById("genveje").innerHTML =
+  "<b>Falsrettelsen — dine tolv:</b> " +
+  Object.keys(FORHAAND).map(n =>
+    '<a href="#" onclick="gaaTil(\'' + n + '\');return false">' + n + "</a>").join(" · ") +
+  '<br><b>Snittet ligger på loftet:</b> ' +
+  LOFT.map(n => '<a href="#" onclick="gaaTil(\'' + n + '\');return false">' + n + "</a>").join(" · ");
 
 i = Math.max(0, KOE.findIndex(p => !(p.billede in domme)));
 if (i < 0) i = 0;

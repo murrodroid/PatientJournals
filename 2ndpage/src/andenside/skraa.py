@@ -35,18 +35,25 @@ ANTAL_BAAND = 24       # antal maalepunkter ned gennem siden
 OVERLAP = 2.5          # hvert vindues hoejde, malt i skridt mellem punkterne
 MARGEN = 0.03          # top og bund udelades -- affotograferingens skygge
 LINJE_TOLERANCE = 25   # px et baand maa afvige fra flertallets rette linje
-FOLD_TAERSKEL = 0.5    # en kolonne regnes med til folden, saa laenge saa stor
-# en del af dens pixels er moerke. Profilen er andelen af pixels under 180,
-# og inde i baeltet staar den paa 0,93-1,00 paa de rigtige sider, mens den
-# uden for ligger paa 0,00-0,20. Halvdelen ligger midt i det tomrum.
-FOLD_LOFT_ANDEL = 0.06  # hvor langt ud gennem moerkningen der hoejst gaas.
-# Maalt paa leveringen er baeltet 20-77 px bredt, altsaa 1,5-4,2 % af sidens
-# bredde. Loftet er sat over det hoejeste maalte, ikke efter smag -- og det
-# er der kun for de sider, hvor folden gaar i ét med en moerk baggrund.
 # 25, ikke mindre: maalt paa leveringens 307 sider afviger falsen 5 px fra
 # en ret linje i median og 11 px ved 90-percentilen. En tolerance paa 25
 # rummer altsaa al virkelig krumning med god margen. De sider, lead kaldte
 # gaaet galt, afveg 245-412 px -- ti gange for meget til at vaere en fals.
+FOLD_TAERSKEL = 0.5    # en kolonne regnes med til folden, saa laenge saa stor
+# en del af dens pixels er moerke. Profilen er andelen af pixels under 180,
+# og inde i baeltet staar den paa 0,93-1,00 paa de rigtige sider, mens den
+# uden for ligger paa 0,00-0,20. Halvdelen ligger midt i det tomrum.
+GANG_SPRED = 15        # px et baand maa gaa laengere end sidens flertal
+# Foldens bredde aendrer sig jaevnt ned gennem siden. Maalt paa de 311 sider,
+# hvor mindst seks baand naaede gennem folden: 90-percentil-baandet gaar 6 px
+# laengere end sidens median (median over sider), 14 px paa den 10 % daarligste
+# side. 15 daekker altsaa den virkelige variation. Det laengst gaaende baand
+# paa en side gaar til gengaeld 77 px laengere -- og dét er halen forneden,
+# hvor folden gaar i ét med affotograferingens skygge.
+FOLD_LOFT_ANDEL = 0.06  # hvor langt ud gennem moerkningen der hoejst gaas.
+# Maalt paa leveringen er baeltet 20-77 px bredt, altsaa 1,5-4,2 % af sidens
+# bredde. Loftet er sat over det hoejeste maalte, ikke efter smag -- og det
+# er der kun for de sider, hvor folden gaar i ét med en moerk baggrund.
 MIND_ENIGE = 8         # saa mange baand skal blive tilbage, ellers er siden usikker
 BUFFER_ANDEL = 0.005   # flyttes VAEK fra vores egen tekst, ind mod falsen
 # 0,5 %, valgt af lead 2026-08-30 efter at have set samme sider ved 2,0 %,
@@ -81,6 +88,7 @@ class SkraaBeskaering:
     baand_i_alt: int
 
     afvigelse_px: int = 0   # stoerste afstand fra et baand til den rette fals
+    fold_fundet: bool = True  # slap moerkningen, saa foldens anden side kunne ses?
 
     @property
     def sikker(self) -> bool:
@@ -91,7 +99,8 @@ class SkraaBeskaering:
         # rette linje.
         return (self.baand_med_kant * 2 >= self.baand_i_alt
                 and self.baand_med_kant >= MIND_ENIGE
-                and self.afvigelse_px <= LINJE_TOLERANCE)
+                and self.afvigelse_px <= LINJE_TOLERANCE
+                and self.fold_fundet)
 
 
 def _graatoner(img: Image.Image) -> "np.ndarray":
@@ -108,7 +117,7 @@ def _profil_i_baand(graa: "np.ndarray", y0: int, y1: int, *, step: int = 3,
     return smooth((graa[y0:y1:step, :] < taerskel).mean(axis=0).tolist())
 
 
-def _ud_gennem_folden(profil: list[float], x: int, vindue, loft: int) -> int:
+def _ud_gennem_folden(profil: list[float], x: int, vindue, loft: int) -> tuple[int, bool]:
     """Fra moerkningens BEGYNDELSE og ud til dens anden side.
 
     Falsen er ikke en streg, men et baelte: papiret krummer ind mod folden og
@@ -122,21 +131,36 @@ def _ud_gennem_folden(profil: list[float], x: int, vindue, loft: int) -> int:
     bliver staaende -- stoej, prompten allerede beder modellen se bort fra.
     Den modsatte fejl er en manglende stavelse i transskriptionen.
 
+    Gangen skal FOERST ind i baeltet og saa ud af det igen. Springet ligger
+    dér, hvor moerkningen begynder, og dér er kolonnen maaske kun 20 % moerk;
+    et krav om, at naeste kolonne allerede er over halvt moerk, ville stoppe
+    gangen med det samme. Maalt paa 273109_000082 gjorde det netop det for
+    syv af 24 baand, mens resten gik 45-85 px.
+
     `loft` er der, fordi baeltet paa nogle sider gaar i ét med en moerk
-    baggrund. Uden det ville snittet vandre til billedkanten.
+    baggrund. Uden det ville snittet vandre til billedkanten. Returnerer
+    ogsaa, OM baeltet slap inden loftet: gjorde det ikke, er tallet et gaet,
+    og det skal kaldet ovenover kunne se.
     """
     udad = 1 if vindue.retning == "fra_hoejre" else -1
-    sidste = x
+    inde, sidste, slap = False, x, False
     for skridt in range(1, loft + 1):
         naeste = x + udad * skridt
-        if not (0 <= naeste < len(profil)) or profil[naeste] < FOLD_TAERSKEL:
+        if not (0 <= naeste < len(profil)):
             break
-        sidste = naeste
-    return sidste
+        if profil[naeste] >= FOLD_TAERSKEL:
+            inde, sidste = True, naeste
+        elif inde:
+            slap = True
+            break
+    return (sidste, slap) if inde else (x, True)
 
 
-def _kant_i_profil(profil: list[float], vindue, *, loft: int) -> int | None:
-    """Falsens fjerne kant: stoerste spring opad, og saa ud gennem moerkningen."""
+def _kant_i_profil(profil: list[float], vindue) -> int | None:
+    """Hvor moerkningen BEGYNDER: stoerste spring opad langs soegeretningen.
+
+    Det er ikke der, der skal skaeres -- se `_ud_gennem_folden`.
+    """
     if vindue.retning == "fra_hoejre":
         raek = range(vindue.start + 1, vindue.slut)
         forrige = -1
@@ -148,15 +172,21 @@ def _kant_i_profil(profil: list[float], vindue, *, loft: int) -> int | None:
         spring = profil[x] - profil[x + forrige]
         if spring > bedste:
             bedste, bedste_x = spring, x
-    if bedste_x is None or bedste < MIN_STIGNING:
-        return None
-    return _ud_gennem_folden(profil, bedste_x, vindue, loft)
+    return bedste_x if bedste >= MIN_STIGNING else None
 
 
 def baandkanter(
     img: Image.Image, side: Side, *, antal: int = ANTAL_BAAND,
     overlap: float = OVERLAP,
 ) -> list[tuple[int, int | None]]:
+    """Falsens kant pr. baand. Se `_baandkanter_og_fold` for det hele."""
+    return _baandkanter_og_fold(img, side, antal=antal, overlap=overlap)[0]
+
+
+def _baandkanter_og_fold(
+    img: Image.Image, side: Side, *, antal: int = ANTAL_BAAND,
+    overlap: float = OVERLAP,
+) -> tuple[list[tuple[int, int | None]], bool]:
     """Falsens kant maalt i et GLIDENDE vindue ned gennem siden.
 
     Returnerer `(vinduets midte i y, kantens x)`. `None` betyder, at vinduet
@@ -175,17 +205,54 @@ def baandkanter(
     skridt = max(1, (y1 - y0) // antal)
     halv = max(1, int(skridt * overlap / 2))
 
-    ud = []
+    loft = int(img.width * FOLD_LOFT_ANDEL)
+    udad = 1 if vindue.retning == "fra_hoejre" else -1
+
+    # Foerst hvert baand for sig: hvor moerkningen begynder, og hvor langt
+    # der er ud gennem den.
+    start: list[tuple[int, int | None]] = []
+    gang: list[int | None] = []
+    slap: list[bool] = []
     for i in range(antal):
         midte = y0 + skridt * i + skridt // 2
         ya = max(y0, midte - halv)
         yb = min(y1, midte + halv)
         if yb - ya < 2:
-            ud.append((midte, None))
+            start.append((midte, None)); gang.append(None); slap.append(True)
             continue
-        ud.append((midte, _kant_i_profil(_profil_i_baand(graa, ya, yb), vindue,
-                                         loft=int(img.width * FOLD_LOFT_ANDEL))))
-    return ud
+        profil = _profil_i_baand(graa, ya, yb)
+        x = _kant_i_profil(profil, vindue)
+        if x is None:
+            start.append((midte, None)); gang.append(None); slap.append(True)
+            continue
+        ydre, kom_ud = _ud_gennem_folden(profil, x, vindue, loft)
+        start.append((midte, x))
+        gang.append(abs(ydre - x))
+        slap.append(kom_ud)
+
+    # Derefter hele siden under ét. Foldens BREDDE er en fysisk ting, der
+    # aendrer sig jaevnt ned gennem siden -- akkurat som dens placering. Et
+    # baand, der gaar dobbelt saa langt som flertallet, har ikke fundet
+    # foldens anden side, men er loebet videre ud i affotograferingens
+    # skygge forneden. Uden det faar snittet en hale i bunden (set paa
+    # 273102_001066, _001074 og 273024_001127).
+    fundne = [g for g in gang if g is not None]
+    if not fundne:
+        return start, True
+
+    # Slap moerkningen aldrig for flertallet af baandene, gaar folden i ét
+    # med noget andet moerkt hele siden ned. Saa er loftet et gaet, ikke en
+    # maaling -- og et gaet skal ikke skaeres efter. Der skaeres som foer,
+    # og siden maerkes usikker i stedet. Set paa fire sider, vaerst
+    # 273035_000244 med 17 af 24 baand paa loftet.
+    med_kant = [i for i, g in enumerate(gang) if g is not None]
+    if sum(1 for i in med_kant if slap[i]) * 2 < len(med_kant):
+        return start, False
+
+    midt = int(np.median(fundne))
+    return [(y, x if x is None or g is None
+             else x + udad * min(g, midt + GANG_SPRED))
+            for (y, x), g in zip(start, gang)], True
 
 
 def fjern_udskridende(
@@ -277,7 +344,7 @@ def beskaer_langs_fals(
     # Baandkanterne beregnes ÉN gang og genbruges. Tidligere kaldte denne
     # funktion baade baandkanter og fals_graense, og sidstnaevnte beregnede
     # dem forfra -- altsaa tre gange det samme arbejde pr. side.
-    kanter = baandkanter(img, side, antal=antal)
+    kanter, fold_fundet = _baandkanter_og_fold(img, side, antal=antal)
     kanter, afvigelse = fjern_udskridende(kanter)
     med_kant = sum(1 for _, x in kanter if x is not None)
     graense = fals_graense(img, side, antal=antal, buffer_andel=buffer_andel,
@@ -288,7 +355,7 @@ def beskaer_langs_fals(
             billede=side.image_name, recto_verso=side.recto_verso,
             bredde_foer=img.width, bredde_efter=img.width,
             haeldning_px=0, baand_med_kant=0, baand_i_alt=len(kanter),
-            afvigelse_px=afvigelse,
+            afvigelse_px=afvigelse, fold_fundet=fold_fundet,
         )
         return img.copy(), maaling
 
@@ -322,5 +389,6 @@ def beskaer_langs_fals(
         haeldning_px=(max(fundne) - min(fundne)) if fundne else 0,
         baand_med_kant=med_kant,
         baand_i_alt=len(kanter),
+        fold_fundet=fold_fundet,
     )
     return beskaaret, maaling
