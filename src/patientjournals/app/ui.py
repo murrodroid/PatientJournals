@@ -10,7 +10,11 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
 from patientjournals.app.access import run_access_checks
-from patientjournals.app.catalog import list_google_model_options, list_schema_options
+from patientjournals.app.catalog import (
+    list_batch_model_options,
+    list_google_model_options,
+    list_schema_options,
+)
 from patientjournals.app.dashboard import (
     dashboard_summary_json,
     find_dataset_files,
@@ -34,7 +38,6 @@ from patientjournals.app.jobs import (
     find_dataset_near,
     recover_dataset_gaps,
     list_batch_chunks,
-    list_batch_chunks_with_state,
     list_submit_jobs,
     local_image_names,
     poll_local_batch_states,
@@ -43,7 +46,6 @@ from patientjournals.app.jobs import (
     repair_all_missing_recorded_results,
     repair_retry_metadata_links,
     resubmit_failed_requests,
-    resolve_batch_run_readiness,
     reusable_recorded_results,
     run_batch_draft_direct,
     run_batch_rerun_direct,
@@ -53,11 +55,13 @@ from patientjournals.app.jobs import (
 )
 from patientjournals.app.models import (
     AppSettings,
+    BatchChunkSummary,
     DatasetLibraryItem,
     SubmitJobDraft,
     app_settings_path,
 )
 from patientjournals.app.settings_store import load_app_settings, save_app_settings
+from patientjournals.app.workflows import WorkflowService
 from patientjournals.config import config
 from patientjournals.shared.local_secrets import local_secrets_path, save_local_api_key
 
@@ -67,6 +71,88 @@ ACCENT = "#00B2CA"
 INK = "#1E1E24"
 MUTED_BG = "#F4F8F9"
 SOFT_BORDER = "#D7E5E8"
+
+VERIFICATION_THINKING_LEVELS = ("low", "medium", "high")
+VERIFICATION_SCOPE_LABELS = {
+    "flagged": "Risk-routed + control sample",
+    "all": "All pages",
+}
+
+
+def _verification_thinking_index(level: object) -> int:
+    normalized = str(level or "high").strip().lower()
+    try:
+        return VERIFICATION_THINKING_LEVELS.index(normalized)
+    except ValueError:
+        return len(VERIFICATION_THINKING_LEVELS) - 1
+
+
+def _verification_thinking_level(index: object) -> str:
+    try:
+        resolved = int(float(str(index)))
+    except (TypeError, ValueError):
+        resolved = len(VERIFICATION_THINKING_LEVELS) - 1
+    resolved = max(0, min(len(VERIFICATION_THINKING_LEVELS) - 1, resolved))
+    return VERIFICATION_THINKING_LEVELS[resolved]
+
+
+def _verification_scope_label(scope: object) -> str:
+    return VERIFICATION_SCOPE_LABELS.get(
+        str(scope or "flagged"), VERIFICATION_SCOPE_LABELS["flagged"]
+    )
+
+
+def _verification_scope_value(label: object) -> str:
+    normalized = str(label or "").strip()
+    for value, display in VERIFICATION_SCOPE_LABELS.items():
+        if normalized in {value, display}:
+            return value
+    return "flagged"
+
+
+def _verification_thinking_slider(
+    parent: tk.Misc,
+    variable: tk.IntVar,
+) -> ttk.Frame:
+    """Build a discrete low/medium/maximum verifier-effort control."""
+    frame = ttk.Frame(parent, style="App.TFrame")
+    frame.columnconfigure(0, weight=1)
+    selected_label = tk.StringVar()
+
+    def update_label(*_args) -> None:
+        level = _verification_thinking_level(variable.get())
+        selected_label.set(
+            "Maximum (high, default)" if level == "high" else level.title()
+        )
+
+    tk.Scale(
+        frame,
+        from_=0,
+        to=2,
+        resolution=1,
+        orient="horizontal",
+        showvalue=False,
+        variable=variable,
+        command=lambda _value: update_label(),
+        bg=BG,
+        fg=INK,
+        troughcolor=MUTED_BG,
+        activebackground=ACCENT,
+        highlightthickness=0,
+        borderwidth=0,
+        sliderlength=20,
+    ).grid(row=0, column=0, columnspan=3, sticky="ew")
+    ttk.Label(frame, text="Low", style="Muted.TLabel").grid(row=1, column=0, sticky="w")
+    ttk.Label(frame, text="Medium", style="Muted.TLabel").grid(row=1, column=1)
+    ttk.Label(frame, text="Maximum (default)", style="Muted.TLabel").grid(
+        row=1, column=2, sticky="e"
+    )
+    ttk.Label(frame, textvariable=selected_label, style="App.TLabel").grid(
+        row=2, column=0, columnspan=3, sticky="w", pady=(3, 0)
+    )
+    variable.trace_add("write", update_label)
+    update_label()
+    return frame
 
 
 def _truncate_cell(value: object, limit: int = 60) -> str:
@@ -134,6 +220,7 @@ class PatientJournalsApp:
         self.registry = JobRegistry()
         self.schema_options = list_schema_options()
         self.model_options = list_google_model_options()
+        self.validation_model_options = list_batch_model_options()
         self.nav_items: dict[str, tk.Label] = {}
         self._live_batch_status: dict[str, str] = {}
         self._jobs_refresh_after_id = None
@@ -285,7 +372,9 @@ class PatientJournalsApp:
             font=("Helvetica", 11, "bold"),
             padding=8,
         )
-        style.map("Treeview", background=[("selected", ACCENT)], foreground=[("selected", BG)])
+        style.map(
+            "Treeview", background=[("selected", ACCENT)], foreground=[("selected", BG)]
+        )
         style.configure("TProgressbar", troughcolor=MUTED_BG, background=ACCENT)
         style.configure(
             "Vertical.TScrollbar",
@@ -330,12 +419,22 @@ class PatientJournalsApp:
                 font=("Helvetica", 13, "bold"),
                 cursor="hand2",
             )
-            button.bind("<Button-1>", lambda _event, nav_key=key, action=command: self._navigate(nav_key, action))
+            button.bind(
+                "<Button-1>",
+                lambda _event, nav_key=key, action=command: self._navigate(
+                    nav_key, action
+                ),
+            )
             button.bind(
                 "<Enter>",
                 lambda _event, item=button: item.configure(bg="#2B2B33", fg=BG),
             )
-            button.bind("<Leave>", lambda _event, nav_key=key, item=button: self._style_nav_item(nav_key, item))
+            button.bind(
+                "<Leave>",
+                lambda _event, nav_key=key, item=button: self._style_nav_item(
+                    nav_key, item
+                ),
+            )
             button.pack(fill="x", pady=3)
             self.nav_items[key] = button
 
@@ -388,7 +487,9 @@ class PatientJournalsApp:
         return label
 
     def _grid_help(self, parent: tk.Misc, row: int, column: int, text: str) -> None:
-        self._help_icon(parent, text).grid(row=row, column=column, padx=(8, 0), sticky="w")
+        self._help_icon(parent, text).grid(
+            row=row, column=column, padx=(8, 0), sticky="w"
+        )
 
     def _gemini_key_is_configured(self) -> bool:
         try:
@@ -415,7 +516,9 @@ class PatientJournalsApp:
             return False
         value = value.strip()
         if not value:
-            messagebox.showerror("Missing API key", "The Gemini API key cannot be empty.")
+            messagebox.showerror(
+                "Missing API key", "The Gemini API key cannot be empty."
+            )
             return False
         path = self._store_gemini_api_key(value)
         messagebox.showinfo(
@@ -429,22 +532,32 @@ class PatientJournalsApp:
             return True
         return self._prompt_for_gemini_api_key(reason=reason)
 
-    def _field(self, parent: ttk.Frame, label: str, variable: tk.StringVar, row: int) -> ttk.Entry:
-        ttk.Label(parent, text=label, style="App.TLabel").grid(row=row, column=0, sticky="w", pady=8)
+    def _field(
+        self, parent: ttk.Frame, label: str, variable: tk.StringVar, row: int
+    ) -> ttk.Entry:
+        ttk.Label(parent, text=label, style="App.TLabel").grid(
+            row=row, column=0, sticky="w", pady=8
+        )
         entry = ttk.Entry(parent, textvariable=variable, width=64)
         entry.grid(row=row, column=1, sticky="ew", pady=8, padx=(14, 0))
         return entry
 
     def _section(self, parent: tk.Misc, title: str) -> ttk.LabelFrame:
-        frame = ttk.LabelFrame(parent, text=title, padding=(16, 14), style="Section.TLabelframe")
+        frame = ttk.LabelFrame(
+            parent, text=title, padding=(16, 14), style="Section.TLabelframe"
+        )
         frame.pack(fill="x", anchor="n", pady=(0, 14))
         return frame
 
-    def _advanced_section(self, parent: tk.Misc, title: str = "Advanced") -> tuple[ttk.Frame, tk.BooleanVar]:
+    def _advanced_section(
+        self, parent: tk.Misc, title: str = "Advanced"
+    ) -> tuple[ttk.Frame, tk.BooleanVar]:
         open_var = tk.BooleanVar(value=False)
         shell = ttk.Frame(parent, style="App.TFrame")
         shell.pack(fill="x", anchor="n", pady=(0, 14))
-        body = ttk.LabelFrame(shell, text=title, padding=(16, 14), style="Section.TLabelframe")
+        body = ttk.LabelFrame(
+            shell, text=title, padding=(16, 14), style="Section.TLabelframe"
+        )
 
         def toggle() -> None:
             if open_var.get():
@@ -460,7 +573,9 @@ class PatientJournalsApp:
         button.pack(anchor="w")
         return body, open_var
 
-    def _button(self, parent: tk.Misc, text: str, command, *, kind: str = "primary") -> tk.Button:
+    def _button(
+        self, parent: tk.Misc, text: str, command, *, kind: str = "primary"
+    ) -> tk.Button:
         primary = kind == "primary"
         return tk.Button(
             parent,
@@ -538,12 +653,18 @@ class PatientJournalsApp:
         if path:
             variable.set(path)
 
-    def _metric_row(self, parent: ttk.Frame, label: str, value: object, row: int) -> None:
+    def _metric_row(
+        self, parent: ttk.Frame, label: str, value: object, row: int
+    ) -> None:
         ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", pady=3)
-        ttk.Label(parent, text=str(value)).grid(row=row, column=1, sticky="w", pady=3, padx=(12, 0))
+        ttk.Label(parent, text=str(value)).grid(
+            row=row, column=1, sticky="w", pady=3, padx=(12, 0)
+        )
 
     def _bar_group(self, parent: ttk.Frame, title: str, counts: dict[str, int]) -> None:
-        frame = ttk.LabelFrame(parent, text=title, padding=(16, 12), style="Section.TLabelframe")
+        frame = ttk.LabelFrame(
+            parent, text=title, padding=(16, 12), style="Section.TLabelframe"
+        )
         frame.pack(fill="x", pady=(8, 0))
         if not counts:
             ttk.Label(frame, text="No data", style="App.TLabel").pack(anchor="w")
@@ -555,7 +676,9 @@ class PatientJournalsApp:
             ttk.Label(row, text=label, width=24, style="App.TLabel").pack(side="left")
             bar = ttk.Progressbar(row, maximum=max_count, value=count)
             bar.pack(side="left", fill="x", expand=True, padx=(8, 8))
-            ttk.Label(row, text=str(count), width=8, style="App.TLabel").pack(side="left")
+            ttk.Label(row, text=str(count), width=8, style="App.TLabel").pack(
+                side="left"
+            )
 
     def show_setup(self) -> None:
         self._clear_content()
@@ -721,9 +844,9 @@ class PatientJournalsApp:
 
         buttons = self._button_row(footer)
         self._button(buttons, "Run access check", run_checks).pack(side="left")
-        self._button(buttons, "Copy selected fix", copy_selected_fix, kind="secondary").pack(
-            side="left", padx=(10, 0)
-        )
+        self._button(
+            buttons, "Copy selected fix", copy_selected_fix, kind="secondary"
+        ).pack(side="left", padx=(10, 0))
         self._button(
             buttons,
             "Open Settings",
@@ -740,7 +863,9 @@ class PatientJournalsApp:
     def show_datasets(self) -> None:
         self._clear_content()
         self._heading("Datasets")
-        self._subheading("Browse extracted datasets from this machine and the shared bucket.")
+        self._subheading(
+            "Browse extracted datasets from this machine and the shared bucket."
+        )
 
         footer = ttk.Frame(self.content, style="App.TFrame")
         footer.pack(side="bottom", fill="x", pady=(8, 0))
@@ -931,7 +1056,9 @@ class PatientJournalsApp:
     def show_dashboard(self) -> None:
         self._clear_content()
         self._heading("Validation Dashboard")
-        self._subheading("Compare validation accuracy across datasets, runs, and schema setups.")
+        self._subheading(
+            "Compare validation accuracy across datasets, runs, and schema setups."
+        )
         page = self._scrollable_frame(self.content)
 
         run_root_var = tk.StringVar(value=self.settings.local_runs_root)
@@ -946,7 +1073,9 @@ class PatientJournalsApp:
 
         controls = self._section(page, "Start Validation")
         controls.columnconfigure(1, weight=1)
-        ttk.Label(controls, text="Dataset", style="App.TLabel").grid(row=0, column=0, sticky="w", pady=8)
+        ttk.Label(controls, text="Dataset", style="App.TLabel").grid(
+            row=0, column=0, sticky="w", pady=8
+        )
         dataset_combo = ttk.Combobox(
             controls,
             textvariable=dataset_var,
@@ -985,16 +1114,19 @@ class PatientJournalsApp:
                 if dataset_var.get() not in values:
                     dataset_combo.configure(values=[dataset_var.get(), *values])
 
-        self._button(controls, "Load datasets", load_dataset_choices, kind="secondary").grid(
-            row=0, column=2, padx=(10, 0), pady=8
-        )
+        self._button(
+            controls, "Load datasets", load_dataset_choices, kind="secondary"
+        ).grid(row=0, column=2, padx=(10, 0), pady=8)
         self._button(controls, "Browse", browse_dataset, kind="secondary").grid(
             row=0, column=3, padx=(8, 0), pady=8
         )
         self._field(controls, "Images", images_var, 1)
-        self._button(controls, "Browse", lambda: self._select_folder(images_var), kind="secondary").grid(
-            row=1, column=2, padx=(10, 0), pady=8
-        )
+        self._button(
+            controls,
+            "Browse",
+            lambda: self._select_folder(images_var),
+            kind="secondary",
+        ).grid(row=1, column=2, padx=(10, 0), pady=8)
         self._field(controls, "Validator", username_var, 2)
         self._grid_help(
             controls,
@@ -1033,7 +1165,9 @@ class PatientJournalsApp:
                     run_root=run_root_var.get() or "runs",
                     validations_root=validations_root_var.get() or "validations",
                     cloud_validations_bucket=(
-                        self.settings.gcs_bucket_name if include_shared_var.get() else ""
+                        self.settings.gcs_bucket_name
+                        if include_shared_var.get()
+                        else ""
                     ),
                     cloud_validations_prefix=self.settings.validations_gcs_prefix,
                 )
@@ -1073,9 +1207,13 @@ class PatientJournalsApp:
                 len(summary.validation_runs),
                 2,
             )
-            self._metric_row(overview, "Validation decisions", summary.validation_count, 3)
+            self._metric_row(
+                overview, "Validation decisions", summary.validation_count, 3
+            )
             self._metric_row(overview, "Scored decisions", scored_decisions, 4)
-            self._metric_row(overview, "Latest dataset", summary.latest_dataset or "none", 5)
+            self._metric_row(
+                overview, "Latest dataset", summary.latest_dataset or "none", 5
+            )
 
             runs = ttk.LabelFrame(
                 left,
@@ -1086,7 +1224,14 @@ class PatientJournalsApp:
             runs.pack(fill="both", expand=True, pady=(8, 0))
             run_tree = ttk.Treeview(
                 runs,
-                columns=("run", "validator", "dataset", "accuracy", "decisions", "corrected"),
+                columns=(
+                    "run",
+                    "validator",
+                    "dataset",
+                    "accuracy",
+                    "decisions",
+                    "corrected",
+                ),
                 show="headings",
                 height=8,
             )
@@ -1100,9 +1245,7 @@ class PatientJournalsApp:
             ):
                 run_tree.heading(column, text=heading)
                 anchor = (
-                    "e"
-                    if column in {"accuracy", "decisions", "corrected"}
-                    else "w"
+                    "e" if column in {"accuracy", "decisions", "corrected"} else "w"
                 )
                 run_tree.column(column, width=width, anchor=anchor)
             run_tree.pack(fill="both", expand=True)
@@ -1211,9 +1354,9 @@ class PatientJournalsApp:
 
         buttons = self._button_row(page)
         self._button(buttons, "Launch validator", launch_validator).pack(side="left")
-        self._button(buttons, "Use latest dataset", use_latest_dataset, kind="secondary").pack(
-            side="left", padx=(10, 0)
-        )
+        self._button(
+            buttons, "Use latest dataset", use_latest_dataset, kind="secondary"
+        ).pack(side="left", padx=(10, 0))
         self._button(buttons, "Refresh", fill_summary, kind="secondary").pack(
             side="left", padx=(10, 0)
         )
@@ -1236,7 +1379,9 @@ class PatientJournalsApp:
             ),
             kind="secondary",
         ).pack(side="left", padx=(10, 0))
-        ttk.Label(page, textvariable=status_var, style="Muted.TLabel").pack(anchor="w", pady=(10, 18))
+        ttk.Label(page, textvariable=status_var, style="Muted.TLabel").pack(
+            anchor="w", pady=(10, 18)
+        )
 
         preset = self._preset_validation_dataset
         if preset:
@@ -1253,7 +1398,9 @@ class PatientJournalsApp:
     def show_settings(self) -> None:
         self._clear_content()
         self._heading("Settings")
-        self._subheading("Keep the daily defaults visible; cloud routing details live under Advanced.")
+        self._subheading(
+            "Keep the daily defaults visible; cloud routing details live under Advanced."
+        )
         page = self._scrollable_frame(self.content)
 
         frame = self._section(page, "Workspace")
@@ -1270,23 +1417,54 @@ class PatientJournalsApp:
         request_prefix_var = tk.StringVar(value=self.settings.batch_requests_gcs_prefix)
         output_prefix_var = tk.StringVar(value=self.settings.batch_outputs_gcs_prefix)
         datasets_prefix_var = tk.StringVar(value=self.settings.datasets_gcs_prefix)
-        validations_prefix_var = tk.StringVar(value=self.settings.validations_gcs_prefix)
-        upload_validations_var = tk.BooleanVar(value=self.settings.upload_validation_to_gcs)
+        validations_prefix_var = tk.StringVar(
+            value=self.settings.validations_gcs_prefix
+        )
+        upload_validations_var = tk.BooleanVar(
+            value=self.settings.upload_validation_to_gcs
+        )
         runs_var = tk.StringVar(value=self.settings.local_runs_root)
         api_env_var = tk.StringVar(value=self.settings.gemini_api_key_env)
         validation_images_var = tk.StringVar(value=self.settings.validation_images_root)
-        duplicate_strategy_var = tk.StringVar(value=self.settings.batch_duplicate_strategy)
+        duplicate_strategy_var = tk.StringVar(
+            value=self.settings.batch_duplicate_strategy
+        )
         cost_rate_var = tk.StringVar(
             value=str(self.settings.estimated_cost_per_1k_images or "")
         )
         api_threshold_var = tk.StringVar(
             value=str(self.settings.api_recovery_threshold)
         )
+        ocr_enabled_var = tk.BooleanVar(value=self.settings.ocr_enabled)
+        subagents_var = tk.BooleanVar(value=self.settings.subagents)
+        validation_enabled_var = tk.BooleanVar(
+            value=self.settings.model_validation_enabled
+        )
+        validation_model_var = tk.StringVar(value=self.settings.verification_model)
+        validation_thinking_var = tk.IntVar(
+            value=_verification_thinking_index(
+                self.settings.verification_thinking_level
+            )
+        )
+        validation_scope_var = tk.StringVar(
+            value=_verification_scope_label(self.settings.verification_scope)
+        )
+        validation_control_sample_var = tk.StringVar(
+            value=str(self.settings.verification_control_sample_percent)
+        )
+        validation_tokens_var = tk.StringVar(
+            value=str(self.settings.verification_max_output_tokens)
+        )
+        validation_chunks_var = tk.StringVar(
+            value=str(self.settings.verification_num_chunks)
+        )
         key_status_var = tk.StringVar(
             value="configured" if self._gemini_key_is_configured() else "missing"
         )
 
-        ttk.Label(frame, text="Auth mode", style="App.TLabel").grid(row=0, column=0, sticky="w", pady=8)
+        ttk.Label(frame, text="Auth mode", style="App.TLabel").grid(
+            row=0, column=0, sticky="w", pady=8
+        )
         auth_combo = ttk.Combobox(
             frame,
             textvariable=auth_var,
@@ -1297,9 +1475,9 @@ class PatientJournalsApp:
         auth_combo.grid(row=0, column=1, sticky="w", pady=8, padx=(14, 0))
 
         self._field(frame, "Service account JSON", service_var, 1)
-        self._button(frame, "Browse", lambda: self._select_file(service_var), kind="secondary").grid(
-            row=1, column=2, padx=(10, 0), pady=8
-        )
+        self._button(
+            frame, "Browse", lambda: self._select_file(service_var), kind="secondary"
+        ).grid(row=1, column=2, padx=(10, 0), pady=8)
         self._field(frame, "GCP project", project_var, 2)
         self._field(frame, "GCS bucket", bucket_var, 3)
         self._grid_help(
@@ -1310,9 +1488,12 @@ class PatientJournalsApp:
         )
         self._field(frame, "Runs folder", runs_var, 4)
         self._field(frame, "Validation image folder", validation_images_var, 5)
-        self._button(frame, "Browse", lambda: self._select_folder(validation_images_var), kind="secondary").grid(
-            row=5, column=2, padx=(10, 0), pady=8
-        )
+        self._button(
+            frame,
+            "Browse",
+            lambda: self._select_folder(validation_images_var),
+            kind="secondary",
+        ).grid(row=5, column=2, padx=(10, 0), pady=8)
         ttk.Label(frame, text="Gemini API key", style="App.TLabel").grid(
             row=6, column=0, sticky="w", pady=8
         )
@@ -1342,9 +1523,99 @@ class PatientJournalsApp:
             f"Stored outside the repo in {local_secrets_path()}. It is never written to app_config.json.",
         )
 
+        validation = self._section(page, "Optional pipeline defaults")
+        validation.columnconfigure(1, weight=1)
+        ttk.Checkbutton(
+            validation,
+            text="Include positional OCR for new jobs",
+            variable=ocr_enabled_var,
+        ).grid(row=0, column=0, columnspan=2, sticky="w", pady=8)
+        self._grid_help(
+            validation,
+            0,
+            2,
+            "Each job can override this. Cloud OCR sidecars are required only when enabled.",
+        )
+        ttk.Checkbutton(
+            validation,
+            text="Use schema subagents for new jobs",
+            variable=subagents_var,
+        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=8)
+        self._grid_help(
+            validation,
+            1,
+            2,
+            "Each top-level schema field is handled by its own specialist request.",
+        )
+        ttk.Checkbutton(
+            validation,
+            text="Enable second-pass model validation for new jobs",
+            variable=validation_enabled_var,
+        ).grid(row=2, column=0, columnspan=2, sticky="w", pady=8)
+        self._grid_help(
+            validation,
+            2,
+            2,
+            "Verification is independent of OCR and subagents and is available for Cloud batch jobs.",
+        )
+        validation_model_names = [
+            option.name for option in self.validation_model_options
+        ]
+        if self.settings.verification_model not in validation_model_names:
+            validation_model_names.insert(0, self.settings.verification_model)
+        ttk.Label(validation, text="Verifier model", style="App.TLabel").grid(
+            row=3, column=0, sticky="w", pady=8
+        )
+        ttk.Combobox(
+            validation,
+            textvariable=validation_model_var,
+            values=validation_model_names,
+            state="readonly",
+        ).grid(row=3, column=1, sticky="ew", pady=8, padx=(14, 0))
+        ttk.Label(validation, text="Thinking", style="App.TLabel").grid(
+            row=4, column=0, sticky="w", pady=8
+        )
+        _verification_thinking_slider(validation, validation_thinking_var).grid(
+            row=4, column=1, sticky="ew", pady=8, padx=(14, 0)
+        )
+        ttk.Label(validation, text="Verification scope", style="App.TLabel").grid(
+            row=5, column=0, sticky="w", pady=8
+        )
+        ttk.Combobox(
+            validation,
+            textvariable=validation_scope_var,
+            values=tuple(VERIFICATION_SCOPE_LABELS.values()),
+            state="readonly",
+        ).grid(row=5, column=1, sticky="ew", pady=8, padx=(14, 0))
+        self._field(
+            validation,
+            "Routine-page control sample (%)",
+            validation_control_sample_var,
+            6,
+        )
+        self._grid_help(
+            validation,
+            6,
+            2,
+            "Used only for risk-routed verification; all flagged pages plus this deterministic routine-page sample are checked.",
+        )
+        ttk.Label(
+            validation,
+            text=(
+                "Correction policy: schema-valid verifier corrections are accepted "
+                "automatically; complete runs publish the next immutable version."
+            ),
+            style="Muted.TLabel",
+            wraplength=780,
+        ).grid(row=7, column=0, columnspan=3, sticky="w", pady=8)
+        self._field(validation, "Max output tokens", validation_tokens_var, 8)
+        self._field(validation, "Validation batch chunks", validation_chunks_var, 9)
+
         advanced, _advanced_open = self._advanced_section(page)
         advanced.columnconfigure(1, weight=1)
-        ttk.Label(advanced, text="Batch backend", style="App.TLabel").grid(row=0, column=0, sticky="w", pady=8)
+        ttk.Label(advanced, text="Batch backend", style="App.TLabel").grid(
+            row=0, column=0, sticky="w", pady=8
+        )
         backend_combo = ttk.Combobox(
             advanced,
             textvariable=backend_var,
@@ -1373,7 +1644,9 @@ class PatientJournalsApp:
             "When enabled, each validator saves locally and uploads CSV plus metadata to the shared bucket.",
         )
         self._field(advanced, "Gemini API key env", api_env_var, 9)
-        ttk.Label(advanced, text="Duplicate strategy", style="App.TLabel").grid(row=10, column=0, sticky="w", pady=8)
+        ttk.Label(advanced, text="Duplicate strategy", style="App.TLabel").grid(
+            row=10, column=0, sticky="w", pady=8
+        )
         ttk.Combobox(
             advanced,
             textvariable=duplicate_strategy_var,
@@ -1382,10 +1655,14 @@ class PatientJournalsApp:
             width=24,
         ).grid(row=10, column=1, sticky="w", pady=8, padx=(14, 0))
         self._field(advanced, "Est. cost per 1k images ($)", cost_rate_var, 11)
-        self._field(advanced, "API recovery threshold (failures)", api_threshold_var, 12)
+        self._field(
+            advanced, "API recovery threshold (failures)", api_threshold_var, 12
+        )
 
         status_var = tk.StringVar(value="")
-        ttk.Label(page, textvariable=status_var, style="Muted.TLabel").pack(anchor="w", pady=(12, 0))
+        ttk.Label(page, textvariable=status_var, style="Muted.TLabel").pack(
+            anchor="w", pady=(12, 0)
+        )
 
         def save() -> None:
             try:
@@ -1402,6 +1679,35 @@ class PatientJournalsApp:
                 messagebox.showerror(
                     "Invalid setting",
                     "API recovery threshold must be a whole number.",
+                )
+                return
+            try:
+                validation_tokens = max(
+                    1, int(validation_tokens_var.get().strip() or 4096)
+                )
+                validation_chunks = max(
+                    1, int(validation_chunks_var.get().strip() or 1)
+                )
+                validation_control_sample = float(
+                    validation_control_sample_var.get().strip() or 0.0
+                )
+                if not 0.0 <= validation_control_sample <= 100.0:
+                    raise ValueError
+            except ValueError:
+                messagebox.showerror(
+                    "Invalid setting",
+                    "Validation tokens/chunks must be whole numbers and the control sample must be between 0 and 100 percent.",
+                )
+                return
+            if (
+                validation_enabled_var.get()
+                and _verification_scope_value(validation_scope_var.get())
+                == "flagged"
+                and validation_control_sample <= 0.0
+            ):
+                messagebox.showerror(
+                    "Invalid setting",
+                    "Risk-routed verification requires a positive routine-page control sample. Choose all-page scope to use 0%.",
                 )
                 return
             self.settings = AppSettings(
@@ -1424,6 +1730,20 @@ class PatientJournalsApp:
                 batch_duplicate_strategy=duplicate_strategy_var.get(),  # type: ignore[arg-type]
                 estimated_cost_per_1k_images=cost_rate,
                 api_recovery_threshold=api_threshold,
+                ocr_enabled=ocr_enabled_var.get(),
+                subagents=subagents_var.get(),
+                model_validation_enabled=validation_enabled_var.get(),
+                verification_model=validation_model_var.get(),
+                verification_thinking_level=_verification_thinking_level(
+                    validation_thinking_var.get()
+                ),  # type: ignore[arg-type]
+                verification_scope=_verification_scope_value(
+                    validation_scope_var.get()
+                ),  # type: ignore[arg-type]
+                verification_control_sample_percent=validation_control_sample,
+                verification_apply_mode="apply_patches",
+                verification_max_output_tokens=validation_tokens,
+                verification_num_chunks=validation_chunks,
             )
             path = save_app_settings(self.settings, self.settings_path)
             status_var.set(f"Saved {path}")
@@ -1453,18 +1773,44 @@ class PatientJournalsApp:
         schema_names = [option.name for option in self.schema_options]
         model_names = [option.name for option in self.model_options]
         schema_var = tk.StringVar(value=schema_names[0] if schema_names else "")
-        default_model = config.model if config.model in model_names else (
-            model_names[0] if model_names else ""
+        default_model = (
+            config.model
+            if config.model in model_names
+            else (model_names[0] if model_names else "")
         )
         model_var = tk.StringVar(value=default_model)
         output_format_var = tk.StringVar(value="jsonl")
         continue_var = tk.StringVar(value="")
         num_batches_var = tk.StringVar(value="")
-        subagents_var = tk.BooleanVar(value=False)
+        ocr_enabled_var = tk.BooleanVar(value=self.settings.ocr_enabled)
+        subagents_var = tk.BooleanVar(value=self.settings.subagents)
+        model_validation_var = tk.BooleanVar(
+            value=self.settings.model_validation_enabled
+        )
+        verification_model_var = tk.StringVar(value=self.settings.verification_model)
+        verification_thinking_var = tk.IntVar(
+            value=_verification_thinking_index(
+                self.settings.verification_thinking_level
+            )
+        )
+        verification_scope_var = tk.StringVar(
+            value=_verification_scope_label(self.settings.verification_scope)
+        )
+        verification_control_sample_var = tk.StringVar(
+            value=str(self.settings.verification_control_sample_percent)
+        )
+        verification_tokens_var = tk.StringVar(
+            value=str(self.settings.verification_max_output_tokens)
+        )
+        verification_chunks_var = tk.StringVar(
+            value=str(self.settings.verification_num_chunks)
+        )
         status_var = tk.StringVar(value="")
         command_var = tk.StringVar(value="")
 
-        ttk.Label(frame, text="Dataset source", style="App.TLabel").grid(row=0, column=0, sticky="w", pady=8)
+        ttk.Label(frame, text="Dataset source", style="App.TLabel").grid(
+            row=0, column=0, sticky="w", pady=8
+        )
         ttk.Combobox(
             frame,
             textvariable=source_var,
@@ -1479,7 +1825,9 @@ class PatientJournalsApp:
             "Local uses a folder on this computer. Cloud uses image folders already uploaded to GCS.",
         )
 
-        ttk.Label(frame, text="Run mode", style="App.TLabel").grid(row=1, column=0, sticky="w", pady=8)
+        ttk.Label(frame, text="Run mode", style="App.TLabel").grid(
+            row=1, column=0, sticky="w", pady=8
+        )
         ttk.Combobox(
             frame,
             textvariable=mode_var,
@@ -1520,7 +1868,9 @@ class PatientJournalsApp:
         cloud_tree.column("images", anchor="e", width=100)
         cloud_tree.column("updated", anchor="w", width=140)
         cloud_tree.grid(row=0, column=0, sticky="ew")
-        cloud_scroll = ttk.Scrollbar(cloud_panel, orient="vertical", command=cloud_tree.yview)
+        cloud_scroll = ttk.Scrollbar(
+            cloud_panel, orient="vertical", command=cloud_tree.yview
+        )
         cloud_tree.configure(yscrollcommand=cloud_scroll.set)
         cloud_scroll.grid(row=0, column=1, sticky="ns")
         cloud_actions = ttk.Frame(cloud_panel, style="App.TFrame")
@@ -1593,15 +1943,15 @@ class PatientJournalsApp:
             if not selected:
                 status_var.set("Select one or more cloud folders first.")
                 return
-            image_count = sum(cloud_count_by_iid.get(item_id, 0) for item_id in selected)
+            image_count = sum(
+                cloud_count_by_iid.get(item_id, 0) for item_id in selected
+            )
             prefixes = selected_cloud_prefixes()
             if len(prefixes) == 1:
                 label = prefixes[0]
             else:
                 label = f"{len(prefixes)} folders"
-            status_var.set(
-                f"Cloud images: {image_count}; selection={label}"
-            )
+            status_var.set(f"Cloud images: {image_count}; selection={label}")
 
         cloud_inspect_button = self._button(
             cloud_actions,
@@ -1633,7 +1983,9 @@ class PatientJournalsApp:
                 cloud_prefix_var.set("")
             selected_count = len(cloud_tree.selection())
             total_count = len(cloud_tree.get_children(""))
-            cloud_select_all_var.set(bool(total_count and selected_count == total_count))
+            cloud_select_all_var.set(
+                bool(total_count and selected_count == total_count)
+            )
 
         cloud_tree.bind("<<TreeviewSelect>>", update_cloud_prefix_var)
 
@@ -1649,7 +2001,9 @@ class PatientJournalsApp:
             local_entry.grid_remove()
             local_button.grid_remove()
             cloud_label.grid(row=2, column=0, sticky="w", pady=8)
-            cloud_panel.grid(row=2, column=1, columnspan=3, sticky="ew", pady=8, padx=(14, 0))
+            cloud_panel.grid(
+                row=2, column=1, columnspan=3, sticky="ew", pady=8, padx=(14, 0)
+            )
 
         def update_source_view(*_args) -> None:
             if source_var.get() == "cloud":
@@ -1661,14 +2015,18 @@ class PatientJournalsApp:
         source_var.trace_add("write", update_source_view)
         update_source_view()
 
-        ttk.Label(frame, text="Schema", style="App.TLabel").grid(row=3, column=0, sticky="w", pady=8)
-        ttk.Combobox(frame, textvariable=schema_var, values=schema_names, state="readonly").grid(
-            row=3, column=1, sticky="ew", pady=8, padx=(14, 0)
+        ttk.Label(frame, text="Schema", style="App.TLabel").grid(
+            row=3, column=0, sticky="w", pady=8
         )
-        ttk.Label(frame, text="Model", style="App.TLabel").grid(row=4, column=0, sticky="w", pady=8)
-        ttk.Combobox(frame, textvariable=model_var, values=model_names, state="readonly").grid(
-            row=4, column=1, sticky="ew", pady=8, padx=(14, 0)
+        ttk.Combobox(
+            frame, textvariable=schema_var, values=schema_names, state="readonly"
+        ).grid(row=3, column=1, sticky="ew", pady=8, padx=(14, 0))
+        ttk.Label(frame, text="Model", style="App.TLabel").grid(
+            row=4, column=0, sticky="w", pady=8
         )
+        ttk.Combobox(
+            frame, textvariable=model_var, values=model_names, state="readonly"
+        ).grid(row=4, column=1, sticky="ew", pady=8, padx=(14, 0))
         self._grid_help(
             frame,
             4,
@@ -1678,7 +2036,9 @@ class PatientJournalsApp:
 
         advanced, _advanced_open = self._advanced_section(page)
         advanced.columnconfigure(1, weight=1)
-        ttk.Label(advanced, text="Output format", style="App.TLabel").grid(row=0, column=0, sticky="w", pady=8)
+        ttk.Label(advanced, text="Output format", style="App.TLabel").grid(
+            row=0, column=0, sticky="w", pady=8
+        )
         ttk.Combobox(
             advanced,
             textvariable=output_format_var,
@@ -1688,32 +2048,178 @@ class PatientJournalsApp:
         ).grid(row=0, column=1, sticky="w", pady=8, padx=(14, 0))
         self._field(advanced, "Continue dataset", continue_var, 1)
         self._field(advanced, "Batch chunks", num_batches_var, 2)
+        ocr_options = ttk.LabelFrame(advanced, text="OCR context", padding=10)
+        ocr_options.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(10, 4))
         ttk.Checkbutton(
-            advanced,
-            text="Sub Agent Usage",
-            variable=subagents_var,
-        ).grid(row=3, column=0, columnspan=2, sticky="w", pady=8)
-        self._grid_help(
-            advanced,
-            3,
-            2,
-            "Runs one parallel model request per top-level schema field, then joins and validates the page before writing the dataset.",
-        )
+            ocr_options,
+            text="Include positional OCR",
+            variable=ocr_enabled_var,
+        ).pack(anchor="w")
+        ttk.Label(
+            ocr_options,
+            text=(
+                "Adds generation-bound OCR text and coordinates. Cloud jobs require "
+                "prepared OCR sidecars only when enabled."
+            ),
+            style="Muted.TLabel",
+            wraplength=780,
+        ).pack(anchor="w", pady=(4, 0))
 
-        preview = ttk.Label(advanced, textvariable=command_var, wraplength=850, style="Muted.TLabel")
-        preview.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(12, 0))
-        ttk.Label(page, textvariable=status_var, style="Muted.TLabel").pack(anchor="w", pady=(8, 0))
+        specialist_options = ttk.LabelFrame(
+            advanced, text="Schema specialists", padding=10
+        )
+        specialist_options.grid(row=4, column=0, columnspan=3, sticky="ew", pady=4)
+        ttk.Checkbutton(
+            specialist_options,
+            text="Use schema subagents",
+            variable=subagents_var,
+        ).pack(anchor="w")
+        ttk.Label(
+            specialist_options,
+            text=(
+                "Runs one parallel model request per top-level schema field, then "
+                "joins and validates the page before writing the dataset."
+            ),
+            style="Muted.TLabel",
+            wraplength=780,
+        ).pack(anchor="w", pady=(4, 0))
+
+        validation_options = ttk.LabelFrame(
+            advanced, text="Second-pass verification", padding=10
+        )
+        validation_options.grid(row=5, column=0, columnspan=3, sticky="ew", pady=4)
+        validation_options.columnconfigure(1, weight=1)
+        model_validation_check = ttk.Checkbutton(
+            validation_options,
+            text="Enable model verification (Cloud batch only)",
+            variable=model_validation_var,
+        )
+        model_validation_check.grid(
+            row=0, column=0, columnspan=2, sticky="w", pady=(0, 8)
+        )
+        ttk.Label(
+            validation_options,
+            text=(
+                "Checks the exact image and candidate, optionally using OCR. Every "
+                "run writes field-correction metadata."
+            ),
+            style="Muted.TLabel",
+            wraplength=780,
+        ).grid(row=1, column=0, columnspan=3, sticky="w", pady=(0, 8))
+        validation_model_names = [
+            option.name for option in self.validation_model_options
+        ]
+        if self.settings.verification_model not in validation_model_names:
+            validation_model_names.insert(0, self.settings.verification_model)
+        ttk.Label(validation_options, text="Verifier model", style="App.TLabel").grid(
+            row=2, column=0, sticky="w", pady=8
+        )
+        ttk.Combobox(
+            validation_options,
+            textvariable=verification_model_var,
+            values=validation_model_names,
+            state="readonly",
+        ).grid(row=2, column=1, sticky="ew", pady=8, padx=(14, 0))
+        ttk.Label(
+            validation_options, text="Verifier thinking", style="App.TLabel"
+        ).grid(row=3, column=0, sticky="w", pady=8)
+        _verification_thinking_slider(
+            validation_options, verification_thinking_var
+        ).grid(row=3, column=1, sticky="ew", pady=8, padx=(14, 0))
+        ttk.Label(
+            validation_options, text="Verification scope", style="App.TLabel"
+        ).grid(row=4, column=0, sticky="w", pady=8)
+        ttk.Combobox(
+            validation_options,
+            textvariable=verification_scope_var,
+            values=tuple(VERIFICATION_SCOPE_LABELS.values()),
+            state="readonly",
+        ).grid(row=4, column=1, sticky="ew", pady=8, padx=(14, 0))
+        self._field(
+            validation_options,
+            "Routine-page control sample (%)",
+            verification_control_sample_var,
+            5,
+        )
+        self._grid_help(
+            validation_options,
+            5,
+            2,
+            "Risk-routed mode verifies all flagged pages and this deterministic percentage of routine pages.",
+        )
+        ttk.Label(
+            validation_options,
+            text=(
+                "Schema-valid verifier corrections are accepted automatically. "
+                "A complete run publishes the next immutable dataset version."
+            ),
+            style="Muted.TLabel",
+            wraplength=780,
+        ).grid(row=6, column=0, columnspan=3, sticky="w", pady=8)
+        self._field(
+            validation_options,
+            "Verifier max output tokens",
+            verification_tokens_var,
+            7,
+        )
+        self._field(
+            validation_options,
+            "Validation batch chunks",
+            verification_chunks_var,
+            8,
+        )
+        ttk.Label(
+            validation_options,
+            text=(
+                "Risk routing reduces verifier calls while retaining a deterministic "
+                "routine-page control sample; All pages performs a full sweep."
+            ),
+            style="Muted.TLabel",
+            wraplength=780,
+        ).grid(row=9, column=0, columnspan=3, sticky="w", pady=(4, 0))
+
+        def update_model_validation_state(*_args) -> None:
+            state = "normal" if mode_var.get() == "cloud_batch" else "disabled"
+            model_validation_check.configure(state=state)
+
+        mode_var.trace_add("write", update_model_validation_state)
+        update_model_validation_state()
+
+        preview = ttk.Label(
+            advanced, textvariable=command_var, wraplength=850, style="Muted.TLabel"
+        )
+        preview.grid(row=6, column=0, columnspan=3, sticky="ew", pady=(12, 0))
+        ttk.Label(page, textvariable=status_var, style="Muted.TLabel").pack(
+            anchor="w", pady=(8, 0)
+        )
 
         def draft() -> SubmitJobDraft:
             num_batches = None
             if num_batches_var.get().strip():
                 num_batches = max(1, int(num_batches_var.get().strip()))
-            cloud_prefixes = selected_cloud_prefixes() if source_var.get() == "cloud" else ()
-            if (
-                source_var.get() == "cloud"
-                and not cloud_prefixes
-            ):
-                raise ValueError("Load the bucket and select one or more cloud folders.")
+            cloud_prefixes = (
+                selected_cloud_prefixes() if source_var.get() == "cloud" else ()
+            )
+            if source_var.get() == "cloud" and not cloud_prefixes:
+                raise ValueError(
+                    "Load the bucket and select one or more cloud folders."
+                )
+            try:
+                verification_tokens = max(
+                    1, int(verification_tokens_var.get().strip() or 4096)
+                )
+                verification_chunks = max(
+                    1, int(verification_chunks_var.get().strip() or 1)
+                )
+                verification_control_sample = float(
+                    verification_control_sample_var.get().strip() or 0.0
+                )
+                if not 0.0 <= verification_control_sample <= 100.0:
+                    raise ValueError
+            except ValueError as exc:
+                raise ValueError(
+                    "Verifier tokens/chunks must be whole numbers and the control sample must be between 0 and 100 percent."
+                ) from exc
             return SubmitJobDraft(
                 dataset_source=source_var.get(),  # type: ignore[arg-type]
                 run_mode=mode_var.get(),  # type: ignore[arg-type]
@@ -1721,11 +2227,28 @@ class PatientJournalsApp:
                 model_name=model_var.get(),
                 output_format=output_format_var.get(),  # type: ignore[arg-type]
                 local_path=local_path_var.get(),
-                cloud_prefix=cloud_prefixes[0] if cloud_prefixes else cloud_prefix_var.get(),
+                cloud_prefix=cloud_prefixes[0]
+                if cloud_prefixes
+                else cloud_prefix_var.get(),
                 cloud_prefixes=cloud_prefixes,
                 continue_dataset=continue_var.get(),
                 num_batches=num_batches,
+                ocr_enabled=ocr_enabled_var.get(),
                 subagents=subagents_var.get(),
+                model_validation_enabled=(
+                    model_validation_var.get() and mode_var.get() == "cloud_batch"
+                ),
+                verification_model=verification_model_var.get(),
+                verification_thinking_level=_verification_thinking_level(
+                    verification_thinking_var.get()
+                ),  # type: ignore[arg-type]
+                verification_scope=_verification_scope_value(
+                    verification_scope_var.get()
+                ),  # type: ignore[arg-type]
+                verification_control_sample_percent=verification_control_sample,
+                verification_apply_mode="apply_patches",
+                verification_max_output_tokens=verification_tokens,
+                verification_num_chunks=verification_chunks,
             )
 
         def preview_command() -> None:
@@ -1886,7 +2409,9 @@ class PatientJournalsApp:
 
         buttons = self._button_row(page)
         self._button(buttons, "Submit", run_job).pack(side="left")
-        self._button(buttons, "Preview command", preview_command, kind="secondary").pack(side="left", padx=(10, 0))
+        self._button(
+            buttons, "Preview command", preview_command, kind="secondary"
+        ).pack(side="left", padx=(10, 0))
 
     def _open_results_window(
         self,
@@ -1913,7 +2438,9 @@ class PatientJournalsApp:
             text=f"{job.model or 'batch'} — {job.image_count} image(s)",
             style="Heading.TLabel",
         ).pack(anchor="w")
-        ttk.Label(header, text=job.input_location, style="Muted.TLabel").pack(anchor="w")
+        ttk.Label(header, text=job.input_location, style="Muted.TLabel").pack(
+            anchor="w"
+        )
 
         state_var = tk.StringVar(value="Loading saved results…")
         ttk.Label(win, textvariable=state_var, style="Muted.TLabel").pack(
@@ -1926,7 +2453,11 @@ class PatientJournalsApp:
         ok_var = tk.StringVar(value="—")
         fail_var = tk.StringVar(value="—")
         for index, (label, var) in enumerate(
-            (("Total", total_var), ("Succeeded", ok_var), ("Failed / missing", fail_var))
+            (
+                ("Total", total_var),
+                ("Succeeded", ok_var),
+                ("Failed / missing", fail_var),
+            )
         ):
             cell = ttk.Frame(metrics, style="App.TFrame")
             cell.grid(row=0, column=index, padx=(0, 28), sticky="w")
@@ -2012,13 +2543,18 @@ class PatientJournalsApp:
         )
 
         preview_frame = ttk.LabelFrame(
-            win, text="Sample of extracted rows", padding=(8, 8), style="Section.TLabelframe"
+            win,
+            text="Sample of extracted rows",
+            padding=(8, 8),
+            style="Section.TLabelframe",
         )
         preview_frame.pack(fill="both", expand=True, padx=18, pady=(8, 8))
         preview = ttk.Treeview(preview_frame, show="headings", height=10)
         preview.grid(row=0, column=0, sticky="nsew")
         pscroll = ttk.Scrollbar(preview_frame, orient="vertical", command=preview.yview)
-        hscroll = ttk.Scrollbar(preview_frame, orient="horizontal", command=preview.xview)
+        hscroll = ttk.Scrollbar(
+            preview_frame, orient="horizontal", command=preview.xview
+        )
         preview.configure(yscrollcommand=pscroll.set, xscrollcommand=hscroll.set)
         pscroll.grid(row=0, column=1, sticky="ns")
         hscroll.grid(row=1, column=0, sticky="ew")
@@ -2026,7 +2562,14 @@ class PatientJournalsApp:
         preview_frame.columnconfigure(0, weight=1)
 
         error_box = tk.Text(
-            win, height=4, wrap="word", bg=MUTED_BG, fg=INK, relief="flat", padx=10, pady=8
+            win,
+            height=4,
+            wrap="word",
+            bg=MUTED_BG,
+            fg=INK,
+            relief="flat",
+            padx=10,
+            pady=8,
         )
 
         footer = ttk.Frame(win, style="App.TFrame", padding=(18, 12))
@@ -2057,9 +2600,7 @@ class PatientJournalsApp:
                 hide_failure_actions()
                 return
             api_state = (
-                "normal"
-                if not busy and state.get("api_action_allowed")
-                else "disabled"
+                "normal" if not busy and state.get("api_action_allowed") else "disabled"
             )
             batch_resubmit_button.configure(state="disabled" if busy else "normal")
             finalize_failed_button.configure(
@@ -2094,7 +2635,7 @@ class PatientJournalsApp:
             label = "page" if state["failed"] == 1 else "pages"
             if mode == "chunk":
                 failure_action_text_var.set(
-                    f"No rows were retrieved. Resubmit the job to try again."
+                    "No rows were retrieved. Resubmit the job to try again."
                 )
                 api_recover_button.configure(state="disabled")
                 finalize_failed_button.configure(state="disabled")
@@ -2116,7 +2657,9 @@ class PatientJournalsApp:
                     state="normal" if state["api_action_allowed"] else "disabled",
                 )
                 finalize_failed_button.configure(state="normal")
-                batch_resubmit_button.configure(text="Resubmit as batch", state="normal")
+                batch_resubmit_button.configure(
+                    text="Resubmit as batch", state="normal"
+                )
                 retry_chunk_spinbox.configure(state="normal")
             if not failure_actions.winfo_ismapped():
                 failure_actions.pack(
@@ -2173,14 +2716,18 @@ class PatientJournalsApp:
                 expected = int(payload.get("expected_pages") or job.image_count or 0)
                 succeeded = int(payload.get("successful_pages") or 0)
                 recovered = int(payload.get("recovered_pages") or 0)
-                missing = int(payload.get("missing_pages") or max(0, expected - succeeded))
+                missing = int(
+                    payload.get("missing_pages") or max(0, expected - succeeded)
+                )
                 total_var.set(str(expected))
                 ok_text = f"{succeeded}"
                 if recovered:
                     ok_text = f"{succeeded} ({recovered} recovered with API)"
                 ok_var.set(ok_text)
                 fail_var.set(str(missing))
-                state["dataset"] = dataset_path or str(payload.get("dataset_path") or "")
+                state["dataset"] = dataset_path or str(
+                    payload.get("dataset_path") or ""
+                )
                 state["failed"] = missing
                 state["mode"] = "request"
                 populate_preview(columns, rows)
@@ -2276,7 +2823,9 @@ class PatientJournalsApp:
                 )
             else:
                 hide_failure_actions()
-            can_use_dataset = bool(state["dataset"]) and not recovery_failed and missing == 0
+            can_use_dataset = (
+                bool(state["dataset"]) and not recovery_failed and missing == 0
+            )
             validate_button.configure(state="normal" if can_use_dataset else "disabled")
             keep_button.configure(
                 text=(
@@ -2331,9 +2880,7 @@ class PatientJournalsApp:
                     "as a batch."
                 )
             else:
-                state_var.set(
-                    "API recovery finished; there are no missing pages left."
-                )
+                state_var.set("API recovery finished; there are no missing pages left.")
 
         def show_not_ready(message: str) -> None:
             state["done"] = False
@@ -2360,12 +2907,16 @@ class PatientJournalsApp:
                         payload["_loaded_from_saved_results"] = True
 
                 if payload is None:
-                    readiness = resolve_batch_run_readiness(job.run_dir)
-                    if readiness.state not in {"succeeded", "failed"}:
-                        detail = f" {readiness.detail}" if readiness.detail else ""
+                    readiness = WorkflowService(
+                        self.settings, settings_path=self.settings_path
+                    ).readiness(job.run_dir)
+                    readiness_state = str(readiness.get("state") or "")
+                    readiness_detail = str(readiness.get("detail") or "")
+                    if readiness_state not in {"succeeded", "failed"}:
+                        detail = f" {readiness_detail}" if readiness_detail else ""
                         message = (
                             "Batch outputs are not ready yet. "
-                            f"Current status: {readiness.state}.{detail}"
+                            f"Current status: {readiness_state}.{detail}"
                         )
                         self.root.after(0, lambda: show_not_ready(message))
                         return
@@ -2488,24 +3039,30 @@ class PatientJournalsApp:
 
             if mode == "chunk":
                 state_var.set("Resubmitting the failed job as a batch…")
-                action = lambda: run_batch_rerun_direct(job.run_dir, self.settings)
+
+                def action():
+                    return run_batch_rerun_direct(job.run_dir, self.settings)
+
                 reload_after = False
             elif method == "api":
-                state_var.set(
-                    f"Recovering {state['failed']} missing page(s) via API…"
-                )
-                action = lambda: recover_dataset_gaps(job.run_dir, self.settings)
+                state_var.set(f"Recovering {state['failed']} missing page(s) via API…")
+
+                def action():
+                    return recover_dataset_gaps(job.run_dir, self.settings)
+
                 reload_after = True
             else:
                 state_var.set(
                     f"Resubmitting {state['failed']} failed page(s) as up to "
                     f"{retry_num_batches} retry chunk(s)…"
                 )
-                action = lambda: resubmit_failed_requests(
-                    job.run_dir,
-                    self.settings,
-                    num_batches=retry_num_batches,
-                )
+                def action():
+                    return resubmit_failed_requests(
+                        job.run_dir,
+                        self.settings,
+                        num_batches=retry_num_batches,
+                    )
+
                 reload_after = False
 
             def worker() -> None:
@@ -2525,7 +3082,9 @@ class PatientJournalsApp:
                     self._live_batch_status.pop(job.run_dir, None)
                     if reload_after:
                         if on_change:
-                            on_change(f"Recovered failed pages via API for {job.job_id}.")
+                            on_change(
+                                f"Recovered failed pages via API for {job.job_id}."
+                            )
                         if isinstance(result, dict) and result.get(
                             "api_recovery_completed"
                         ):
@@ -2600,13 +3159,27 @@ class PatientJournalsApp:
         footer = ttk.Frame(self.content, style="App.TFrame")
         footer.pack(side="bottom", fill="x", pady=(8, 0))
 
-        columns = ("created", "model", "folder", "images", "status", "success", "failed")
+        columns = (
+            "created",
+            "model",
+            "folder",
+            "images",
+            "status",
+            "ocr",
+            "subagents",
+            "validation",
+            "success",
+            "failed",
+        )
         headings = {
             "created": "Created",
             "model": "Model",
             "folder": "Folder / cloud location",
             "images": "Images",
             "status": "Status",
+            "ocr": "OCR",
+            "subagents": "Subagents",
+            "validation": "Verification",
             "success": "Success",
             "failed": "Failed",
         }
@@ -2616,6 +3189,9 @@ class PatientJournalsApp:
             "folder": 330,
             "images": 80,
             "status": 110,
+            "ocr": 65,
+            "subagents": 80,
+            "validation": 130,
             "success": 230,
             "failed": 70,
         }
@@ -2652,8 +3228,28 @@ class PatientJournalsApp:
         chunk_tree.pack(side="top", fill="x")
 
         status_var = tk.StringVar(value="")
-        duplicate_strategy_var = tk.StringVar(value=self.settings.batch_duplicate_strategy)
+        duplicate_strategy_var = tk.StringVar(
+            value=self.settings.batch_duplicate_strategy
+        )
         ignore_failed_var = tk.BooleanVar(value=False)
+        verification_model_var = tk.StringVar(value=self.settings.verification_model)
+        verification_thinking_var = tk.IntVar(
+            value=_verification_thinking_index(
+                self.settings.verification_thinking_level
+            )
+        )
+        verification_scope_var = tk.StringVar(
+            value=_verification_scope_label(self.settings.verification_scope)
+        )
+        verification_control_sample_var = tk.StringVar(
+            value=str(self.settings.verification_control_sample_percent)
+        )
+        verification_tokens_var = tk.StringVar(
+            value=str(self.settings.verification_max_output_tokens)
+        )
+        verification_chunks_var = tk.StringVar(
+            value=str(self.settings.verification_num_chunks)
+        )
         ttk.Label(footer, textvariable=status_var, style="Muted.TLabel").pack(
             side="bottom", anchor="w", pady=(8, 0)
         )
@@ -2663,7 +3259,12 @@ class PatientJournalsApp:
 
         def effective_status(job) -> str:
             live = self._live_batch_status.get(job.run_dir)
-            if live and job.status in {"retry_submitted", "submitted", "running", "unknown"}:
+            if live and job.status in {
+                "retry_submitted",
+                "submitted",
+                "running",
+                "unknown",
+            }:
                 return live
             if job.retrieved:
                 return job.status
@@ -2710,6 +3311,13 @@ class PatientJournalsApp:
                 job.input_location,
                 job.image_count,
                 display_status(effective_status(job)),
+                "on" if job.ocr_enabled else "off",
+                "on" if job.subagents else "off",
+                (
+                    job.model_validation_status or "enabled"
+                    if job.model_validation_enabled
+                    else "off"
+                ),
                 success_text,
                 failed_text,
             )
@@ -2799,7 +3407,15 @@ class PatientJournalsApp:
 
             def worker() -> None:
                 try:
-                    chunks = list_batch_chunks_with_state(run_dir)
+                    live_status = WorkflowService(
+                        self.settings, settings_path=self.settings_path
+                    ).live_batch_status(run_dir)
+                    chunks = [
+                        BatchChunkSummary(**item)
+                        for item in live_status.get("chunks", [])
+                        if isinstance(item, dict)
+                    ]
+                    readiness = live_status.get("readiness", {})
                 except Exception as exc:  # noqa: BLE001
                     message = str(exc)
 
@@ -2813,12 +3429,12 @@ class PatientJournalsApp:
                 def apply() -> None:
                     status_refresh_inflight.discard(run_dir)
                     insert_chunks(chunks)
-                    readiness = resolve_batch_run_readiness(run_dir, chunks=chunks)
-                    state = readiness.state
+                    state = str(readiness.get("state") or "")
                     if state:
                         self._live_batch_status[run_dir] = state
                         refresh(quiet=True)
-                        detail = f" {readiness.detail}" if readiness.detail else ""
+                        readiness_detail = str(readiness.get("detail") or "")
+                        detail = f" {readiness_detail}" if readiness_detail else ""
                         status_var.set(
                             f"Status: {state} ({len(chunks)} chunk(s)).{detail}"
                         )
@@ -2835,7 +3451,41 @@ class PatientJournalsApp:
             job = selected_job()
             if job is None:
                 insert_chunks([])
+                submit_validation_button.configure(state="disabled")
+                retrieve_validation_button.configure(state="disabled")
                 return
+            if job.model_validation_enabled:
+                if job.verification_model:
+                    verification_model_var.set(job.verification_model)
+                verification_thinking_var.set(
+                    _verification_thinking_index(job.verification_thinking_level)
+                )
+                verification_scope_var.set(
+                    _verification_scope_label(job.verification_scope)
+                )
+                verification_control_sample_var.set(
+                    str(job.verification_control_sample_percent)
+                )
+                verification_tokens_var.set(str(job.verification_max_output_tokens))
+                verification_chunks_var.set(str(job.verification_num_chunks))
+            submit_validation_button.configure(
+                state=(
+                    "normal"
+                    if job.model_validation_enabled
+                    and job.retrieved
+                    and job.model_validation_status == "pending"
+                    else "disabled"
+                )
+            )
+            retrieve_validation_button.configure(
+                state=(
+                    "normal"
+                    if job.model_validation_enabled
+                    and bool(job.verification_run_dir)
+                    and job.model_validation_status == "submitted"
+                    else "disabled"
+                )
+            )
             state = effective_status(job)
             if state in {"submitted", "unknown", "retry_submitted"}:
                 show_chunks_for_selection(with_state=True)
@@ -2935,6 +3585,105 @@ class PatientJournalsApp:
             else:
                 status_var.set("No missing result records or retry links found.")
 
+        def submit_model_validation() -> None:
+            job = selected_job()
+            if (
+                job is None
+                or not job.run_dir
+                or not job.model_validation_enabled
+                or not job.retrieved
+                or job.model_validation_status != "pending"
+            ):
+                status_var.set(
+                    "Select a retrieved job that has model validation enabled."
+                )
+                return
+            try:
+                max_tokens = max(1, int(verification_tokens_var.get().strip()))
+                num_chunks = max(1, int(verification_chunks_var.get().strip()))
+            except ValueError:
+                messagebox.showerror(
+                    "Invalid validation options",
+                    "Verifier tokens and chunks must be whole numbers.",
+                )
+                return
+            status_var.set("Submitting candidate-aware model validation…")
+
+            def worker() -> None:
+                try:
+                    WorkflowService(
+                        self.settings, settings_path=self.settings_path
+                    ).submit_model_validation(
+                        job.run_dir,
+                        model=verification_model_var.get(),
+                        thinking_level=_verification_thinking_level(
+                            verification_thinking_var.get()
+                        ),
+                        scope=_verification_scope_value(verification_scope_var.get()),
+                        max_output_tokens=max_tokens,
+                        num_chunks=num_chunks,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    message = str(exc)
+                    self.root.after(
+                        0,
+                        lambda message=message: messagebox.showerror(
+                            "Model validation submit failed", message
+                        ),
+                    )
+                    return
+
+                def done() -> None:
+                    refresh(quiet=True)
+                    status_var.set(
+                        "Model validation submitted. Wait for the verifier batch "
+                        "to finish, then retrieve model validation."
+                    )
+
+                self.root.after(0, done)
+
+            threading.Thread(target=worker, daemon=True).start()
+
+        def retrieve_model_validation() -> None:
+            job = selected_job()
+            if job is None or not job.run_dir or not job.verification_run_dir:
+                status_var.set("Select a job with a submitted verifier batch.")
+                return
+            status_var.set("Retrieving model-validation results…")
+
+            def worker() -> None:
+                try:
+                    result = WorkflowService(
+                        self.settings, settings_path=self.settings_path
+                    ).retrieve_model_validation(job.run_dir)
+                except Exception as exc:  # noqa: BLE001
+                    message = str(exc)
+                    self.root.after(
+                        0,
+                        lambda message=message: messagebox.showerror(
+                            "Model validation retrieve failed", message
+                        ),
+                    )
+                    return
+
+                def done() -> None:
+                    refresh(quiet=True)
+                    correction_path = str(result.get("field_corrections_path") or "")
+                    corrected_fields = int(result.get("corrected_fields") or 0)
+                    suffix = (
+                        f" {corrected_fields} field(s) corrected; metadata: "
+                        f"{correction_path}."
+                        if correction_path
+                        else ""
+                    )
+                    status_var.set(
+                        "Model-validation results retrieved and recorded." + suffix
+                    )
+
+                self.root.after(0, done)
+
+            threading.Thread(target=worker, daemon=True).start()
+
         tree.bind(
             "<<TreeviewSelect>>",
             on_job_selected,
@@ -2956,6 +3705,22 @@ class PatientJournalsApp:
         self._button(buttons, "Refresh list", lambda: refresh(), kind="secondary").pack(
             side="left"
         )
+        submit_validation_button = self._button(
+            buttons,
+            "Submit model validation",
+            submit_model_validation,
+            kind="secondary",
+        )
+        submit_validation_button.configure(state="disabled")
+        submit_validation_button.pack(side="left", padx=(10, 0))
+        retrieve_validation_button = self._button(
+            buttons,
+            "Retrieve model validation",
+            retrieve_model_validation,
+            kind="secondary",
+        )
+        retrieve_validation_button.configure(state="disabled")
+        retrieve_validation_button.pack(side="left", padx=(10, 0))
 
         advanced, _advanced_open = self._advanced_section(footer)
         advanced.columnconfigure(1, weight=1)
@@ -2974,18 +3739,74 @@ class PatientJournalsApp:
             text="Ignore failed",
             variable=ignore_failed_var,
         ).grid(row=0, column=2, sticky="w", padx=(14, 0))
-        self._button(advanced, "Cancel selected job", cancel_selected, kind="secondary").grid(
-            row=1, column=0, sticky="w", pady=(14, 0)
-        )
-        self._button(advanced, "Repair metadata", repair_metadata, kind="secondary").grid(
-            row=1, column=1, sticky="w", pady=(14, 0), padx=(14, 0)
-        )
+        self._button(
+            advanced, "Cancel selected job", cancel_selected, kind="secondary"
+        ).grid(row=1, column=0, sticky="w", pady=(14, 0))
+        self._button(
+            advanced, "Repair metadata", repair_metadata, kind="secondary"
+        ).grid(row=1, column=1, sticky="w", pady=(14, 0), padx=(14, 0))
         self._grid_help(
             advanced,
             1,
             2,
             "Repairs missing result summaries and links retry batches back to their original job.",
         )
+        validation_model_names = [
+            option.name for option in self.validation_model_options
+        ]
+        if self.settings.verification_model not in validation_model_names:
+            validation_model_names.insert(0, self.settings.verification_model)
+        ttk.Label(advanced, text="Verifier model", style="App.TLabel").grid(
+            row=2, column=0, sticky="w", pady=(14, 0)
+        )
+        ttk.Combobox(
+            advanced,
+            textvariable=verification_model_var,
+            values=validation_model_names,
+            state="readonly",
+        ).grid(row=2, column=1, sticky="ew", pady=(14, 0), padx=(14, 0))
+        ttk.Label(advanced, text="Verifier thinking", style="App.TLabel").grid(
+            row=3, column=0, sticky="w", pady=(8, 0)
+        )
+        _verification_thinking_slider(advanced, verification_thinking_var).grid(
+            row=3, column=1, sticky="ew", pady=(8, 0), padx=(14, 0)
+        )
+        ttk.Label(advanced, text="Verification scope", style="App.TLabel").grid(
+            row=4, column=0, sticky="w", pady=(8, 0)
+        )
+        ttk.Combobox(
+            advanced,
+            textvariable=verification_scope_var,
+            values=tuple(VERIFICATION_SCOPE_LABELS.values()),
+            state="readonly",
+        ).grid(row=4, column=1, sticky="ew", pady=(8, 0), padx=(14, 0))
+        control_sample_entry = self._field(
+            advanced,
+            "Routine-page control sample (%) — fixed at retrieval",
+            verification_control_sample_var,
+            5,
+        )
+        control_sample_entry.configure(state="disabled")
+        ttk.Label(
+            advanced,
+            text=(
+                "Schema-valid verifier corrections are accepted automatically. "
+                "Complete runs publish the next immutable dataset version."
+            ),
+            style="Muted.TLabel",
+            wraplength=780,
+        ).grid(row=6, column=0, columnspan=3, sticky="w", pady=(8, 0))
+        self._field(advanced, "Verifier max output tokens", verification_tokens_var, 7)
+        self._field(advanced, "Validation batch chunks", verification_chunks_var, 8)
+        ttk.Label(
+            advanced,
+            text=(
+                "Risk-routed mode checks flagged pages plus the recorded control "
+                "sample. After a terminal result, submit again to test another configuration."
+            ),
+            style="Muted.TLabel",
+            wraplength=780,
+        ).grid(row=9, column=0, columnspan=3, sticky="w", pady=(4, 0))
         self._jobs_repaint = lambda: refresh(quiet=True)
         refresh()
         self._jobs_refresh_after_id = self.root.after(AUTO_REFRESH_MS, auto_refresh)

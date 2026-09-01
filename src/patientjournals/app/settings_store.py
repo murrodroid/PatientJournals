@@ -14,6 +14,15 @@ def _coerce_settings(payload: dict[str, object]) -> AppSettings:
         key: payload.get(key, defaults.get(key))
         for key in allowed
     }
+    scope = str(values.get("verification_scope") or "flagged")
+    values["verification_scope"] = scope if scope in {"all", "flagged"} else "flagged"
+    values["verification_control_sample_percent"] = max(
+        0.0,
+        min(100.0, float(values.get("verification_control_sample_percent") or 0.0)),
+    )
+    # Final-model corrections remain automatic after the immutable schema and
+    # complete-population consolidation gates.
+    values["verification_apply_mode"] = "apply_patches"
     return AppSettings(**values)  # type: ignore[arg-type]
 
 
@@ -55,7 +64,16 @@ def command_override_payload(
     cloud_prefix: str = "",
     cloud_prefixes: tuple[str, ...] = (),
     duplicate_strategy: str = "",
+    ocr_enabled: bool | None = None,
     subagents: bool | None = None,
+    model_validation_enabled: bool | None = None,
+    verification_model: str = "",
+    verification_thinking_level: str = "",
+    verification_scope: str = "",
+    verification_control_sample_percent: float | None = None,
+    verification_apply_mode: str = "",
+    verification_max_output_tokens: int | None = None,
+    verification_num_chunks: int | None = None,
 ) -> dict[str, object]:
     payload = settings.to_json_dict()
     if model_name:
@@ -83,8 +101,30 @@ def command_override_payload(
         payload["batch_input_prefixes"] = (cloud_prefix,)
     if duplicate_strategy:
         payload["batch_duplicate_strategy"] = duplicate_strategy
+    if ocr_enabled is not None:
+        payload["ocr_enabled"] = bool(ocr_enabled)
     if subagents is not None:
         payload["subagents"] = bool(subagents)
+    if model_validation_enabled is not None:
+        payload["model_validation_enabled"] = bool(model_validation_enabled)
+    if verification_model:
+        payload["verification_model"] = verification_model
+    if verification_thinking_level:
+        payload["verification_thinking_level"] = verification_thinking_level
+    if verification_scope:
+        payload["verification_scope"] = verification_scope
+    if verification_control_sample_percent is not None:
+        payload["verification_control_sample_percent"] = max(
+            0.0, min(100.0, float(verification_control_sample_percent))
+        )
+    if verification_apply_mode:
+        payload["verification_apply_mode"] = verification_apply_mode
+    if verification_max_output_tokens is not None:
+        payload["verification_max_output_tokens"] = max(
+            1, int(verification_max_output_tokens)
+        )
+    if verification_num_chunks is not None:
+        payload["verification_num_chunks"] = max(1, int(verification_num_chunks))
     return payload
 
 

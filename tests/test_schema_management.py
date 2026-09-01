@@ -17,7 +17,7 @@ from patientjournals.app.schemas import (
     dataset_schema_field_paths,
     flatten_schema_fields,
 )
-from patientjournals.config.schemas import model_from_json_schema
+from patientjournals.config.schemas import FrontPage, model_from_json_schema
 from patientjournals.validation.cli import build_validation_datapoints
 
 
@@ -157,6 +157,101 @@ def test_managed_json_schema_builds_a_strict_runtime_model() -> None:
     assert parsed.score == 2.0
     with pytest.raises(ValidationError):
         model.model_validate({"name": "A", "unknown": "not allowed"})
+
+
+def test_managed_json_schema_preserves_legacy_extra_ignore_behavior() -> None:
+    schema = {
+        "title": "StudySchema",
+        "type": "object",
+        "properties": {"name": {"type": "string"}},
+        "required": ["name"],
+    }
+    model = model_from_json_schema("StudySchema", schema)
+
+    parsed = model.model_validate({"name": "A", "unknown": "ignored"})
+
+    assert parsed.model_dump() == {"name": "A"}
+
+
+def test_managed_json_schema_enforces_date_format_bounds() -> None:
+    schema = {
+        "title": "DatedStudySchema",
+        "type": "object",
+        "properties": {
+            "inclusive": {
+                "type": "string",
+                "format": "date",
+                "formatMinimum": "1879-01-01",
+                "formatMaximum": "1910-12-31",
+            },
+            "exclusive": {
+                "type": "string",
+                "format": "date",
+                "formatExclusiveMinimum": "1879-01-01",
+                "formatExclusiveMaximum": "1910-12-31",
+            },
+        },
+        "required": ["inclusive", "exclusive"],
+        "additionalProperties": False,
+    }
+    model = model_from_json_schema("DatedStudySchema", schema)
+
+    parsed = model.model_validate_json(
+        '{"inclusive":"1879-01-01","exclusive":"1900-01-01"}',
+        strict=True,
+    )
+
+    assert parsed.inclusive.isoformat() == "1879-01-01"
+    with pytest.raises(ValidationError):
+        model.model_validate_json(
+            '{"inclusive":"1878-12-31","exclusive":"1900-01-01"}',
+            strict=True,
+        )
+    with pytest.raises(ValidationError):
+        model.model_validate_json(
+            '{"inclusive":"1911-01-01","exclusive":"1900-01-01"}',
+            strict=True,
+        )
+    with pytest.raises(ValidationError):
+        model.model_validate_json(
+            '{"inclusive":"1900-01-01","exclusive":"1879-01-01"}',
+            strict=True,
+        )
+    with pytest.raises(ValidationError):
+        model.model_validate_json(
+            '{"inclusive":"1900-01-01","exclusive":"1910-12-31"}',
+            strict=True,
+        )
+
+
+def test_managed_json_schema_rejects_invalid_date_format_bound() -> None:
+    schema = {
+        "title": "DatedStudySchema",
+        "type": "object",
+        "properties": {
+            "observed": {
+                "type": "string",
+                "format": "date",
+                "formatMinimum": "not-a-date",
+            }
+        },
+        "required": ["observed"],
+    }
+
+    with pytest.raises(ValueError, match="formatMinimum"):
+        model_from_json_schema("DatedStudySchema", schema)
+
+
+def test_builtin_frontpage_retains_exact_legacy_json_schema() -> None:
+    schema = FrontPage.model_json_schema()
+
+    assert "serum" in schema["required"]
+    assert "crossed_out" in schema["properties"]
+    assert "crossed_out" not in schema["required"]
+    hospital_stay = schema["$defs"]["HospitalStay"]["properties"]
+    for field_name in ("admission_date", "release_date"):
+        assert "formatMinimum" not in hospital_stay[field_name]
+        assert "formatMaximum" not in hospital_stay[field_name]
 
 
 def test_versioned_validation_uses_each_rows_schema_and_model(tmp_path) -> None:

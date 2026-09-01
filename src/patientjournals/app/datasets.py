@@ -730,7 +730,7 @@ def list_cloud_dataset_library(
                 row_count=row_count,
                 size_bytes=getattr(blob, "size", None),
                 updated_at=_format_blob_updated(blob),
-                run_id=Path(name).parent.name,
+                run_id=str(metadata.get("source_run_id") or Path(name).parent.name),
                 gcs_uri=uri,
                 model=str(metadata.get("model") or ""),
                 schema_name=str(metadata.get("schema_name") or ""),

@@ -336,6 +336,12 @@ def _counter_to_dict(counter: Counter[str]) -> dict[str, int]:
 
 def collect_outputs(args: argparse.Namespace | None = None) -> CollectOutputsResult:
     args = args or _parse_args()
+    if bool(getattr(config, "model_validation_enabled", False)):
+        raise RuntimeError(
+            "batch.collect-outputs cannot publish validation-enabled extraction "
+            "outputs. Use batch.retrieve to create generation-bound page "
+            "candidates, then batch.verify."
+        )
     if args.skip_gcs_outputs and not args.local_output:
         raise ValueError(
             "--skip-gcs-outputs requires at least one --local-output path."

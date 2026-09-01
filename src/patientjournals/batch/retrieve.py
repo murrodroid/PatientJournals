@@ -10,18 +10,24 @@ from concurrent.futures import ThreadPoolExecutor, as_completed as futures_as_co
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable, Mapping
 
 from google import genai
+from google.api_core.exceptions import PreconditionFailed
 from google.cloud import storage
 from google.genai import types
 from tqdm import tqdm
 
 from patientjournals.batch.client import get_batch_client, resolve_service_account_path
-from patientjournals.batch.ocr_context import ocr_context_for_blob
+from patientjournals.batch.ocr_context import (
+    CloudBlobIdentity,
+    CloudOcrMetadata,
+    ocr_context_for_blob,
+)
 from patientjournals.batch.output_records import (
     add_reproducibility_columns,
     add_response_metadata_columns,
+    gemini_finish_reason,
     parse_gemini_output_record,
 )
 from patientjournals.batch.results import RetrieveBatchResult
@@ -34,6 +40,7 @@ from patientjournals.batch.subagent_outputs import (
     write_combined_subagent_outputs,
 )
 from patientjournals.config import config
+from patientjournals.config.schemas import resolve_output_schema
 from patientjournals.shared.generation_spec import (
     build_live_generation_config,
     prompt_text,
@@ -48,14 +55,40 @@ from patientjournals.shared.processing_metrics import (
     MANIFEST_FILE_NAME,
     append_processing_record,
     base_image_record,
-    utc_now_iso,
     write_processing_summary,
 )
 from patientjournals.shared.response_parsing import extract_response_metadata
 from patientjournals.shared import run_layout
 from patientjournals.shared.identity import identity_columns
-from patientjournals.shared.subagents import page_key_from_request_key
+from patientjournals.shared.subagents import (
+    encode_specialist_request_key,
+    page_key_from_request_key,
+)
 from patientjournals.shared.tools import create_subfolder, flush_rows, get_run_logger
+from patientjournals.validation.candidates import (
+    PAGE_CANDIDATES_FILE_NAME,
+    PageCandidateWriter,
+    read_page_candidates,
+    write_page_candidates,
+)
+from patientjournals.validation.routing import (
+    DETERMINISTIC_ROUTING_POLICY_VERSION,
+    route_candidates,
+    write_routing_decisions,
+)
+from patientjournals.validation.input_manifest import (
+    EXTRACTION_IMAGE_BINDINGS_FILE_NAME,
+    INPUT_IMAGE_MANIFEST_FILE_NAME,
+    ExtractionImageBinding,
+    InputImageManifestRecord,
+    bindings_by_key,
+    file_sha256,
+    ocr_document_sha256,
+    read_extraction_image_bindings,
+    read_input_image_manifest,
+    verify_extraction_image_bindings,
+)
+from patientjournals.shared.ocr import render_ocr_context
 
 
 _GEMINI_TERMINAL_STATES = {
@@ -64,6 +97,20 @@ _GEMINI_TERMINAL_STATES = {
     "JOB_STATE_CANCELLED",
 }
 _ANTHROPIC_TERMINAL_STATES = {"ended", "succeeded", "errored", "canceled", "expired"}
+DETERMINISTIC_ROUTING_FILE_NAME = "deterministic_routing.jsonl"
+_NON_RETRYABLE_SUBAGENT_FAILURE_REASONS = frozenset(
+    {
+        "duplicate_valid_specialist",
+        "joined_schema_validation_failed",
+    }
+)
+
+
+@dataclass(frozen=True)
+class _UploadedPrevalidationArtifact:
+    uri: str
+    sha256: str
+    generation: str
 
 
 def _parse_args() -> argparse.Namespace:
@@ -475,6 +522,14 @@ class _RecoveryResult:
     mime_type: str | None = None
 
 
+@dataclass(frozen=True)
+class _FirstPassRecoveryEvidence:
+    """Exact image and optional OCR evidence used by one first-pass request."""
+
+    image_binding: ExtractionImageBinding
+    input_record: InputImageManifestRecord
+
+
 async def _generate_recovery_response(
     *,
     recovery_client,
@@ -508,6 +563,81 @@ async def _generate_recovery_response(
     )
 
 
+def _generation_bound_blob(
+    *,
+    bucket,
+    identity: CloudBlobIdentity,
+    evidence_name: str,
+):
+    bucket_name = str(getattr(bucket, "name", "") or "")
+    if not identity.bucket or not identity.name or not identity.generation:
+        raise RuntimeError(
+            f"Incomplete generation-bound {evidence_name} identity for API recovery."
+        )
+    if bucket_name and bucket_name != identity.bucket:
+        raise RuntimeError(
+            f"Generation-bound {evidence_name} is in bucket {identity.bucket!r}, "
+            f"not recovery bucket {bucket_name!r}."
+        )
+    return bucket.blob(identity.name, generation=int(identity.generation))
+
+
+def _bound_ocr_context_for_recovery(
+    *,
+    bucket,
+    input_record: InputImageManifestRecord,
+) -> str:
+    """Render the exact OCR sidecar recorded for the extraction request."""
+
+    if not input_record.ocr_enabled:
+        return ""
+
+    expected_sidecar = input_record.sidecar_source
+    if expected_sidecar.name != input_record.ocr_sidecar_name:
+        raise RuntimeError(
+            f"OCR sidecar identity for {input_record.key!r} does not match its "
+            "first-pass manifest name."
+        )
+    sidecar_blob = _generation_bound_blob(
+        bucket=bucket,
+        identity=expected_sidecar,
+        evidence_name="OCR sidecar",
+    )
+    download = getattr(sidecar_blob, "download_as_bytes", None)
+    if not callable(download):
+        raise TypeError(
+            f"OCR sidecar cannot be downloaded: {input_record.ocr_sidecar_name}"
+        )
+    sidecar_bytes = download(
+        if_generation_match=int(expected_sidecar.generation)
+    )
+    if not isinstance(sidecar_bytes, bytes):
+        sidecar_bytes = bytes(sidecar_bytes)
+    if hashlib.sha256(sidecar_bytes).hexdigest() != input_record.ocr_sidecar_sha256:
+        raise RuntimeError(
+            f"OCR sidecar content for {input_record.key!r} differs from the "
+            "first-pass extraction manifest."
+        )
+
+    metadata = CloudOcrMetadata.from_json(sidecar_bytes)
+    if not input_record.source.matches(metadata.source):
+        raise RuntimeError(
+            f"OCR source image identity for {input_record.key!r} differs from the "
+            "first-pass extraction manifest."
+        )
+    if metadata.document.image_sha256 != input_record.ocr_image_sha256:
+        raise RuntimeError(
+            f"OCR image digest for {input_record.key!r} differs from the "
+            "first-pass extraction manifest."
+        )
+    if ocr_document_sha256(metadata.document) != input_record.ocr_document_sha256:
+        raise RuntimeError(
+            f"OCR text/position document for {input_record.key!r} differs from the "
+            "first-pass extraction manifest."
+        )
+    return render_ocr_context(metadata.document)
+
+
 async def _recover_one_missing_page_via_api_key(
     *,
     key: str,
@@ -517,8 +647,36 @@ async def _recover_one_missing_page_via_api_key(
     recovery_model: str,
     generation_config: dict,
     log,
+    first_pass_evidence: _FirstPassRecoveryEvidence | None = None,
 ) -> _RecoveryResult:
-    blob = bucket.blob(key)
+    if bool(config.model_validation_enabled) and first_pass_evidence is None:
+        return _RecoveryResult(
+            key=key,
+            line_number=line_number,
+            failure_reason="recovery_first_pass_evidence_not_found",
+        )
+    if bool(config.model_validation_enabled) and first_pass_evidence is not None and (
+        first_pass_evidence.image_binding.provider != "gemini"
+        or first_pass_evidence.image_binding.reference_mode
+        != "immutable_staged_uri"
+    ):
+        return _RecoveryResult(
+            key=key,
+            line_number=line_number,
+            failure_reason="recovery_first_pass_request_binding_invalid",
+        )
+
+    if first_pass_evidence is not None:
+        request_source = first_pass_evidence.image_binding.request_source
+        blob = _generation_bound_blob(
+            bucket=bucket,
+            identity=request_source,
+            evidence_name="first-pass request image",
+        )
+        mime_type = first_pass_evidence.input_record.mime_type
+    else:
+        blob = bucket.blob(key)
+        mime_type = _guess_blob_mime_type(blob, key)
     max_attempts = max(1, int(config.api_max_attempts))
     total_started = time.perf_counter()
 
@@ -534,9 +692,30 @@ async def _recover_one_missing_page_via_api_key(
                     total_seconds=time.perf_counter() - total_started,
                 )
 
-            image_bytes = await asyncio.to_thread(blob.download_as_bytes)
-            mime_type = _guess_blob_mime_type(blob, key)
-            ocr_context = await asyncio.to_thread(ocr_context_for_blob, blob)
+            if first_pass_evidence is not None:
+                image_bytes = await asyncio.to_thread(
+                    blob.download_as_bytes,
+                    if_generation_match=int(
+                        first_pass_evidence.image_binding.request_source.generation
+                    ),
+                )
+                if (
+                    first_pass_evidence.input_record.ocr_enabled
+                    and hashlib.sha256(image_bytes).hexdigest()
+                    != first_pass_evidence.input_record.ocr_image_sha256
+                ):
+                    raise RuntimeError(
+                        f"Recovered request image digest for {key!r} differs from "
+                        "the OCR-bound first-pass input."
+                    )
+                ocr_context = await asyncio.to_thread(
+                    _bound_ocr_context_for_recovery,
+                    bucket=bucket,
+                    input_record=first_pass_evidence.input_record,
+                )
+            else:
+                image_bytes = await asyncio.to_thread(blob.download_as_bytes)
+                ocr_context = await asyncio.to_thread(ocr_context_for_blob, blob)
             generation_started = time.perf_counter()
             response = await _generate_recovery_response(
                 recovery_client=recovery_client,
@@ -547,6 +726,14 @@ async def _recover_one_missing_page_via_api_key(
                 ocr_context=ocr_context,
             )
             generation_seconds = time.perf_counter() - generation_started
+
+            if bool(config.model_validation_enabled):
+                finish_reason = gemini_finish_reason(response)
+                if finish_reason != "STOP":
+                    raise ValueError(
+                        "Unclean API recovery finish reason: "
+                        f"{finish_reason or 'missing'}"
+                    )
 
             metadata = extract_response_metadata(response)
             text_payload = metadata.get("text")
@@ -603,6 +790,9 @@ async def _recover_missing_pages_via_api_key_async(
     recovery_model: str,
     generation_config: dict,
     log,
+    first_pass_evidence_by_key: Mapping[
+        str, _FirstPassRecoveryEvidence
+    ] | None = None,
 ) -> list[_RecoveryResult]:
     concurrency = max(1, int(config.api_concurrent_tasks or 1))
     semaphore = asyncio.Semaphore(concurrency)
@@ -618,6 +808,11 @@ async def _recover_missing_pages_via_api_key_async(
                 recovery_model=recovery_model,
                 generation_config=generation_config,
                 log=log,
+                first_pass_evidence=(
+                    first_pass_evidence_by_key.get(key)
+                    if first_pass_evidence_by_key is not None
+                    else None
+                ),
             )
 
     tasks = [
@@ -645,6 +840,11 @@ def _recover_missing_pages_via_api_key(
     log,
     force: bool = False,
     manifest_path: Path | None = None,
+    candidate_writer: PageCandidateWriter | None = None,
+    candidate_provenance: dict[str, object] | None = None,
+    first_pass_evidence_by_key: Mapping[
+        str, _FirstPassRecoveryEvidence
+    ] | None = None,
 ) -> int:
     if not missing_keys:
         return 0
@@ -692,6 +892,7 @@ def _recover_missing_pages_via_api_key(
             recovery_model=recovery_model,
             generation_config=generation_config,
             log=log,
+            first_pass_evidence_by_key=first_pass_evidence_by_key,
         )
     )
 
@@ -746,6 +947,25 @@ def _recover_missing_pages_via_api_key(
         failures.pop(key, None)
 
         metadata = result.metadata or {}
+        if candidate_writer is not None:
+            candidate_writer.write(
+                key=key,
+                candidate=result.parsed_model.model_dump(mode="json"),
+                extraction_metadata={
+                    **dict(candidate_provenance or {}),
+                    "model": recovery_model,
+                    "provider": "gemini",
+                    "schema_name": str(
+                        getattr(config, "output_schema_name", "") or ""
+                    ),
+                    "schema_version_id": str(
+                        getattr(config, "output_schema_version_id", "") or ""
+                    ),
+                    "source": "api_recovery",
+                    "recovered": True,
+                    "line_number": result.line_number,
+                },
+            )
         rows = data_to_rows(
             result.parsed_model,
             file_name=key,
@@ -795,22 +1015,216 @@ def _read_batch_job_payload(path: Path) -> dict | None:
     return None
 
 
+def _restore_submit_semantics(
+    *,
+    submit_run_dir: Path,
+    submit_metadata: Mapping[str, object],
+    log,
+) -> None:
+    """Restore scientific inputs from the extraction run, not current settings."""
+
+    metadata_path = submit_run_dir / "metadata.json"
+    metadata = _read_batch_job_payload(metadata_path)
+    if not isinstance(metadata, dict):
+        raise RuntimeError(
+            "Extraction retrieval requires the submit run's metadata.json snapshot."
+        )
+    raw_config_values = metadata.get("config_values")
+    config_values = (
+        raw_config_values.get("config", {})
+        if isinstance(raw_config_values, dict)
+        else {}
+    )
+    if not isinstance(config_values, dict):
+        config_values = {}
+
+    for field_name in (
+        "model",
+        "model_temperature",
+        "model_max_output_tokens",
+        "thinking_level",
+        "include_thoughts",
+        "include_confidence_scores",
+        "include_response_avg_logprobs",
+        "batch_include_response_schema",
+        "response_mime_type",
+        "response_schema_field",
+        "output_format",
+        "dataset_file_name",
+        "csv_sep",
+        "input_prompt_name",
+        "ocr_enabled",
+    ):
+        if field_name in config_values and config_values[field_name] is not None:
+            setattr(config, field_name, config_values[field_name])
+
+    schema_name = str(
+        submit_metadata.get("schema_name")
+        or metadata.get("schema_name")
+        or ""
+    ).strip()
+    schema_version_id = str(
+        submit_metadata.get("schema_version_id")
+        or metadata.get("schema_version_id")
+        or ""
+    ).strip()
+    schema_payload = metadata.get("output_schema")
+    if not schema_name or not isinstance(schema_payload, dict) or not schema_payload:
+        raise RuntimeError(
+            "Extraction metadata does not contain a complete schema snapshot."
+        )
+    config.output_schema_name = schema_name
+    config.output_schema_version_id = schema_version_id
+    built_in_model = None
+    if not schema_version_id:
+        try:
+            candidate_model = resolve_output_schema(schema_name)
+        except ValueError:
+            candidate_model = None
+        if candidate_model is not None:
+            candidate_schema = candidate_model.model_json_schema()
+            if json.dumps(
+                candidate_schema,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ) == json.dumps(
+                schema_payload,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ):
+                built_in_model = candidate_model
+    if built_in_model is not None:
+        config.output_schema_override = None
+        config.output_model = built_in_model
+    else:
+        config.output_schema_override = schema_payload
+
+    for field_name in (
+        "subagents",
+        "model_validation_enabled",
+        "verification_model",
+        "verification_thinking_level",
+        "verification_scope",
+        "verification_control_sample_percent",
+        "verification_max_output_tokens",
+        "verification_num_chunks",
+    ):
+        if field_name in submit_metadata and submit_metadata[field_name] is not None:
+            setattr(config, field_name, submit_metadata[field_name])
+    config.__post_init__()
+
+    canonical_snapshot = json.dumps(
+        schema_payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True
+    )
+    canonical_runtime = json.dumps(
+        config.output_schema,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    if canonical_runtime != canonical_snapshot:
+        raise RuntimeError(
+            "Restored extraction schema does not match the immutable submit snapshot."
+        )
+    log(
+        "Restored extraction semantics from submit metadata: "
+        f"model={config.model}, schema={schema_name}@{schema_version_id or 'built-in'}, "
+        f"control_sample={config.verification_control_sample_percent}%."
+    )
+
+
+def _plan_subagent_retry_requests(
+    *,
+    failed_page_keys: set[str],
+    failed_page_reasons: Mapping[str, str],
+    subagent_failures: Iterable[Mapping[str, object]],
+) -> tuple[set[str], dict[str, str], dict[str, tuple[str, ...]]]:
+    """Resolve failed pages to safe specialist requests.
+
+    A retry may replace a missing or invalid specialist attempt. It cannot repair a
+    page that already has two valid attempts for one specialist, or a page whose
+    individually valid specialist payloads fail the joined schema: adding more
+    specialist rows would only create duplicate-valid attempts.
+    """
+
+    retry_request_keys_by_page: dict[str, set[str]] = {}
+    non_retryable_reasons_by_page: dict[str, set[str]] = {}
+    for failure in subagent_failures:
+        page_key = str(failure.get("page_key") or "").strip()
+        if not page_key or page_key not in failed_page_keys:
+            continue
+        reason = str(failure.get("reason") or "").strip()
+        if (
+            failure.get("retryable") is False
+            or reason in _NON_RETRYABLE_SUBAGENT_FAILURE_REASONS
+        ):
+            non_retryable_reasons_by_page.setdefault(page_key, set()).add(
+                reason or "non_retryable_subagent_failure"
+            )
+            continue
+
+        specialist_names: set[str] = set()
+        specialist = str(failure.get("specialist") or "").strip()
+        if specialist:
+            specialist_names.add(specialist)
+        missing = failure.get("missing_specialists")
+        if isinstance(missing, list):
+            specialist_names.update(
+                str(item).strip() for item in missing if str(item).strip()
+            )
+        if specialist_names:
+            retry_request_keys_by_page.setdefault(page_key, set()).update(
+                encode_specialist_request_key(page_key, name)
+                for name in specialist_names
+            )
+
+    retry_keys: set[str] = set()
+    retry_reasons: dict[str, str] = {}
+    for page_key in sorted(failed_page_keys):
+        if page_key in non_retryable_reasons_by_page:
+            continue
+        request_keys = retry_request_keys_by_page.get(page_key)
+        if not request_keys:
+            # No specialist response was observed for this page. Retrying the page
+            # key safely fans out all specialists in retry request construction.
+            request_keys = {page_key}
+        for request_key in request_keys:
+            retry_keys.add(request_key)
+            retry_reasons[request_key] = failed_page_reasons.get(
+                page_key, "failed_schema_specialist"
+            )
+
+    return (
+        retry_keys,
+        retry_reasons,
+        {
+            page_key: tuple(sorted(reasons))
+            for page_key, reasons in non_retryable_reasons_by_page.items()
+        },
+    )
+
+
 def _read_request_keys_from_file(path: Path) -> set[str]:
+    return _read_request_keys_from_bytes(path.read_bytes())
+
+
+def _read_request_keys_from_bytes(raw_bytes: bytes) -> set[str]:
     keys: set[str] = set()
-    with open(path, "r", encoding="utf-8") as handle:
-        for line in handle:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                payload = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            key = _normalize_key(payload.get("key"))
-            if key:
-                page_key = page_key_from_request_key(key)
-                if page_key:
-                    keys.add(page_key)
+    for line in raw_bytes.decode("utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        key = _normalize_key(payload.get("key"))
+        if key:
+            page_key = page_key_from_request_key(key)
+            if page_key:
+                keys.add(page_key)
     return keys
 
 
@@ -892,9 +1306,223 @@ def _request_files_from_payload(
     return [config.batch_requests_file_name]
 
 
+def _request_file_entries_from_payload(
+    payload: dict,
+    *,
+    selected_batch_names: list[str] | None = None,
+) -> list[dict[str, object]]:
+    """Return request metadata without collapsing distinct retry attempts."""
+
+    selected = {
+        name.strip()
+        for name in (selected_batch_names or [])
+        if isinstance(name, str) and name.strip()
+    }
+    entries: list[dict[str, object]] = []
+    jobs = payload.get("batch_jobs")
+    if isinstance(jobs, list):
+        for item in jobs:
+            if not isinstance(item, dict):
+                continue
+            if selected:
+                job_name = _normalize_key(item.get("batch_job_name"))
+                if not job_name or job_name not in selected:
+                    continue
+            request_file = _normalize_key(item.get("requests_file"))
+            if request_file:
+                entries.append(dict(item))
+
+    if entries:
+        return entries
+
+    if selected:
+        payload_names = set(_extract_batch_names_from_payload(payload))
+        if payload_names and not payload_names.intersection(selected):
+            return []
+
+    direct = _normalize_key(payload.get("requests_file"))
+    return [{"requests_file": direct or config.batch_requests_file_name}]
+
+
+def _retry_binding_from_payload(
+    *,
+    payload: dict,
+    entry: Mapping[str, object],
+    request_file: str,
+) -> Mapping[str, object] | None:
+    direct = entry.get("requests_gcs_binding")
+    if isinstance(direct, Mapping):
+        return direct
+
+    is_retry = bool(entry.get("is_retry"))
+    retry_run_id = _normalize_key(entry.get("retry_run_id"))
+    batch_name = _normalize_key(entry.get("batch_job_name"))
+    if not is_retry and not retry_run_id:
+        return None
+    retry_runs = payload.get("retry_runs")
+    if isinstance(retry_runs, list):
+        for retry_run in retry_runs:
+            if not isinstance(retry_run, dict):
+                continue
+            run_id = _normalize_key(retry_run.get("run_id"))
+            names = retry_run.get("batch_job_names")
+            name_match = isinstance(names, list) and batch_name in {
+                _normalize_key(value) for value in names
+            }
+            if retry_run_id:
+                if run_id != retry_run_id and not name_match:
+                    continue
+            elif batch_name and not name_match:
+                continue
+            elif not batch_name:
+                continue
+            bindings = retry_run.get("artifact_gcs_bindings")
+            if isinstance(bindings, Mapping):
+                binding = bindings.get(request_file)
+                if isinstance(binding, Mapping):
+                    return binding
+
+    bindings = payload.get("artifact_gcs_bindings")
+    if isinstance(bindings, Mapping):
+        binding = bindings.get(request_file)
+        if isinstance(binding, Mapping):
+            return binding
+    return None
+
+
+def _local_request_file_path(
+    *,
+    submit_run_dir: Path,
+    entry: Mapping[str, object],
+    request_file: str,
+) -> Path | None:
+    request_path = Path(request_file).expanduser()
+    candidates: list[Path] = []
+    is_retry = bool(entry.get("is_retry"))
+    if request_path.is_absolute():
+        candidates.append(request_path)
+    elif is_retry:
+        retry_run_dir = _normalize_key(entry.get("retry_run_dir"))
+        if retry_run_dir:
+            candidates.append(Path(retry_run_dir).expanduser() / request_path)
+        retry_run_id = _normalize_key(entry.get("retry_run_id"))
+        if retry_run_id:
+            candidates.append(submit_run_dir.parent / retry_run_id / request_path)
+            candidates.extend(
+                run_dir / request_path
+                for run_dir in run_layout.iter_run_dirs(config.output_root, "submit")
+                if run_dir.name == retry_run_id
+            )
+    else:
+        candidates.append(submit_run_dir / request_path)
+
+    seen: set[Path] = set()
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        if candidate.exists() and candidate.is_file():
+            return candidate
+    return None
+
+
+def _download_bound_request_artifact(binding: Mapping[str, object]) -> bytes:
+    uri = _normalize_key(binding.get("uri") or binding.get("gcs_uri"))
+    sha256 = _normalize_key(binding.get("sha256"))
+    generation = _normalize_key(binding.get("generation"))
+    if not uri or not sha256 or not generation:
+        raise RuntimeError(
+            "Retry request artifact binding is incomplete; expected URI, SHA-256, "
+            "and GCS generation."
+        )
+    try:
+        generation_number = int(generation)
+    except ValueError as exc:
+        raise RuntimeError("Retry request artifact has an invalid GCS generation.") from exc
+
+    bucket_name, object_name = _parse_gcs_uri(uri)
+    service_account_path = resolve_service_account_path(
+        _require_service_account_file()
+    )
+    storage_client = storage.Client.from_service_account_json(
+        str(service_account_path)
+    )
+    raw_bytes = bytes(
+        storage_client.bucket(bucket_name)
+        .blob(object_name)
+        .download_as_bytes(if_generation_match=generation_number)
+    )
+    if hashlib.sha256(raw_bytes).hexdigest() != sha256:
+        raise RuntimeError("Retry request artifact SHA-256 does not match metadata.")
+    return raw_bytes
+
+
+def _load_request_artifacts(
+    *,
+    payload: dict,
+    submit_run_dir: Path,
+    selected_batch_names: list[str] | None = None,
+) -> list[tuple[str, bytes]]:
+    artifacts: list[tuple[str, bytes]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for entry in _request_file_entries_from_payload(
+        payload,
+        selected_batch_names=selected_batch_names,
+    ):
+        request_file = _normalize_key(entry.get("requests_file"))
+        if not request_file:
+            continue
+        binding = _retry_binding_from_payload(
+            payload=payload,
+            entry=entry,
+            request_file=request_file,
+        )
+        binding_uri = (
+            _normalize_key(binding.get("uri") or binding.get("gcs_uri"))
+            if binding is not None
+            else ""
+        )
+        identity = (
+            _normalize_key(entry.get("retry_run_id")),
+            request_file,
+            binding_uri,
+        )
+        if identity in seen:
+            continue
+        seen.add(identity)
+
+        local_path = _local_request_file_path(
+            submit_run_dir=submit_run_dir,
+            entry=entry,
+            request_file=request_file,
+        )
+        if local_path is not None:
+            raw_bytes = local_path.read_bytes()
+            if binding is not None:
+                expected_sha256 = _normalize_key(binding.get("sha256"))
+                if not expected_sha256:
+                    raise RuntimeError(
+                        "Retry request artifact binding is missing SHA-256."
+                    )
+                if hashlib.sha256(raw_bytes).hexdigest() != expected_sha256:
+                    raise RuntimeError(
+                        f"Local retry request artifact {local_path} does not match "
+                        "its immutable cloud binding."
+                    )
+            artifacts.append((str(local_path), raw_bytes))
+            continue
+
+        if binding is not None:
+            artifacts.append(
+                (binding_uri or request_file, _download_bound_request_artifact(binding))
+            )
+    return artifacts
+
+
 def _find_submit_run_dir(batch_names: list[str]) -> Path | None:
     target = {name for name in batch_names if isinstance(name, str) and name.strip()}
     run_dirs = run_layout.iter_run_dirs(config.output_root, "submit")
+    best: tuple[tuple[int, int, int], Path] | None = None
     for run_dir in run_dirs:
         job_payload = _read_batch_job_payload(run_dir / "batch_job.json")
         if not job_payload:
@@ -902,13 +1530,27 @@ def _find_submit_run_dir(batch_names: list[str]) -> Path | None:
         payload_names = set(_extract_batch_names_from_payload(job_payload))
         if target and not payload_names.intersection(target):
             continue
-        request_files = _request_files_from_payload(job_payload)
-        if any(
-            (run_dir / req).exists() and (run_dir / req).is_file()
-            for req in request_files
+        entries = _request_file_entries_from_payload(job_payload)
+        if not any(
+            _local_request_file_path(
+                submit_run_dir=run_dir,
+                entry=entry,
+                request_file=_normalize_key(entry.get("requests_file")),
+            )
+            is not None
+            for entry in entries
+            if _normalize_key(entry.get("requests_file"))
         ):
-            return run_dir
-    return None
+            continue
+        overlap = len(payload_names.intersection(target)) if target else 0
+        score = (
+            int(bool(target) and target.issubset(payload_names)),
+            overlap,
+            int(str(job_payload.get("job_group_role") or "") == "root"),
+        )
+        if best is None or score > best[0]:
+            best = (score, run_dir)
+    return best[1] if best is not None else None
 
 
 def _resolve_expected_request_keys(
@@ -936,24 +1578,25 @@ def _resolve_expected_request_keys(
         )
         return set()
 
-    request_files = _request_files_from_payload(
-        payload,
+    request_artifacts = _load_request_artifacts(
+        payload=payload,
+        submit_run_dir=submit_run_dir,
         selected_batch_names=selected_batch_names,
     )
-    if not request_files and selected_batch_names:
+    if not request_artifacts and selected_batch_names:
         log(
             "No request files matched selected batch names; "
             "falling back to all request files in submit metadata."
         )
-        request_files = _request_files_from_payload(payload)
+        request_artifacts = _load_request_artifacts(
+            payload=payload,
+            submit_run_dir=submit_run_dir,
+        )
     expected_keys: set[str] = set()
-    loaded_files: list[Path] = []
-    for request_file in request_files:
-        path = submit_run_dir / request_file
-        if not path.exists() or not path.is_file():
-            continue
-        expected_keys.update(_read_request_keys_from_file(path))
-        loaded_files.append(path)
+    loaded_files: list[str] = []
+    for source, raw_bytes in request_artifacts:
+        expected_keys.update(_read_request_keys_from_bytes(raw_bytes))
+        loaded_files.append(source)
 
     if not loaded_files:
         log(
@@ -994,42 +1637,44 @@ def _resolve_anthropic_custom_id_to_key(
         )
         return {}
 
-    request_files = _request_files_from_payload(
-        payload,
+    request_artifacts = _load_request_artifacts(
+        payload=payload,
+        submit_run_dir=submit_run_dir,
         selected_batch_names=selected_batch_names,
     )
-    if not request_files and selected_batch_names:
-        request_files = _request_files_from_payload(payload)
+    if not request_artifacts and selected_batch_names:
+        request_artifacts = _load_request_artifacts(
+            payload=payload,
+            submit_run_dir=submit_run_dir,
+        )
 
     mapping: dict[str, str] = {}
     loaded_files = 0
-    for request_file in request_files:
-        path = submit_run_dir / request_file
-        if not path.exists() or not path.is_file():
-            continue
+    for _source, raw_bytes in request_artifacts:
         loaded_files += 1
-        with open(path, "r", encoding="utf-8") as handle:
-            for line in handle:
-                raw = line.strip()
-                if not raw:
-                    continue
-                try:
-                    item = json.loads(raw)
-                except json.JSONDecodeError:
-                    continue
-                if not isinstance(item, dict):
-                    continue
-                key = _normalize_key(item.get("key"))
-                if not key:
-                    continue
-                custom_id = _normalize_key(item.get("custom_id")) or _anthropic_custom_id_for_key(key)
-                existing = mapping.get(custom_id)
-                if existing and existing != key:
-                    raise RuntimeError(
-                        "Conflicting Anthropic custom_id mapping in request files: "
-                        f"{custom_id} -> {existing} vs {key}"
-                    )
-                mapping[custom_id] = key
+        for line in raw_bytes.decode("utf-8").splitlines():
+            raw = line.strip()
+            if not raw:
+                continue
+            try:
+                item = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(item, dict):
+                continue
+            key = _normalize_key(item.get("key"))
+            if not key:
+                continue
+            custom_id = _normalize_key(
+                item.get("custom_id")
+            ) or _anthropic_custom_id_for_key(key)
+            existing = mapping.get(custom_id)
+            if existing and existing != key:
+                raise RuntimeError(
+                    "Conflicting Anthropic custom_id mapping in request files: "
+                    f"{custom_id} -> {existing} vs {key}"
+                )
+            mapping[custom_id] = key
 
     if loaded_files == 0:
         log(
@@ -1175,6 +1820,117 @@ def _parse_gcs_uri(gcs_uri: str) -> tuple[str, str]:
     return bucket_name, object_path
 
 
+def _verify_first_pass_image_bindings(
+    *,
+    submit_run_dir: Path,
+    submit_metadata: dict[str, Any],
+) -> dict[str, _FirstPassRecoveryEvidence]:
+    binding_meta = submit_metadata.get("extraction_image_bindings")
+    if not isinstance(binding_meta, dict):
+        raise RuntimeError(
+            "Validation-enabled extraction has no exact provider image bindings."
+        )
+    path = submit_run_dir / str(
+        binding_meta.get("path") or EXTRACTION_IMAGE_BINDINGS_FILE_NAME
+    )
+    service_account_path = resolve_service_account_path(
+        _require_service_account_file()
+    )
+    storage_client = storage.Client.from_service_account_json(
+        str(service_account_path)
+    )
+    extraction_metadata_path = submit_run_dir / "metadata.json"
+    if not extraction_metadata_path.is_file():
+        metadata_uri = str(
+            submit_metadata.get("extraction_metadata_gcs_uri") or ""
+        )
+        if not metadata_uri:
+            raise FileNotFoundError(
+                f"Immutable extraction metadata not found: {extraction_metadata_path}"
+            )
+        metadata_bucket, metadata_object = _parse_gcs_uri(metadata_uri)
+        extraction_metadata_path.parent.mkdir(parents=True, exist_ok=True)
+        storage_client.bucket(metadata_bucket).blob(
+            metadata_object
+        ).download_to_filename(str(extraction_metadata_path))
+    expected_metadata_sha = str(
+        submit_metadata.get("extraction_metadata_sha256") or ""
+    )
+    if (
+        not expected_metadata_sha
+        or file_sha256(extraction_metadata_path) != expected_metadata_sha
+    ):
+        raise RuntimeError("Immutable extraction metadata digest mismatch.")
+    if not path.is_file():
+        uri = str(binding_meta.get("gcs_uri") or "")
+        if not uri:
+            raise FileNotFoundError(f"Extraction image bindings not found: {path}")
+        bucket_name, object_name = _parse_gcs_uri(uri)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        storage_client.bucket(bucket_name).blob(object_name).download_to_filename(
+            str(path)
+        )
+    expected_sha = str(binding_meta.get("sha256") or "")
+    if not expected_sha or file_sha256(path) != expected_sha:
+        raise RuntimeError("Extraction image binding artifact digest mismatch.")
+    bindings = read_extraction_image_bindings(path)
+    expected_count = int(binding_meta.get("record_count") or 0)
+    if expected_count <= 0 or len(bindings) != expected_count:
+        raise RuntimeError("Extraction image binding record count mismatch.")
+    bucket = storage_client.bucket(str(config.gcs_bucket_name or ""))
+    verify_extraction_image_bindings(bucket=bucket, bindings=bindings)
+
+    input_manifest_meta = submit_metadata.get("input_image_manifest")
+    if not isinstance(input_manifest_meta, dict):
+        raise RuntimeError(
+            "Validation-enabled extraction has no generation-bound input manifest."
+        )
+    input_manifest_path = submit_run_dir / str(
+        input_manifest_meta.get("path") or INPUT_IMAGE_MANIFEST_FILE_NAME
+    )
+    if not input_manifest_path.is_file():
+        input_manifest_uri = str(input_manifest_meta.get("gcs_uri") or "")
+        if not input_manifest_uri:
+            raise FileNotFoundError(
+                f"Extraction input manifest not found: {input_manifest_path}"
+            )
+        manifest_bucket, manifest_object = _parse_gcs_uri(input_manifest_uri)
+        input_manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        storage_client.bucket(manifest_bucket).blob(
+            manifest_object
+        ).download_to_filename(str(input_manifest_path))
+    expected_manifest_sha = str(input_manifest_meta.get("sha256") or "")
+    if (
+        not expected_manifest_sha
+        or file_sha256(input_manifest_path) != expected_manifest_sha
+    ):
+        raise RuntimeError("Extraction input manifest artifact digest mismatch.")
+    input_records = read_input_image_manifest(input_manifest_path)
+    expected_manifest_count = int(input_manifest_meta.get("record_count") or 0)
+    if expected_manifest_count <= 0 or len(input_records) != expected_manifest_count:
+        raise RuntimeError("Extraction input manifest record count mismatch.")
+
+    binding_map = dict(bindings_by_key(bindings))
+    input_map = {record.key: record for record in input_records}
+    if binding_map.keys() != input_map.keys():
+        raise RuntimeError(
+            "Extraction image bindings and input manifest cover different page keys."
+        )
+    recovery_evidence: dict[str, _FirstPassRecoveryEvidence] = {}
+    for key, binding in binding_map.items():
+        input_record = input_map[key]
+        if binding.source.to_dict() != input_record.source.to_dict():
+            raise RuntimeError(
+                "Extraction image binding source differs from input manifest for "
+                f"{key!r}."
+            )
+        recovery_evidence[key] = _FirstPassRecoveryEvidence(
+            image_binding=binding,
+            input_record=input_record,
+        )
+    return recovery_evidence
+
+
 def _normalize_prefix(prefix: str) -> str:
     value = prefix.strip()
     if not value:
@@ -1214,8 +1970,11 @@ def _upload_dataset_to_gcs(
     dataset_path: Path,
     run_dir_name: str,
     log,
+    *,
+    force: bool = False,
+    required: bool = False,
 ) -> str | None:
-    if not config.upload_dataset_to_gcs:
+    if not config.upload_dataset_to_gcs and not force:
         return None
     if not dataset_path.exists():
         log(f"Skipped upload for missing file: {dataset_path.name}")
@@ -1246,11 +2005,184 @@ def _upload_dataset_to_gcs(
         )
     except Exception as exc:  # noqa: BLE001
         log(f"Dataset upload skipped or failed for {dataset_path.name}.", exc=exc)
+        if required:
+            raise RuntimeError(
+                f"Required cloud artifact upload failed for {dataset_path.name}."
+            ) from exc
         return None
 
     uri = f"gs://{bucket_name}/{object_name}"
     log(f"Uploaded dataset to {uri}.")
     return uri
+
+
+def _upload_prevalidation_artifact_to_gcs(
+    artifact_path: Path,
+    run_dir_name: str,
+    log,
+    *,
+    artifact_kind: str,
+) -> _UploadedPrevalidationArtifact:
+    """Upload immutable, content-addressed pre-v001 validation evidence."""
+
+    try:
+        bucket_name = _require_bucket_name()
+        service_account_path = resolve_service_account_path(
+            _require_service_account_file()
+        )
+        storage_client = storage.Client.from_service_account_json(
+            str(service_account_path)
+        )
+        bucket = storage_client.bucket(bucket_name)
+        prefix = _normalize_prefix(config.validations_gcs_prefix or "")
+        artifact_sha256 = file_sha256(artifact_path)
+        object_name = (
+            f"{prefix}candidates/{run_dir_name}/{artifact_path.stem}/"
+            f"{artifact_sha256}{artifact_path.suffix}"
+        )
+        blob = bucket.blob(object_name)
+        blob.metadata = {
+            "artifact_kind": artifact_kind,
+            "sha256": artifact_sha256,
+            "model": str(config.model or ""),
+            "schema_name": str(getattr(config, "output_schema_name", "") or ""),
+            "schema_version_id": str(
+                getattr(config, "output_schema_version_id", "") or ""
+            ),
+        }
+        try:
+            blob.upload_from_filename(
+                str(artifact_path),
+                content_type=(
+                    "application/jsonl"
+                    if artifact_path.suffix.lower() == ".jsonl"
+                    else "application/json"
+                ),
+                if_generation_match=0,
+            )
+        except Exception as exc:  # noqa: BLE001 - provider wrappers vary
+            if not isinstance(exc, PreconditionFailed) and getattr(exc, "code", None) != 412:
+                raise
+            blob.reload()
+            generation = int(getattr(blob, "generation", 0) or 0)
+            existing = blob.download_as_bytes(
+                if_generation_match=generation or None
+            )
+            if hashlib.sha256(bytes(existing)).hexdigest() != artifact_sha256:
+                raise RuntimeError(
+                    "Content-addressed pre-validation artifact has different bytes."
+                ) from exc
+        blob.reload()
+        generation = str(getattr(blob, "generation", "") or "")
+        if not generation:
+            raise RuntimeError(
+                "Pre-validation artifact upload has no GCS generation binding."
+            )
+    except Exception as exc:  # noqa: BLE001
+        log(
+            f"Required pre-validation candidate upload failed for "
+            f"{artifact_path.name}.",
+            exc=exc,
+        )
+        raise RuntimeError(
+            f"Required pre-validation artifact upload failed: {artifact_path.name}."
+        ) from exc
+    uri = f"gs://{bucket_name}/{object_name}"
+    log(f"Uploaded pre-validation artifact to {uri}.")
+    return _UploadedPrevalidationArtifact(
+        uri=uri,
+        sha256=artifact_sha256,
+        generation=generation,
+    )
+
+
+def _upload_prevalidation_candidate_to_gcs(
+    candidate_path: Path,
+    run_dir_name: str,
+    log,
+) -> _UploadedPrevalidationArtifact:
+    return _upload_prevalidation_artifact_to_gcs(
+        candidate_path,
+        run_dir_name,
+        log,
+        artifact_kind="prevalidation_page_candidates",
+    )
+
+
+def _record_candidate_retrieval_for_cli(
+    *,
+    submit_run_dir: Path,
+    result: RetrieveBatchResult,
+) -> Path:
+    """Bridge batch.retrieve -> batch.verify for the direct CLI workflow."""
+
+    results_path = submit_run_dir / "batch_results.json"
+    existing: dict[str, object] = {}
+    if results_path.is_file():
+        try:
+            loaded = json.loads(results_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            loaded = None
+        if isinstance(loaded, dict):
+            existing = loaded
+    existing.update(
+        {
+            "retrieved_at": datetime.now().astimezone().isoformat(
+                timespec="seconds"
+            ),
+            "dataset_path": str(result.dataset_path),
+            "provider": result.provider,
+            "batch_count": result.batch_count,
+            "rows_written": result.rows_written,
+            "error_rows": result.error_rows,
+            "expected_pages": result.expected_pages,
+            "observed_pages": result.observed_pages,
+            "successful_pages": result.successful_pages,
+            "missing_pages": max(
+                0, result.expected_pages - result.successful_pages
+            ),
+            "page_candidates_path": (
+                str(result.page_candidates_path)
+                if result.page_candidates_path is not None
+                else ""
+            ),
+            "page_candidates_gcs_uri": result.page_candidates_gcs_uri,
+            "page_candidates_sha256": result.page_candidates_sha256,
+            "page_candidates_gcs_generation": (
+                result.page_candidates_gcs_generation
+            ),
+            "deterministic_routing_path": (
+                str(result.deterministic_routing_path)
+                if result.deterministic_routing_path is not None
+                else ""
+            ),
+            "deterministic_routing_gcs_uri": (
+                result.deterministic_routing_gcs_uri
+            ),
+            "deterministic_routing_sha256": result.deterministic_routing_sha256,
+            "deterministic_routing_gcs_generation": (
+                result.deterministic_routing_gcs_generation
+            ),
+            "subagent_combined_gcs_uri": result.subagent_combined_gcs_uri,
+            "subagent_combined_sha256": result.subagent_combined_sha256,
+            "subagent_combined_gcs_generation": (
+                result.subagent_combined_gcs_generation
+            ),
+            "subagent_failures_gcs_uri": result.subagent_failures_gcs_uri,
+            "subagent_failures_sha256": result.subagent_failures_sha256,
+            "subagent_failures_gcs_generation": (
+                result.subagent_failures_gcs_generation
+            ),
+            "deterministic_flagged_pages": result.deterministic_flagged_pages,
+            "deterministic_routine_pages": result.deterministic_routine_pages,
+            "dataset_gcs_uri": result.dataset_gcs_uri,
+        }
+    )
+    results_path.write_text(
+        json.dumps(existing, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    return results_path
 
 
 def _download_from_vertex_gcs_output(
@@ -1394,6 +2326,21 @@ def _extract_anthropic_response_metadata(response: object) -> dict[str, object]:
     }
 
 
+def _anthropic_stop_reason(response: object) -> str:
+    message = response
+    if hasattr(message, "model_dump"):
+        message = message.model_dump(mode="json")
+    elif hasattr(message, "to_dict"):
+        message = message.to_dict()
+    raw = (
+        message.get("stop_reason")
+        if isinstance(message, dict)
+        else getattr(message, "stop_reason", None)
+    )
+    value = getattr(raw, "value", raw)
+    return str(value or "").strip().lower()
+
+
 def _await_completion(
     client,
     batch_name: str,
@@ -1507,16 +2454,44 @@ def retrieve_batch(args: argparse.Namespace | None = None) -> RetrieveBatchResul
     run_dir = _resolve_retrieve_run_dir(args, submit_run_dir=submit_run_dir)
     log = get_run_logger(run_dir)
 
+    submit_metadata: dict | None = None
     if submit_run_dir is not None:
         submit_metadata = _read_batch_job_payload(submit_run_dir / "batch_job.json")
-        if submit_metadata is not None and "subagents" in submit_metadata:
-            recorded_subagents = bool(submit_metadata.get("subagents"))
-            if recorded_subagents != bool(config.subagents):
-                log(
-                    "Restoring Sub Agent Usage from submit metadata: "
-                    f"subagents={recorded_subagents}."
+        if submit_metadata is not None:
+            if (
+                str(submit_metadata.get("job_group_role") or "").lower()
+                == "retry"
+                or submit_metadata.get("retry_source_run")
+            ):
+                raise RuntimeError(
+                    "Retrieve failed-page retry batches through their root extraction "
+                    "run so original and retry attempts share one schema, evidence "
+                    "binding, and completeness gate."
                 )
-            config.subagents = recorded_subagents
+            recorded_validation = bool(
+                submit_metadata.get("model_validation_enabled")
+            )
+            config.model_validation_enabled = recorded_validation
+            if recorded_validation:
+                _restore_submit_semantics(
+                    submit_run_dir=submit_run_dir,
+                    submit_metadata=submit_metadata,
+                    log=log,
+                )
+            else:
+                config.subagents = bool(submit_metadata.get("subagents", False))
+
+    first_pass_recovery_evidence: dict[str, _FirstPassRecoveryEvidence] | None = None
+    if bool(config.model_validation_enabled):
+        if submit_run_dir is None or not isinstance(submit_metadata, dict):
+            raise RuntimeError(
+                "Validation-enabled retrieval requires its extraction submit run "
+                "and immutable batch metadata."
+            )
+        first_pass_recovery_evidence = _verify_first_pass_image_bindings(
+            submit_run_dir=submit_run_dir,
+            submit_metadata=submit_metadata,
+        )
 
     provider = _provider_from_batch_names(
         batch_names,
@@ -1535,6 +2510,12 @@ def retrieve_batch(args: argparse.Namespace | None = None) -> RetrieveBatchResul
         client = get_batch_client(location=client_location)
 
     duplicate_strategy = _effective_duplicate_strategy(args)
+    if bool(config.model_validation_enabled) and duplicate_strategy != "first_successful":
+        raise ValueError(
+            "model_validation_enabled=True requires "
+            "batch_duplicate_strategy='first_successful' so page_candidates.jsonl "
+            "and pre-validation rows have one identical canonical page candidate."
+        )
     recover_missing_with_api = bool(getattr(args, "recover_missing_with_api", False))
     manifest_path = run_dir / MANIFEST_FILE_NAME
 
@@ -1764,6 +2745,13 @@ def retrieve_batch(args: argparse.Namespace | None = None) -> RetrieveBatchResul
         )
 
     outputs_are_joined_subagents = False
+    subagent_join_failures: tuple[dict[str, object], ...] = ()
+    subagent_combined_gcs_uri = ""
+    subagent_combined_sha256 = ""
+    subagent_combined_gcs_generation = ""
+    subagent_failures_gcs_uri = ""
+    subagent_failures_sha256 = ""
+    subagent_failures_gcs_generation = ""
     if bool(config.subagents) and raw_outputs:
         source_handles: list[tuple[str, object]] = []
         try:
@@ -1788,6 +2776,41 @@ def retrieve_batch(args: argparse.Namespace | None = None) -> RetrieveBatchResul
             output_path=combined_path,
             failures_path=subagent_failures_path,
         )
+        uploaded_combined = _upload_prevalidation_artifact_to_gcs(
+            combined_path,
+            run_dir.name,
+            log,
+            artifact_kind="subagent_combined_pages",
+        )
+        uploaded_failures = _upload_prevalidation_artifact_to_gcs(
+            subagent_failures_path,
+            run_dir.name,
+            log,
+            artifact_kind="subagent_join_failures",
+        )
+        subagent_combined_gcs_uri = uploaded_combined.uri
+        subagent_combined_sha256 = uploaded_combined.sha256
+        subagent_combined_gcs_generation = uploaded_combined.generation
+        subagent_failures_gcs_uri = uploaded_failures.uri
+        subagent_failures_sha256 = uploaded_failures.sha256
+        subagent_failures_gcs_generation = uploaded_failures.generation
+        fatal_join_failures = [
+            failure
+            for failure in combined.failures
+            if str(failure.get("reason") or "")
+            in {
+                "invalid_jsonl_line",
+                "invalid_subagent_request_key",
+                "unknown_specialist",
+            }
+        ]
+        if fatal_join_failures:
+            raise RuntimeError(
+                "Schema-specialist output contains malformed or unsolicited "
+                f"request identities ({len(fatal_join_failures)} row(s)); refusing "
+                "to create page candidates."
+            )
+        subagent_join_failures = combined.failures
         raw_outputs = [("subagent-join", combined_path)]
         outputs_are_joined_subagents = True
         log(
@@ -1800,9 +2823,16 @@ def retrieve_batch(args: argparse.Namespace | None = None) -> RetrieveBatchResul
 
     out_name = config.dataset_file_name
     output_dataset_format = config.output_format
-    final_out_path = (
-        run_dir / f"{run_dir.name}_{out_name}.{output_dataset_format.lstrip('.')}"
-    )
+    if bool(config.model_validation_enabled):
+        final_out_path = (
+            run_dir
+            / f"{run_dir.name}_prevalidation_rows."
+            f"{output_dataset_format.lstrip('.')}"
+        )
+    else:
+        final_out_path = (
+            run_dir / f"{run_dir.name}_{out_name}.{output_dataset_format.lstrip('.')}"
+        )
     out_path = final_out_path
     if final_out_path.exists():
         out_path = run_dir / f".{final_out_path.name}.tmp"
@@ -1820,6 +2850,62 @@ def retrieve_batch(args: argparse.Namespace | None = None) -> RetrieveBatchResul
     output_keys_seen: set[str] = set()
     successful_page_keys: set[str] = set()
     failures: dict[str, str] = {}
+    page_candidates_path: Path | None = None
+    deterministic_routing_path: Path | None = None
+    deterministic_flagged_pages = 0
+    deterministic_routine_pages = 0
+    candidate_writer: PageCandidateWriter | None = None
+    source_metadata_sha256 = ""
+    source_batch_job_sha256 = ""
+    candidate_source_provenance: dict[str, object] = {}
+    if bool(config.model_validation_enabled):
+        page_candidates_path = run_dir / PAGE_CANDIDATES_FILE_NAME
+        candidate_writer = PageCandidateWriter(page_candidates_path)
+        source_metadata_gcs_uri = ""
+        source_metadata_gcs_generation = ""
+        source_batch_job_gcs_uri = ""
+        source_batch_job_gcs_generation = ""
+        if submit_run_dir is not None:
+            metadata_path = submit_run_dir / "metadata.json"
+            batch_job_path = submit_run_dir / "batch_job.json"
+            if not metadata_path.is_file() or not batch_job_path.is_file():
+                raise RuntimeError(
+                    "Validation candidates require the complete extraction "
+                    "metadata.json and batch_job.json snapshots."
+                )
+            uploaded_metadata = _upload_prevalidation_artifact_to_gcs(
+                metadata_path,
+                run_dir.name,
+                log,
+                artifact_kind="extraction_metadata_snapshot",
+            )
+            uploaded_batch_job = _upload_prevalidation_artifact_to_gcs(
+                batch_job_path,
+                run_dir.name,
+                log,
+                artifact_kind="extraction_batch_job_snapshot",
+            )
+            source_metadata_sha256 = uploaded_metadata.sha256
+            source_metadata_gcs_uri = uploaded_metadata.uri
+            source_metadata_gcs_generation = uploaded_metadata.generation
+            source_batch_job_sha256 = uploaded_batch_job.sha256
+            source_batch_job_gcs_uri = uploaded_batch_job.uri
+            source_batch_job_gcs_generation = uploaded_batch_job.generation
+        candidate_source_provenance = {
+            "source_run_id": (
+                submit_run_dir.name if submit_run_dir is not None else ""
+            ),
+            "source_metadata_gcs_uri": source_metadata_gcs_uri,
+            "source_metadata_sha256": source_metadata_sha256,
+            "source_metadata_gcs_generation": (
+                source_metadata_gcs_generation
+            ),
+            "source_batch_job_gcs_uri": source_batch_job_gcs_uri,
+            "source_batch_job_sha256": source_batch_job_sha256,
+            "source_batch_job_gcs_generation": (
+                source_batch_job_gcs_generation
+            ),
+        }
 
     global_line_number = 0
     for output_index, (batch_name, raw_path) in enumerate(raw_outputs, start=1):
@@ -2007,6 +3093,41 @@ def retrieve_batch(args: argparse.Namespace | None = None) -> RetrieveBatchResul
                         continue
                     metadata = _extract_anthropic_response_metadata(response)
 
+                    if bool(config.model_validation_enabled):
+                        stop_reason = _anthropic_stop_reason(response)
+                        if stop_reason not in {"end_turn", "stop_sequence"}:
+                            reason = f"stop_reason_{stop_reason or 'missing'}"
+                            error_rows += 1
+                            log(
+                                f"Anthropic output rejected for key={key}: {reason}"
+                            )
+                            append_processing_record(
+                                manifest_path,
+                                base_image_record(
+                                    image_reference=key,
+                                    source="batch_retrieve",
+                                    status="failed",
+                                    model=config.model,
+                                    provider=provider,
+                                    attempts=1,
+                                    max_attempts=1,
+                                    rows_written=0,
+                                    failure_reason=reason,
+                                    extra={
+                                        "batch_name": batch_name,
+                                        "raw_output_file": raw_path.name,
+                                        "line_number": line_number,
+                                    },
+                                ),
+                            )
+                            _record_failure(
+                                failures,
+                                key=key,
+                                line_number=global_line_number,
+                                reason=reason,
+                            )
+                            continue
+
                     text_payload = metadata.get("text")
                     if not text_payload:
                         error_rows += 1
@@ -2182,6 +3303,47 @@ def retrieve_batch(args: argparse.Namespace | None = None) -> RetrieveBatchResul
                 if key:
                     successful_page_keys.add(key)
 
+                if key and candidate_writer is not None:
+                    candidate_writer.write(
+                        key=key,
+                        candidate=parsed_model.model_dump(mode="json"),
+                        extraction_metadata={
+                            **candidate_source_provenance,
+                            "model": config.model,
+                            "provider": provider,
+                            "schema_name": str(
+                                getattr(config, "output_schema_name", "") or ""
+                            ),
+                            "schema_version_id": str(
+                                getattr(config, "output_schema_version_id", "") or ""
+                            ),
+                            "batch_name": batch_name,
+                            "raw_output_file": raw_path.name,
+                            "line_number": line_number,
+                            "source": "batch_retrieve",
+                            "input_image_manifest_gcs_uri": (
+                                (
+                                    submit_metadata.get("input_image_manifest") or {}
+                                ).get("gcs_uri")
+                                if isinstance(submit_metadata, dict)
+                                and isinstance(
+                                    submit_metadata.get("input_image_manifest"), dict
+                                )
+                                else None
+                            ),
+                            "input_image_manifest_sha256": (
+                                (
+                                    submit_metadata.get("input_image_manifest") or {}
+                                ).get("sha256")
+                                if isinstance(submit_metadata, dict)
+                                and isinstance(
+                                    submit_metadata.get("input_image_manifest"), dict
+                                )
+                                else None
+                            ),
+                        },
+                    )
+
                 rows = data_to_rows(
                     parsed_model,
                     file_name=file_key,
@@ -2264,6 +3426,9 @@ def retrieve_batch(args: argparse.Namespace | None = None) -> RetrieveBatchResul
                 log=log,
                 force=recovery_force,
                 manifest_path=manifest_path,
+                candidate_writer=candidate_writer,
+                candidate_provenance=candidate_source_provenance,
+                first_pass_evidence_by_key=first_pass_recovery_evidence,
             )
             recovered_pages += recovered_count
             if recovered_count:
@@ -2281,6 +3446,44 @@ def retrieve_batch(args: argparse.Namespace | None = None) -> RetrieveBatchResul
             "API key recovery is currently implemented for Gemini only."
         )
 
+    if candidate_writer is not None and page_candidates_path is not None:
+        candidate_writer.close()
+        log(
+            f"Wrote {candidate_writer.records_written} unflattened page candidate(s) "
+            f"to {page_candidates_path.name}."
+        )
+        source_candidates = read_page_candidates(page_candidates_path)
+        routed_candidates = tuple(
+            route_candidates(
+                source_candidates,
+                full_model=config.output_model,
+                control_sample_percent=float(
+                    config.verification_control_sample_percent
+                ),
+            )
+        )
+        write_page_candidates(
+            page_candidates_path,
+            (item.candidate for item in routed_candidates),
+        )
+        deterministic_routing_path = run_dir / DETERMINISTIC_ROUTING_FILE_NAME
+        write_routing_decisions(
+            deterministic_routing_path,
+            (item.decision for item in routed_candidates),
+        )
+        deterministic_flagged_pages = sum(
+            item.decision.route == "heavy_review" for item in routed_candidates
+        )
+        deterministic_routine_pages = (
+            len(routed_candidates) - deterministic_flagged_pages
+        )
+        log(
+            "Completed deterministic routing "
+            f"policy={DETERMINISTIC_ROUTING_POLICY_VERSION}: "
+            f"heavy_review={deterministic_flagged_pages}, "
+            f"routine={deterministic_routine_pages}."
+        )
+
     final_expected_success = _expected_success_keys(
         expected_keys=expected_keys,
         observed_output_keys=output_keys_seen,
@@ -2290,6 +3493,32 @@ def retrieve_batch(args: argparse.Namespace | None = None) -> RetrieveBatchResul
         successful_page_keys=successful_page_keys,
         failures=failures,
     )
+    retry_submission_keys = set(failed_retry_keys)
+    retry_submission_reasons = dict(failed_retry_reasons)
+    non_retryable_subagent_pages: dict[str, tuple[str, ...]] = {}
+    if bool(config.subagents) and failed_retry_keys:
+        (
+            retry_submission_keys,
+            retry_submission_reasons,
+            non_retryable_subagent_pages,
+        ) = _plan_subagent_retry_requests(
+            failed_page_keys=failed_retry_keys,
+            failed_page_reasons=failed_retry_reasons,
+            subagent_failures=subagent_join_failures,
+        )
+        if non_retryable_subagent_pages:
+            reason_counts: dict[str, int] = {}
+            for reasons in non_retryable_subagent_pages.values():
+                for reason in reasons:
+                    reason_counts[reason] = reason_counts.get(reason, 0) + 1
+            reason_summary = ", ".join(
+                f"{reason}={count}" for reason, count in sorted(reason_counts.items())
+            )
+            log(
+                "Withheld non-retryable schema-specialist page(s) from failed-page "
+                f"retry submission: {len(non_retryable_subagent_pages)} "
+                f"page(s) ({reason_summary})."
+            )
     ignore_failed = bool(getattr(args, "ignore_failed", False))
     if submit_failed_requested:
         if incomplete_batches:
@@ -2300,10 +3529,10 @@ def retrieve_batch(args: argparse.Namespace | None = None) -> RetrieveBatchResul
             print(
                 "Skipped failed-page retry submission: retrieval used partial chunks."
             )
-        elif failed_retry_keys:
+        elif retry_submission_keys:
             retry_submission = _submit_failed_pages_as_batch(
-                failed_keys=failed_retry_keys,
-                failure_reasons=failed_retry_reasons,
+                failed_keys=retry_submission_keys,
+                failure_reasons=retry_submission_reasons,
                 provider=provider,
                 client=client,
                 batch_names=batch_names,
@@ -2319,6 +3548,12 @@ def retrieve_batch(args: argparse.Namespace | None = None) -> RetrieveBatchResul
                     f"({retry_count} key(s), {len(retry_batch_names)} chunk(s)): "
                     f"{', '.join(retry_batch_names)} [{retry_run_dir}]"
                 )
+        elif non_retryable_subagent_pages:
+            print(
+                "Failed schema-specialist pages were not retried because their "
+                "failure modes cannot be repaired by adding specialist attempts: "
+                f"{len(non_retryable_subagent_pages)} page(s)."
+            )
         else:
             log(
                 "Failed-page retry submission requested, but no failed keys were detected."
@@ -2412,8 +3647,35 @@ def retrieve_batch(args: argparse.Namespace | None = None) -> RetrieveBatchResul
     summary_path = write_processing_summary(run_dir)
     log(f"Wrote image processing manifest: {manifest_path.name}")
     log(f"Wrote image processing summary: {summary_path.name}")
-    dataset_gcs_uri = _upload_dataset_to_gcs(out_path, run_dir.name, log) or ""
-    return RetrieveBatchResult(
+    dataset_gcs_uri = ""
+    if not bool(config.model_validation_enabled):
+        dataset_gcs_uri = _upload_dataset_to_gcs(out_path, run_dir.name, log) or ""
+    page_candidates_gcs_uri = ""
+    page_candidates_sha256 = ""
+    page_candidates_gcs_generation = ""
+    deterministic_routing_gcs_uri = ""
+    deterministic_routing_sha256 = ""
+    deterministic_routing_gcs_generation = ""
+    if page_candidates_path is not None:
+        uploaded_candidates = _upload_prevalidation_candidate_to_gcs(
+            page_candidates_path,
+            run_dir.name,
+            log,
+        )
+        page_candidates_gcs_uri = uploaded_candidates.uri
+        page_candidates_sha256 = uploaded_candidates.sha256
+        page_candidates_gcs_generation = uploaded_candidates.generation
+    if deterministic_routing_path is not None:
+        uploaded_routing = _upload_prevalidation_artifact_to_gcs(
+            deterministic_routing_path,
+            run_dir.name,
+            log,
+            artifact_kind="deterministic_candidate_routing",
+        )
+        deterministic_routing_gcs_uri = uploaded_routing.uri
+        deterministic_routing_sha256 = uploaded_routing.sha256
+        deterministic_routing_gcs_generation = uploaded_routing.generation
+    result = RetrieveBatchResult(
         dataset_path=out_path,
         run_dir=run_dir,
         provider=provider,
@@ -2424,12 +3686,39 @@ def retrieve_batch(args: argparse.Namespace | None = None) -> RetrieveBatchResul
         expected_pages=len(expected_keys),
         observed_pages=len(output_keys_seen),
         successful_pages=len(successful_page_keys),
+        page_candidates_path=page_candidates_path,
+        page_candidates_gcs_uri=page_candidates_gcs_uri,
+        page_candidates_sha256=page_candidates_sha256,
+        page_candidates_gcs_generation=page_candidates_gcs_generation,
+        deterministic_routing_path=deterministic_routing_path,
+        deterministic_routing_gcs_uri=deterministic_routing_gcs_uri,
+        deterministic_routing_sha256=deterministic_routing_sha256,
+        deterministic_routing_gcs_generation=(
+            deterministic_routing_gcs_generation
+        ),
+        subagent_combined_gcs_uri=subagent_combined_gcs_uri,
+        subagent_combined_sha256=subagent_combined_sha256,
+        subagent_combined_gcs_generation=subagent_combined_gcs_generation,
+        subagent_failures_gcs_uri=subagent_failures_gcs_uri,
+        subagent_failures_sha256=subagent_failures_sha256,
+        subagent_failures_gcs_generation=subagent_failures_gcs_generation,
+        deterministic_flagged_pages=deterministic_flagged_pages,
+        deterministic_routine_pages=deterministic_routine_pages,
         duplicate_rows_skipped=duplicate_rows_skipped,
         recovered_pages=recovered_pages,
         failed_rows_included=failed_rows_included,
         manifest_path=manifest_path,
         dataset_gcs_uri=dataset_gcs_uri,
     )
+    if bool(config.model_validation_enabled) and submit_run_dir is not None:
+        # Keep the documented CLI chain self-contained: batch.verify receives
+        # the extraction submit run, so publish the retrieve run's canonical
+        # candidate location back onto that run just as the app workflow does.
+        _record_candidate_retrieval_for_cli(
+            submit_run_dir=submit_run_dir,
+            result=result,
+        )
+    return result
 
 
 if __name__ == "__main__":

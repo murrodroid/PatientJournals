@@ -24,6 +24,7 @@ from patientjournals.batch.submit_requests import (
 from patientjournals.batch.submit_inputs import (
     _ensure_uploaded_sources,
     _list_input_blobs,
+    _normalize_prefix,
 )
 from patientjournals.shared.dataset_coverage import (
     load_dataset_image_coverage,
@@ -33,6 +34,19 @@ from patientjournals.shared import run_layout
 from patientjournals.shared.identity import image_name_from_gcs_object
 from patientjournals.shared.subagents import schema_specialists
 from patientjournals.shared.tools import create_subfolder, get_run_logger
+from patientjournals.validation.input_manifest import (
+    EXTRACTION_IMAGE_BINDINGS_FILE_NAME,
+    EXTRACTION_IMAGE_BINDINGS_META_FILE_NAME,
+    INPUT_IMAGE_MANIFEST_FILE_NAME,
+    INPUT_IMAGE_MANIFEST_META_FILE_NAME,
+    ExtractionImageBinding,
+    bindings_by_key,
+    file_sha256,
+    read_extraction_image_bindings,
+    write_extraction_image_bindings,
+    write_input_image_manifest,
+    write_input_manifest_metadata,
+)
 
 
 def _parse_args() -> argparse.Namespace:
@@ -344,6 +358,66 @@ def _resolve_rerun_run_dir(args: argparse.Namespace) -> Path:
     return latest
 
 
+def _restore_rerun_semantics(
+    *,
+    run_dir: Path,
+    batch_payload: dict,
+    log,
+) -> None:
+    """Restore the original request/model contract before rerun submission."""
+
+    # Keep one authoritative schema/scientific restoration implementation.  The
+    # import is local so normal first-pass submission does not depend on retrieve.
+    from patientjournals.batch.retrieve import _restore_submit_semantics
+
+    _restore_submit_semantics(
+        submit_run_dir=run_dir,
+        submit_metadata=batch_payload,
+        log=log,
+    )
+    metadata = _read_batch_job_payload_if_exists(run_dir / "metadata.json") or {}
+    raw_config_values = metadata.get("config_values")
+    config_values = (
+        raw_config_values.get("config", {})
+        if isinstance(raw_config_values, dict)
+        else {}
+    )
+    if not isinstance(config_values, dict):
+        config_values = {}
+    # These fields determine where immutable inputs/outputs are found and how a
+    # provider job is submitted. Authentication remains machine-local.
+    for field_name in (
+        "gcs_bucket_name",
+        "batch_input_prefix",
+        "batch_input_prefixes",
+        "batch_input_extensions",
+        "batch_year_filter",
+        "batch_date_mapping_file",
+        "batch_restrict_image_names",
+        "fp_mode",
+        "fp_suffix",
+        "batch_requests_file_name",
+        "batch_requests_gcs_prefix",
+        "batch_outputs_gcs_prefix",
+        "batch_backend",
+        "vertex_model_location",
+        "gcp_location",
+        "anthropic_signed_url_ttl_hours",
+        "ocr_required",
+        "batch_ocr_metadata_required",
+    ):
+        if field_name in config_values and config_values[field_name] is not None:
+            setattr(config, field_name, config_values[field_name])
+    config.__post_init__()
+    recorded_provider = str(batch_payload.get("provider") or "").strip().lower()
+    restored_provider = resolve_model_spec(config.model).provider
+    if recorded_provider and recorded_provider != restored_provider:
+        raise RuntimeError(
+            "Rerun metadata provider does not match its restored extraction model: "
+            f"{recorded_provider!r} != {restored_provider!r}."
+        )
+
+
 def _normalize_job_entries(payload: dict) -> list[dict]:
     entries: list[dict] = []
     raw_jobs = payload.get("batch_jobs")
@@ -454,6 +528,12 @@ def _ensure_requests_files_for_rerun(
     ]
     if not expected_missing:
         return dict(existing_files_by_index)
+    if bool(config.model_validation_enabled):
+        raise FileNotFoundError(
+            "Validation-enabled reruns require the original request JSONL bytes; "
+            f"missing chunk(s): {expected_missing}. Refusing to regenerate a new "
+            "scientific request population under an existing run identity."
+        )
 
     downscale = _extract_downscale_from_run_log(run_dir)
     if downscale is not None and downscale < 1.0:
@@ -480,6 +560,13 @@ def _ensure_requests_files_for_rerun(
             "reconstruction did not match expected total chunks."
         )
 
+    image_bindings: dict[str, ExtractionImageBinding] | None = None
+    if bool(config.model_validation_enabled):
+        bindings_path = run_dir / EXTRACTION_IMAGE_BINDINGS_FILE_NAME
+        image_bindings = dict(
+            bindings_by_key(read_extraction_image_bindings(bindings_path))
+        )
+
     files_by_index = dict(existing_files_by_index)
     for chunk_index in expected_missing:
         requests_file_name = (
@@ -499,6 +586,7 @@ def _ensure_requests_files_for_rerun(
             log=log,
             for_vertex=bool(getattr(client, "vertexai", False)),
             provider=provider,
+            image_bindings=image_bindings,
         )
         files_by_index[chunk_index] = requests_file_name
         log(
@@ -670,6 +758,47 @@ def _write_batch_job_meta(
         if specialist_names
         else total_request_count
     )
+    input_manifest: dict[str, object] = {}
+    input_manifest_meta_path = run_dir / INPUT_IMAGE_MANIFEST_META_FILE_NAME
+    if input_manifest_meta_path.exists():
+        try:
+            loaded_manifest = json.loads(
+                input_manifest_meta_path.read_text(encoding="utf-8")
+            )
+        except (OSError, json.JSONDecodeError):
+            loaded_manifest = None
+        if isinstance(loaded_manifest, dict):
+            input_manifest = loaded_manifest
+    extraction_image_bindings: dict[str, object] = {}
+    bindings_meta_path = run_dir / EXTRACTION_IMAGE_BINDINGS_META_FILE_NAME
+    if bindings_meta_path.is_file():
+        try:
+            loaded_bindings = json.loads(
+                bindings_meta_path.read_text(encoding="utf-8")
+            )
+        except (OSError, json.JSONDecodeError):
+            loaded_bindings = None
+        if isinstance(loaded_bindings, dict):
+            extraction_image_bindings = loaded_bindings
+
+    artifact_prefix = _normalize_prefix(config.batch_requests_gcs_prefix or "")
+    extraction_metadata_gcs_uri = (
+        f"gs://{config.gcs_bucket_name}/{artifact_prefix}{run_dir.name}/metadata.json"
+        if bool(config.model_validation_enabled)
+        else ""
+    )
+    batch_job_metadata_gcs_uri = (
+        f"gs://{config.gcs_bucket_name}/{artifact_prefix}{run_dir.name}/batch_job.json"
+        if bool(config.model_validation_enabled)
+        else ""
+    )
+    extraction_metadata_path = run_dir / "metadata.json"
+    extraction_metadata_sha256 = (
+        file_sha256(extraction_metadata_path)
+        if bool(config.model_validation_enabled) and extraction_metadata_path.is_file()
+        else ""
+    )
+
     meta = {
         "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "job_group_id": run_dir.name,
@@ -695,13 +824,57 @@ def _write_batch_job_meta(
         "vertex_location": vertex_location,
         "num_batches_requested": int(num_batches_requested),
         "num_batches_submitted": len(jobs),
+        "ocr_enabled": bool(config.ocr_enabled),
         "subagents": bool(config.subagents),
         "specialist_fields": specialist_names,
+        "input_image_manifest": input_manifest,
+        "extraction_image_bindings": extraction_image_bindings,
+        "extraction_metadata_gcs_uri": extraction_metadata_gcs_uri,
+        "extraction_metadata_sha256": extraction_metadata_sha256,
+        "batch_job_metadata_gcs_uri": batch_job_metadata_gcs_uri,
+        "model_validation_enabled": bool(config.model_validation_enabled),
+        "verification_model": str(config.verification_model or ""),
+        "verification_thinking_level": str(
+            config.verification_thinking_level or "high"
+        ),
+        "verification_scope": str(config.verification_scope or "flagged"),
+        "verification_control_sample_percent": float(
+            config.verification_control_sample_percent
+        ),
+        "verification_max_output_tokens": int(
+            config.verification_max_output_tokens
+        ),
+        "verification_num_chunks": int(config.verification_num_chunks),
+        "pipeline_model_roles": {
+            "specialist_model": str(config.model or ""),
+            "specialist_thinking_level": str(config.thinking_level or ""),
+            "final_authority_model": str(config.verification_model or ""),
+            "final_authority_thinking_level": str(
+                config.verification_thinking_level or "high"
+            ),
+        },
     }
     (run_dir / "batch_job.json").write_text(
         json.dumps(meta, indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
+
+
+def _upload_submit_artifact(
+    *,
+    bucket: storage.Bucket,
+    run_dir: Path,
+    path: Path,
+) -> str:
+    prefix = _normalize_prefix(config.batch_requests_gcs_prefix or "")
+    object_name = f"{prefix}{run_dir.name}/{path.name}"
+    content_type = (
+        "application/jsonl" if path.suffix.lower() == ".jsonl" else "application/json"
+    )
+    bucket.blob(object_name).upload_from_filename(
+        str(path), content_type=content_type
+    )
+    return f"gs://{bucket.name}/{object_name}"
 
 
 def _submit_chunk_job(
@@ -828,6 +1001,32 @@ def submit_batch(args: argparse.Namespace | None = None) -> Path | None:
     args = args or _parse_args()
     if args.rerun and args.continue_dataset:
         raise ValueError("--continue-dataset cannot be combined with --rerun.")
+    rerun_run_dir: Path | None = None
+    rerun_payload: dict | None = None
+    if args.rerun:
+        rerun_run_dir = _resolve_rerun_run_dir(args)
+        rerun_log = get_run_logger(rerun_run_dir)
+        rerun_payload = _read_batch_job_payload_if_exists(
+            rerun_run_dir / "batch_job.json"
+        )
+        if not isinstance(rerun_payload, dict):
+            raise RuntimeError(
+                f"Rerun requires readable batch_job.json metadata: {rerun_run_dir}"
+            )
+        _restore_rerun_semantics(
+            run_dir=rerun_run_dir,
+            batch_payload=rerun_payload,
+            log=rerun_log,
+        )
+    if (
+        bool(config.model_validation_enabled)
+        and str(config.verification_scope or "flagged") == "flagged"
+        and float(config.verification_control_sample_percent) <= 0.0
+    ):
+        raise ValueError(
+            "Risk-routed model validation requires "
+            "verification_control_sample_percent > 0."
+        )
 
     provider = _validate_batch_model_support()
     if not (config.service_account_file or "").strip():
@@ -860,10 +1059,24 @@ def submit_batch(args: argparse.Namespace | None = None) -> Path | None:
             print("--num-batches is ignored when --rerun is set.")
         if args.downscale is not None:
             print("--downscale is ignored when --rerun is set.")
-        run_dir = _resolve_rerun_run_dir(args)
+        assert rerun_run_dir is not None
+        run_dir = rerun_run_dir
         log = get_run_logger(run_dir)
         _warn_if_confidence_scores_unsupported(provider=provider, log=log)
-        payload = _read_batch_job_payload_if_exists(run_dir / "batch_job.json")
+        payload = rerun_payload
+        assert payload is not None
+        recorded_model = str(payload.get("model") or "").strip()
+        if recorded_model and recorded_model != str(config.model).strip():
+            raise RuntimeError(
+                "Rerun model differs from immutable extraction metadata: "
+                f"{config.model!r} != {recorded_model!r}."
+            )
+        recorded_backend = str(payload.get("client_backend") or "").strip().lower()
+        if recorded_backend and recorded_backend != backend_name:
+            raise RuntimeError(
+                "Rerun batch backend differs from immutable extraction metadata: "
+                f"{backend_name!r} != {recorded_backend!r}."
+            )
         payload_provider = str((payload or {}).get("provider") or "").strip().lower()
         if payload_provider in {"gemini", "anthropic"} and payload_provider != provider:
             provider = payload_provider
@@ -1154,6 +1367,63 @@ def submit_batch(args: argparse.Namespace | None = None) -> Path | None:
             f"{validated_ocr_count} generation-bound sidecar(s)."
         )
 
+    extraction_bindings_by_key: dict[str, ExtractionImageBinding] | None = None
+    if bool(config.model_validation_enabled):
+        input_manifest_path, input_manifest_records = write_input_image_manifest(
+            blobs,
+            run_dir / INPUT_IMAGE_MANIFEST_FILE_NAME,
+            include_ocr=bool(config.ocr_enabled),
+        )
+        input_manifest_gcs_uri = _upload_requests_to_gcs(
+            bucket=bucket,
+            run_dir_name=run_dir.name,
+            local_requests_path=input_manifest_path,
+        )
+        write_input_manifest_metadata(
+            run_dir=run_dir,
+            manifest_path=input_manifest_path,
+            gcs_uri=input_manifest_gcs_uri,
+            record_count=len(input_manifest_records),
+            ocr_enabled=bool(config.ocr_enabled),
+        )
+        log(
+            "Persisted generation-bound extraction input manifest for model "
+            "validation: "
+            f"{input_manifest_path.name} ({len(input_manifest_records)} page(s)) -> "
+            f"{input_manifest_gcs_uri}."
+        )
+        bindings_path, extraction_bindings = write_extraction_image_bindings(
+            bucket=bucket,
+            records=input_manifest_records,
+            provider=provider,  # type: ignore[arg-type]
+            run_dir_name=run_dir.name,
+            path=run_dir / EXTRACTION_IMAGE_BINDINGS_FILE_NAME,
+        )
+        bindings_gcs_uri = _upload_submit_artifact(
+            bucket=bucket, run_dir=run_dir, path=bindings_path
+        )
+        (run_dir / EXTRACTION_IMAGE_BINDINGS_META_FILE_NAME).write_text(
+            json.dumps(
+                {
+                    "path": bindings_path.name,
+                    "gcs_uri": bindings_gcs_uri,
+                    "sha256": file_sha256(bindings_path),
+                    "record_count": len(extraction_bindings),
+                },
+                indent=2,
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        extraction_bindings_by_key = dict(bindings_by_key(extraction_bindings))
+        _upload_submit_artifact(
+            bucket=bucket, run_dir=run_dir, path=run_dir / "metadata.json"
+        )
+        log(
+            "Pinned first-pass provider image references to "
+            f"{len(extraction_bindings)} exact GCS generation(s)."
+        )
+
     num_batches_requested = _resolve_num_batches(args)
     chunks = _split_blobs_evenly(blobs, num_batches_requested)
     if not chunks:
@@ -1183,6 +1453,7 @@ def submit_batch(args: argparse.Namespace | None = None) -> Path | None:
             log=log,
             for_vertex=bool(getattr(client, "vertexai", False)),
             provider=provider,
+            image_bindings=extraction_bindings_by_key,
         )
         batch_job_name, input_source, input_ref, dest_ref = _submit_chunk_job(
             client=client,
@@ -1221,6 +1492,10 @@ def submit_batch(args: argparse.Namespace | None = None) -> Path | None:
             else None,
             provider=provider,
         )
+        if bool(config.model_validation_enabled):
+            _upload_submit_artifact(
+                bucket=bucket, run_dir=run_dir, path=run_dir / "batch_job.json"
+            )
 
     _write_batch_job_meta(
         run_dir=run_dir,
@@ -1230,6 +1505,10 @@ def submit_batch(args: argparse.Namespace | None = None) -> Path | None:
         vertex_location=vertex_location if getattr(client, "vertexai", False) else None,
         provider=provider,
     )
+    if bool(config.model_validation_enabled):
+        _upload_submit_artifact(
+            bucket=bucket, run_dir=run_dir, path=run_dir / "batch_job.json"
+        )
 
     job_names = ", ".join(
         str(item.get("batch_job_name"))

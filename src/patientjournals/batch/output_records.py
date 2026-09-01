@@ -48,6 +48,27 @@ def response_has_value(response: object) -> bool:
     return True
 
 
+def gemini_finish_reason(response: object) -> str:
+    """Return the normalized first-candidate finish reason, if present."""
+
+    candidates = None
+    if isinstance(response, dict):
+        candidates = response.get("candidates")
+    else:
+        candidates = getattr(response, "candidates", None)
+    if not isinstance(candidates, (list, tuple)) or not candidates:
+        return ""
+    candidate = candidates[0]
+    if isinstance(candidate, dict):
+        raw = candidate.get("finishReason") or candidate.get("finish_reason")
+    else:
+        raw = getattr(candidate, "finish_reason", None) or getattr(
+            candidate, "finishReason", None
+        )
+    value = getattr(raw, "value", raw)
+    return str(value or "").strip().upper()
+
+
 def parse_gemini_output_record(
     record: object,
     *,
@@ -96,6 +117,18 @@ def parse_gemini_output_record(
             source=source,
             line_number=line_number,
         )
+
+    if bool(getattr(config, "model_validation_enabled", False)):
+        finish_reason = gemini_finish_reason(response)
+        if finish_reason != "STOP":
+            return GeminiOutputParseResult(
+                key=key,
+                parsed_model=None,
+                metadata={"finish_reason": finish_reason or None},
+                reason=f"finish_reason_{finish_reason.lower() or 'missing'}",
+                source=source,
+                line_number=line_number,
+            )
 
     metadata = extract_response_metadata(response)
     stored_metadata = record.get("_patientjournals_metadata")

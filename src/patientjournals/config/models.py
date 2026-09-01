@@ -18,6 +18,13 @@ class ModelSpec:
 
 _REGISTERED_MODELS: dict[str, ModelSpec] = {
     # Gemini
+    "gemini-3.7-flash": ModelSpec(
+        name="gemini-3.7-flash",
+        provider="gemini",
+        supports_batch=True,
+        supports_confidence_scores=True,
+        supports_thoughts=True,
+    ),
     "gemini-3.1-pro": ModelSpec(
         name="gemini-3.1-pro",
         provider="gemini",

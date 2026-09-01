@@ -13,6 +13,9 @@ DatasetSource = Literal["local", "cloud"]
 RunMode = Literal["local_api", "cloud_batch"]
 OutputFormat = Literal["jsonl", "csv"]
 DuplicateStrategy = Literal["first_successful", "provide_all"]
+VerificationThinkingLevel = Literal["low", "medium", "high"]
+VerificationScope = Literal["all", "flagged"]
+VerificationApplyMode = Literal["report_only", "apply_patches"]
 
 
 @dataclass(frozen=True)
@@ -42,6 +45,18 @@ class AppSettings:
     # them with synchronous API calls (fast, no new batch); above it, it submits a
     # rerun batch instead. API recovery is Gemini-only.
     api_recovery_threshold: int = 20
+    # Optional pipeline stages. These are durable app defaults; each submitted
+    # job snapshots its own values through SubmitJobDraft.
+    ocr_enabled: bool = True
+    subagents: bool = False
+    model_validation_enabled: bool = False
+    verification_model: str = "gemini-3.1-pro-preview"
+    verification_thinking_level: VerificationThinkingLevel = "high"
+    verification_scope: VerificationScope = "flagged"
+    verification_control_sample_percent: float = 2.0
+    verification_apply_mode: VerificationApplyMode = "apply_patches"
+    verification_max_output_tokens: int = 4096
+    verification_num_chunks: int = 1
 
     @classmethod
     def from_runtime_config(cls) -> "AppSettings":
@@ -67,6 +82,45 @@ class AppSettings:
             batch_duplicate_strategy=str(
                 config.batch_duplicate_strategy or "first_successful"
             ),  # type: ignore[arg-type]
+            ocr_enabled=bool(getattr(config, "ocr_enabled", True)),
+            subagents=bool(getattr(config, "subagents", False)),
+            model_validation_enabled=bool(
+                getattr(config, "model_validation_enabled", False)
+            ),
+            verification_model=str(
+                getattr(config, "verification_model", "")
+                or "gemini-3.1-pro-preview"
+            ),
+            verification_thinking_level=str(
+                getattr(config, "verification_thinking_level", "high") or "high"
+            ),  # type: ignore[arg-type]
+            verification_scope=str(
+                getattr(config, "verification_scope", "flagged") or "flagged"
+            ),  # type: ignore[arg-type]
+            verification_control_sample_percent=max(
+                0.0,
+                min(
+                    100.0,
+                    float(
+                        getattr(
+                            config,
+                            "verification_control_sample_percent",
+                            2.0,
+                        )
+                        or 0.0
+                    ),
+                ),
+            ),
+            verification_apply_mode=str(
+                getattr(config, "verification_apply_mode", "apply_patches")
+                or "apply_patches"
+            ),  # type: ignore[arg-type]
+            verification_max_output_tokens=max(
+                1, int(getattr(config, "verification_max_output_tokens", 4096) or 4096)
+            ),
+            verification_num_chunks=max(
+                1, int(getattr(config, "verification_num_chunks", 1) or 1)
+            ),
         )
 
     def to_json_dict(self) -> dict[str, object]:
@@ -173,7 +227,16 @@ class SubmitJobDraft:
     cloud_prefixes: tuple[str, ...] = ()
     continue_dataset: str = ""
     num_batches: int | None = None
+    ocr_enabled: bool = True
     subagents: bool = False
+    model_validation_enabled: bool = False
+    verification_model: str = "gemini-3.1-pro-preview"
+    verification_thinking_level: VerificationThinkingLevel = "high"
+    verification_scope: VerificationScope = "flagged"
+    verification_control_sample_percent: float = 2.0
+    verification_apply_mode: VerificationApplyMode = "apply_patches"
+    verification_max_output_tokens: int = 4096
+    verification_num_chunks: int = 1
 
 
 @dataclass(frozen=True)
@@ -211,6 +274,18 @@ class JobSummary:
     failed: int | None = None
     recovered: int = 0
     failed_included: int = 0
+    ocr_enabled: bool = True
+    subagents: bool = False
+    model_validation_enabled: bool = False
+    model_validation_status: str = ""
+    verification_run_dir: str = ""
+    verification_model: str = ""
+    verification_thinking_level: VerificationThinkingLevel = "high"
+    verification_scope: VerificationScope = "flagged"
+    verification_control_sample_percent: float = 2.0
+    verification_apply_mode: VerificationApplyMode = "apply_patches"
+    verification_max_output_tokens: int = 4096
+    verification_num_chunks: int = 1
 
 
 @dataclass(frozen=True)

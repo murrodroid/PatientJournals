@@ -6,11 +6,15 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from patientjournals.app.catalog import list_google_model_options
+from patientjournals.app.catalog import (
+    list_batch_model_options,
+    list_google_model_options,
+)
 from patientjournals.app.models import SubmitJobDraft
 from patientjournals.app.settings_store import load_app_settings
 from patientjournals.app.task_runner import TaskRunner
 from patientjournals.app.workflows import WorkflowService, serializable
+from patientjournals.config import config
 
 
 APP_HTML = """<!doctype html>
@@ -57,6 +61,8 @@ APP_HTML = """<!doctype html>
     summary { cursor:pointer; font-weight:800; }
     .inline-control { display:flex; gap:8px; align-items:center; }
     .inline-control select, .inline-control input { width:auto; }
+    .option-group { border:1px solid var(--line); background:white; padding:12px; margin:12px 0; }
+    .option-group h3 { margin:0 0 8px; font-size:15px; }
     .notice { border:1px solid var(--line); background:var(--soft); padding:12px; margin:12px 0; }
     .pill { display:inline-flex; align-items:center; border:1px solid var(--line); background:var(--soft); padding:4px 8px; margin-right:6px; font-size:12px; font-weight:800; }
     .race { display:grid; gap:12px; }
@@ -77,6 +83,12 @@ APP_HTML = """<!doctype html>
     .race-row.demo .race-fill { background:repeating-linear-gradient(45deg, rgba(0,178,202,.18) 0 8px, rgba(0,178,202,.42) 8px 16px); }
     .race-row.demo .race-car { background:white; }
     .small-note { font-size:12px; color:var(--muted); margin:6px 0 12px; }
+    .thinking-slider { margin:6px 0 12px; }
+    .thinking-slider input[type="range"] { width:100%; padding:0; min-height:28px; accent-color:var(--accent); }
+    .thinking-scale-labels { display:grid; grid-template-columns:1fr 1fr 1fr; color:var(--muted); font-size:12px; }
+    .thinking-scale-labels span:nth-child(2) { text-align:center; }
+    .thinking-scale-labels span:last-child { text-align:right; font-weight:800; }
+    .thinking-current { margin-top:5px; font-weight:800; }
     .status { color:var(--muted); margin:10px 0; min-height:22px; white-space:pre-wrap; }
     .bad { color:#9A3412; }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12px; }
@@ -170,9 +182,41 @@ const state = {
   schemaEditorParent: '',
   schemaEditorName: '',
   schemaEditorMakeActive: false,
-  datasetInspect: null
+  datasetInspect: null,
+  validationModels: [],
+  validationDefaults: {},
+  optionalDefaults: {}
 };
 const $ = (sel) => document.querySelector(sel);
+const VERIFICATION_THINKING_LEVELS = ['low', 'medium', 'high'];
+function verificationThinkingIndex(level) {
+  const index = VERIFICATION_THINKING_LEVELS.indexOf(String(level || 'high').toLowerCase());
+  return index < 0 ? 2 : index;
+}
+function verificationThinkingLevel(id) {
+  const index = Math.max(0, Math.min(2, Number($('#' + id)?.value ?? 2)));
+  return VERIFICATION_THINKING_LEVELS[index] || 'high';
+}
+function verificationThinkingLabel(level) {
+  if (level === 'high') return 'Maximum (high, default)';
+  return level.charAt(0).toUpperCase() + level.slice(1);
+}
+function updateVerificationThinking(id) {
+  const output = $('#' + id + 'Value');
+  if (output) output.textContent = verificationThinkingLabel(verificationThinkingLevel(id));
+}
+function setVerificationThinking(id, level) {
+  const control = $('#' + id);
+  if (control) control.value = String(verificationThinkingIndex(level));
+  updateVerificationThinking(id);
+}
+function verificationThinkingSlider(id, level='high') {
+  const index = verificationThinkingIndex(level);
+  return `<div class="thinking-slider"><input id="${id}" type="range" min="0" max="2" step="1" value="${index}" oninput="updateVerificationThinking('${id}')" aria-label="Verifier thinking level"><div class="thinking-scale-labels"><span>Low</span><span>Medium</span><span>Maximum (default)</span></div><div id="${id}Value" class="thinking-current">${verificationThinkingLabel(VERIFICATION_THINKING_LEVELS[index])}</div></div>`;
+}
+function verificationScopeOptions(selected='flagged') {
+  return `<option value="flagged" ${selected === 'flagged' ? 'selected' : ''}>Risk-routed + control sample</option><option value="all" ${selected === 'all' ? 'selected' : ''}>All pages</option>`;
+}
 async function api(path, opts={}) {
   const res = await fetch(path, opts);
   const data = await res.json();
@@ -780,11 +824,44 @@ async function jobs() {
     <button class="btn secondary" onclick="retrieveSelectedJobs()">Retrieve selected</button>
     <button class="btn secondary" onclick="jobAction('recover')">Recover API</button>
     <button class="btn secondary" onclick="jobAction('finalize')">Finalize Failed</button>
+    <button id="submitModelValidationButton" class="btn secondary" onclick="submitSelectedModelValidation()" disabled>Submit model validation</button>
+    <button id="retrieveModelValidationButton" class="btn secondary" onclick="retrieveSelectedModelValidation()" disabled>Retrieve model validation</button>
     <label class="inline-control"><input id="ignoreFailed" type="checkbox"> Ignore failed</label>
     <label class="inline-control">Duplicates <select id="duplicateStrategy"><option value="first_successful">First successful</option><option value="provide_all">Provide all</option></select></label>
-  </div><div id="jobsBody"></div>`;
+  </div>
+  <details><summary>Model validation controls</summary>
+    <label>Verifier model</label><select id="jobVerificationModel"></select>
+    <label>Thinking</label>${verificationThinkingSlider('jobVerificationThinking', 'high')}
+    <label>Verification scope</label><select id="jobVerificationScope">${verificationScopeOptions('flagged')}</select>
+    <label>Routine-page control sample (%)</label><input id="jobVerificationControlSample" type="number" min="0" max="100" step="0.1" value="2" disabled>
+    <div class="small-note">This value was fixed when extraction retrieval created deterministic routing. Choose it on the Submit screen; all-pages scope ignores it.</div>
+    <div class="small-note"><strong>Correction policy:</strong> schema-valid verifier corrections are accepted automatically. A complete successful run publishes the next immutable dataset version.</div>
+    <label>Max output tokens</label><input id="jobVerificationMaxTokens" type="number" min="1" value="4096">
+    <label>Validation batch chunks</label><input id="jobVerificationChunks" type="number" min="1" value="1">
+    <div class="small-note">Only jobs submitted with second-pass validation enabled are eligible. Missing, failed, or unverifiable selected pages block publication under the recorded scope policy.</div>
+  </details>
+  <div id="jobsBody"></div>`;
   try {
-    state.jobs = await api('/api/jobs');
+    const [jobsPayload, settings, validationModels] = await Promise.all([
+      api('/api/jobs'),
+      api('/api/cloud/settings'),
+      api('/api/validation/models')
+    ]);
+    state.jobs = jobsPayload;
+    state.validationDefaults = settings || {};
+    state.validationModels = validationModels || [];
+    const modelSelect = $('#jobVerificationModel');
+    const configuredModels = [...state.validationModels];
+    if (settings.verification_model && !configuredModels.some(item => item.name === settings.verification_model)) {
+      configuredModels.unshift({name: settings.verification_model, provider: 'configured'});
+    }
+    modelSelect.innerHTML = configuredModels.map(item => `<option value="${esc(item.name)}">${esc(item.name)} (${esc(item.provider)})</option>`).join('');
+    modelSelect.value = settings.verification_model || 'gemini-3.1-pro-preview';
+    setVerificationThinking('jobVerificationThinking', settings.verification_thinking_level || 'high');
+    $('#jobVerificationScope').value = settings.verification_scope || 'flagged';
+    $('#jobVerificationControlSample').value = settings.verification_control_sample_percent ?? 2;
+    $('#jobVerificationMaxTokens').value = settings.verification_max_output_tokens || 4096;
+    $('#jobVerificationChunks').value = settings.verification_num_chunks || 1;
     state.selectedJobIds = new Set([...state.selectedJobIds].filter(id => state.jobs.some(j => j.job_id === id)));
     renderJobs();
     setStatus(`${state.jobs.length} job(s). ${state.selectedJobIds.size} selected.`);
@@ -798,13 +875,32 @@ function renderJobs() {
     return `<tr class="clickable ${selected}" onclick="toggleJob(${i})">
       <td class="select-cell"><input type="checkbox" ${checked} onclick="event.stopPropagation(); toggleJob(${i}, this.checked)"></td>
       <td>${esc(j.created_at)}</td><td>${esc(j.model)}</td><td>${esc(j.schema_name || '')}<div class="muted mono" title="${esc(j.schema_version_id || '')}">${esc(shortText(j.schema_version_id || '', 24))}</div></td><td>${esc(j.input_location)}</td>
-      <td>${esc(j.image_count)}</td><td>${esc(j.status)}</td><td>${esc(j.succeeded ?? '')}</td><td>${esc(j.failed ?? '')}</td>
+      <td>${esc(j.image_count)}</td><td>${esc(j.status)}</td><td>${esc(j.ocr_enabled ? 'on' : 'off')}</td><td>${esc(j.subagents ? 'on' : 'off')}</td><td>${esc(j.model_validation_enabled ? (j.model_validation_status || 'enabled') : 'off')}</td><td>${esc(j.succeeded ?? '')}</td><td>${esc(j.failed ?? '')}</td>
     </tr>`;
   }).join('');
   $('#jobsBody').innerHTML = rawTable(
-    [`<th class="select-cell"><input type="checkbox" ${allChecked ? 'checked' : ''} onchange="toggleAllJobs(this.checked)"></th>`, '<th>Created</th>', '<th>Model</th>', '<th>Schema version</th>', '<th>Input</th>', '<th>Images</th>', '<th>Status</th>', '<th>Success</th>', '<th>Missing</th>'],
+    [`<th class="select-cell"><input type="checkbox" ${allChecked ? 'checked' : ''} onchange="toggleAllJobs(this.checked)"></th>`, '<th>Created</th>', '<th>Model</th>', '<th>Schema version</th>', '<th>Input</th>', '<th>Images</th>', '<th>Status</th>', '<th>OCR</th>', '<th>Subagents</th>', '<th>Verification</th>', '<th>Success</th>', '<th>Missing</th>'],
     rows
   );
+  updateModelValidationJobActions();
+}
+function updateModelValidationJobActions() {
+  const rows = selectedJobs();
+  if (rows.length === 1 && rows[0].model_validation_enabled) {
+    const job = rows[0];
+    if ($('#jobVerificationModel') && job.verification_model) $('#jobVerificationModel').value = job.verification_model;
+    setVerificationThinking('jobVerificationThinking', job.verification_thinking_level || 'high');
+    if ($('#jobVerificationScope')) $('#jobVerificationScope').value = job.verification_scope || 'flagged';
+    if ($('#jobVerificationControlSample')) $('#jobVerificationControlSample').value = job.verification_control_sample_percent ?? 2;
+    if ($('#jobVerificationMaxTokens')) $('#jobVerificationMaxTokens').value = job.verification_max_output_tokens || 4096;
+    if ($('#jobVerificationChunks')) $('#jobVerificationChunks').value = job.verification_num_chunks || 1;
+  }
+  const submitReady = rows.some(job => job.model_validation_enabled && job.retrieved && job.model_validation_status === 'pending');
+  const retrieveReady = rows.some(job => job.model_validation_enabled && Boolean(job.verification_run_dir) && job.model_validation_status === 'submitted');
+  const submitButton = $('#submitModelValidationButton');
+  const retrieveButton = $('#retrieveModelValidationButton');
+  if (submitButton) submitButton.disabled = !submitReady;
+  if (retrieveButton) retrieveButton.disabled = !retrieveReady;
 }
 function toggleJob(index, checked=null) {
   const job = state.jobs[index];
@@ -840,6 +936,39 @@ async function jobAction(action) {
   try {
     const started = await Promise.all(rows.map(j => api(map[action], { method:'POST', body: JSON.stringify({ run_dir: j.run_dir }), headers:{'Content-Type':'application/json'} })));
     setStatus(`Started ${started.length} ${action} task(s).`);
+    activate('tasks');
+  } catch (e) { setStatus(e.message, true); }
+}
+async function submitSelectedModelValidation() {
+  const rows = selectedJobs().filter(job => job.model_validation_enabled && job.retrieved && job.model_validation_status === 'pending');
+  if (!rows.length) return setStatus('Select a retrieved job that has model validation enabled.', true);
+  const options = {
+    model: $('#jobVerificationModel')?.value || state.validationDefaults.verification_model || 'gemini-3.1-pro-preview',
+    thinking_level: verificationThinkingLevel('jobVerificationThinking'),
+    verification_scope: $('#jobVerificationScope')?.value || state.validationDefaults.verification_scope || 'flagged',
+    max_output_tokens: Number($('#jobVerificationMaxTokens')?.value || 4096),
+    num_chunks: Number($('#jobVerificationChunks')?.value || 1)
+  };
+  try {
+    const started = await Promise.all(rows.map(job => api('/api/jobs/model-validation/submit', {
+      method:'POST',
+      body:JSON.stringify({run_dir: job.run_dir, ...options}),
+      headers:{'Content-Type':'application/json'}
+    })));
+    setStatus(`Started ${started.length} model-validation submit task(s).`);
+    activate('tasks');
+  } catch (e) { setStatus(e.message, true); }
+}
+async function retrieveSelectedModelValidation() {
+  const rows = selectedJobs().filter(job => job.model_validation_enabled && job.verification_run_dir && job.model_validation_status === 'submitted');
+  if (!rows.length) return setStatus('Select a job with a submitted verifier batch.', true);
+  try {
+    const started = await Promise.all(rows.map(job => api('/api/jobs/model-validation/retrieve', {
+      method:'POST',
+      body:JSON.stringify({run_dir: job.run_dir}),
+      headers:{'Content-Type':'application/json'}
+    })));
+    setStatus(`Started ${started.length} model-validation retrieve task(s).`);
     activate('tasks');
   } catch (e) { setStatus(e.message, true); }
 }
@@ -996,19 +1125,47 @@ async function submit() {
   $('#main').innerHTML = `<h1>Submit</h1><div class="sub">Start a local API or cloud batch run from selectable inputs.</div><div id="status" class="status">Loading choices...</div><div id="submitBody"></div>`;
   try {
     const [opts, localInputs] = await Promise.all([api('/api/options'), api('/api/local-inputs').catch(() => [])]);
+    state.validationModels = opts.validation_models || [];
+    state.validationDefaults = opts.validation_defaults || {};
+    state.optionalDefaults = opts.optional_defaults || {};
     state.localInputs = localInputs || [];
     if (!state.selectedLocalPath && state.localInputs.length) state.selectedLocalPath = state.localInputs[0].path;
     $('#submitBody').innerHTML = `<section class="panel">
       <label>Source</label><select id="source" onchange="renderInputChoices()"><option value="local">Local</option><option value="cloud">Cloud</option></select>
-      <label>Run mode</label><select id="mode"><option value="local_api">Local API</option><option value="cloud_batch">Cloud batch</option></select>
+      <label>Run mode</label><select id="mode" onchange="updateModelValidationControls()"><option value="local_api">Local API</option><option value="cloud_batch">Cloud batch</option></select>
       <div id="inputChoices"></div>
       <div class="toolbar"><button class="btn secondary" onclick="previewSubmission()">Preview random pages</button></div><div id="submitPreview"></div>
       <label>Schema version</label><select id="schema">${(opts.schemas || []).map(s=>`<option value="${esc(s.version_id)}" data-name="${esc(s.name)}" ${s.is_active ? 'selected' : ''}>${esc(s.name)} v${esc(s.version_number)}${s.is_active ? ' - Active' : ''}</option>`).join('')}</select>
-      <label>Model</label><select id="model">${(opts.models || []).map(m=>`<option>${esc(m.name)}</option>`).join('')}</select>
-      <details><summary>Advanced</summary><label>Batch chunks</label><input id="chunks" type="number" min="1" placeholder="optional"><label class="inline-control"><input id="subagentUsage" type="checkbox"> Sub Agent Usage</label><div class="small-note">Runs one parallel request per top-level schema field, then joins and validates the page before dataset insertion.</div></details>
+      <label>Model</label><select id="model">${(opts.models || []).map(m=>`<option ${m.name === opts.default_model ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select>
+      <details><summary>Advanced</summary>
+        <label>Batch chunks</label><input id="chunks" type="number" min="1" placeholder="optional">
+        <div class="option-group"><h3>OCR context</h3>
+          <label class="inline-control"><input id="ocrUsage" type="checkbox" ${state.optionalDefaults.ocr_enabled ? 'checked' : ''}> Include positional OCR</label>
+          <div class="small-note">Adds generation-bound text and coordinates to extraction prompts. Cloud jobs require prepared OCR sidecars only when this is enabled.</div>
+        </div>
+        <div class="option-group"><h3>Schema specialists</h3>
+          <label class="inline-control"><input id="subagentUsage" type="checkbox" ${state.optionalDefaults.subagents ? 'checked' : ''}> Use schema subagents</label>
+          <div class="small-note">Runs one parallel request per top-level schema field, then joins and validates the page before dataset insertion.</div>
+        </div>
+        <div class="option-group"><h3>Second-pass verification</h3>
+          <label class="inline-control"><input id="modelValidationEnabled" type="checkbox" ${state.optionalDefaults.model_validation_enabled ? 'checked' : ''} onchange="updateModelValidationControls()"> Enable model verification</label>
+          <div class="small-note">Cloud batch only. The verifier checks the exact image and candidate, optionally using OCR when OCR context is enabled.</div>
+          <label>Verifier model</label><select id="verificationModel">${state.validationModels.map(m=>`<option value="${esc(m.name)}" ${m.name === state.validationDefaults.verification_model ? 'selected' : ''}>${esc(m.name)} (${esc(m.provider)})</option>`).join('')}</select>
+          <label>Verifier thinking</label>${verificationThinkingSlider('verificationThinking', state.validationDefaults.verification_thinking_level || 'high')}
+          <label>Verification scope</label><select id="verificationScope">${verificationScopeOptions(state.validationDefaults.verification_scope || 'flagged')}</select>
+          <label>Routine-page control sample (%)</label><input id="verificationControlSample" type="number" min="0" max="100" step="0.1" value="${esc(state.validationDefaults.verification_control_sample_percent ?? 2)}">
+          <div class="small-note">Risk-routed mode verifies all flagged pages plus this deterministic sample of routine pages. All-pages mode ignores the sample.</div>
+          <div class="small-note"><strong>Correction policy:</strong> schema-valid corrections are accepted automatically and a complete successful run publishes the next immutable dataset version.</div>
+          <label>Verifier max output tokens</label><input id="verificationMaxTokens" type="number" min="1" value="${esc(state.validationDefaults.verification_max_output_tokens || 4096)}">
+          <label>Validation batch chunks</label><input id="verificationChunks" type="number" min="1" value="${esc(state.validationDefaults.verification_num_chunks || 1)}">
+          <div class="small-note">Every run writes immutable, hash-bound field-correction and routing metadata; successful runs publish v001, v002, and so on.</div>
+        </div>
+      </details>
       <div class="toolbar"><button class="btn" onclick="submitRun()">Submit</button><button class="btn secondary" onclick="submit()">Refresh choices</button></div>
     </section>`;
     renderInputChoices();
+    setVerificationThinking('verificationThinking', state.validationDefaults.verification_thinking_level || 'high');
+    updateModelValidationControls();
     setStatus('Choices loaded.');
   } catch (e) { setStatus(e.message, true); }
 }
@@ -1020,11 +1177,22 @@ function renderInputChoices() {
     if (localOption) localOption.disabled = source === 'cloud';
     if (source === 'cloud') mode.value = 'cloud_batch';
   }
+  updateModelValidationControls();
   if (source === 'cloud') {
     if (!state.cloudInputs.length) return loadCloudInputs();
     return renderCloudInputs();
   }
   return renderLocalInputs();
+}
+function updateModelValidationControls() {
+  const batchMode = ($('#mode')?.value || 'local_api') === 'cloud_batch';
+  const enabledControl = $('#modelValidationEnabled');
+  if (enabledControl) enabledControl.disabled = !batchMode;
+  const enabled = batchMode && Boolean(enabledControl?.checked);
+  ['verificationModel','verificationThinking','verificationScope','verificationControlSample','verificationMaxTokens','verificationChunks'].forEach(id => {
+    const control = $('#' + id);
+    if (control) control.disabled = !enabled;
+  });
 }
 function renderLocalInputs() {
   const rows = state.localInputs.map((item, i) => {
@@ -1132,7 +1300,16 @@ async function submitRun() {
     model_name: $('#model').value,
     output_format: 'jsonl',
     num_batches: $('#chunks')?.value ? Number($('#chunks').value) : null,
-    subagents: Boolean($('#subagentUsage')?.checked)
+    ocr_enabled: Boolean($('#ocrUsage')?.checked),
+    subagents: Boolean($('#subagentUsage')?.checked),
+    model_validation_enabled: mode === 'cloud_batch' && Boolean($('#modelValidationEnabled')?.checked),
+    verification_model: $('#verificationModel')?.value || state.validationDefaults.verification_model || 'gemini-3.1-pro-preview',
+    verification_thinking_level: verificationThinkingLevel('verificationThinking'),
+    verification_scope: $('#verificationScope')?.value || state.validationDefaults.verification_scope || 'flagged',
+    verification_control_sample_percent: Number($('#verificationControlSample')?.value ?? state.validationDefaults.verification_control_sample_percent ?? 2),
+    verification_apply_mode: 'apply_patches',
+    verification_max_output_tokens: Number($('#verificationMaxTokens')?.value || 4096),
+    verification_num_chunks: Number($('#verificationChunks')?.value || 1)
   };
   try {
     const task = await api('/api/submit', { method:'POST', body: JSON.stringify(body), headers:{'Content-Type':'application/json'} });
@@ -1144,7 +1321,11 @@ async function submitRun() {
 async function cloud() {
   $('#main').innerHTML = `<h1>Cloud</h1><div class="sub">Google Cloud connection, browser login, and access checks.</div><div id="status" class="status">Loading...</div><div id="cloudBody"></div>`;
   try {
-    const settings = await api('/api/cloud/settings');
+    const [settings, verificationModelsPayload] = await Promise.all([api('/api/cloud/settings'), api('/api/validation/models')]);
+    const verificationModels = [...(verificationModelsPayload || [])];
+    if (settings.verification_model && !verificationModels.some(item => item.name === settings.verification_model)) {
+      verificationModels.unshift({name: settings.verification_model, provider: 'configured'});
+    }
     $('#cloudBody').innerHTML = `<div class="split">
       <section class="panel">
         <h2>Connection</h2>
@@ -1163,6 +1344,27 @@ async function cloud() {
           <label>Schemas prefix</label><input id="cloudSchemasPrefix" value="${esc(settings.schemas_gcs_prefix || '')}">
           <label><input id="cloudUploadValidations" type="checkbox" ${settings.upload_validation_to_gcs ? 'checked' : ''}> Upload validations to shared bucket</label>
         </details>
+        <details><summary>Optional pipeline defaults</summary>
+          <div class="option-group"><h3>OCR context</h3>
+            <label class="inline-control"><input id="cloudOcrEnabled" type="checkbox" ${settings.ocr_enabled ? 'checked' : ''}> Enable for new jobs</label>
+          </div>
+          <div class="option-group"><h3>Schema specialists</h3>
+            <label class="inline-control"><input id="cloudSubagents" type="checkbox" ${settings.subagents ? 'checked' : ''}> Enable for new jobs</label>
+          </div>
+          <div class="option-group"><h3>Second-pass verification</h3>
+          <label class="inline-control"><input id="cloudModelValidationEnabled" type="checkbox" ${settings.model_validation_enabled ? 'checked' : ''}> Enable for new Cloud batch jobs</label>
+          <div class="small-note">Each job snapshots all three optional-stage choices independently.</div>
+          <label>Verifier model</label><select id="cloudVerificationModel">${verificationModels.map(m=>`<option value="${esc(m.name)}" ${m.name === settings.verification_model ? 'selected' : ''}>${esc(m.name)} (${esc(m.provider)})</option>`).join('')}</select>
+          <label>Thinking</label>${verificationThinkingSlider('cloudVerificationThinking', settings.verification_thinking_level || 'high')}
+          <label>Verification scope</label><select id="cloudVerificationScope">${verificationScopeOptions(settings.verification_scope || 'flagged')}</select>
+          <label>Routine-page control sample (%)</label><input id="cloudVerificationControlSample" type="number" min="0" max="100" step="0.1" value="${esc(settings.verification_control_sample_percent ?? 2)}">
+          <div class="small-note">Risk-routed mode verifies all flagged pages plus this deterministic sample of routine pages. All-pages mode ignores the sample.</div>
+          <div class="small-note"><strong>Correction policy:</strong> schema-valid verifier corrections are always accepted automatically.</div>
+          <label>Max output tokens</label><input id="cloudVerificationMaxTokens" type="number" min="1" value="${esc(settings.verification_max_output_tokens || 4096)}">
+          <label>Validation batch chunks</label><input id="cloudVerificationChunks" type="number" min="1" value="${esc(settings.verification_num_chunks || 1)}">
+          <div class="small-note">The first successful run creates v001; later successful reruns publish the next version. Missing, failed, or unverifiable selected pages block publication under the recorded scope policy.</div>
+          </div>
+        </details>
         <div class="toolbar">
           <button class="btn" onclick="connectCloud('adc')">Connect browser login</button>
           <button class="btn secondary" onclick="runCloudCheck()">Run access check</button>
@@ -1176,6 +1378,7 @@ async function cloud() {
       </section>
     </div>`;
     $('#cloudAuthMode').value = settings.auth_mode || 'adc';
+    setVerificationThinking('cloudVerificationThinking', settings.verification_thinking_level || 'high');
     setStatus('Cloud settings loaded.');
   } catch (e) { setStatus(e.message, true); }
 }
@@ -1193,7 +1396,17 @@ function cloudPayload() {
     datasets_gcs_prefix: $('#cloudDatasetsPrefix')?.value || '',
     validations_gcs_prefix: $('#cloudValidationsPrefix')?.value || '',
     schemas_gcs_prefix: $('#cloudSchemasPrefix')?.value || '',
-    upload_validation_to_gcs: $('#cloudUploadValidations')?.checked ?? true
+    upload_validation_to_gcs: $('#cloudUploadValidations')?.checked ?? true,
+    ocr_enabled: $('#cloudOcrEnabled')?.checked ?? true,
+    subagents: $('#cloudSubagents')?.checked ?? false,
+    model_validation_enabled: $('#cloudModelValidationEnabled')?.checked ?? false,
+    verification_model: $('#cloudVerificationModel')?.value || 'gemini-3.1-pro-preview',
+    verification_thinking_level: verificationThinkingLevel('cloudVerificationThinking'),
+    verification_scope: $('#cloudVerificationScope')?.value || 'flagged',
+    verification_control_sample_percent: Number($('#cloudVerificationControlSample')?.value ?? 2),
+    verification_apply_mode: 'apply_patches',
+    verification_max_output_tokens: Number($('#cloudVerificationMaxTokens')?.value || 4096),
+    verification_num_chunks: Number($('#cloudVerificationChunks')?.value || 1)
   };
 }
 async function saveCloud() {
@@ -1311,6 +1524,25 @@ class AppHandler(BaseHTTPRequestHandler):
                             for item in schema_data.get("versions", [])
                         ],
                         "models": serializable(list_google_model_options()),
+                        "default_model": str(config.model or ""),
+                        "validation_models": serializable(list_batch_model_options()),
+                        "optional_defaults": {
+                            "ocr_enabled": self.service.settings.ocr_enabled,
+                            "subagents": self.service.settings.subagents,
+                            "model_validation_enabled": (
+                                self.service.settings.model_validation_enabled
+                            ),
+                        },
+                        "validation_defaults": {
+                            "model_validation_enabled": self.service.settings.model_validation_enabled,
+                            "verification_model": self.service.settings.verification_model,
+                            "verification_thinking_level": self.service.settings.verification_thinking_level,
+                            "verification_scope": self.service.settings.verification_scope,
+                            "verification_control_sample_percent": self.service.settings.verification_control_sample_percent,
+                            "verification_apply_mode": "apply_patches",
+                            "verification_max_output_tokens": self.service.settings.verification_max_output_tokens,
+                            "verification_num_chunks": self.service.settings.verification_num_chunks,
+                        },
                     }
                 )
             elif parsed.path == "/api/schemas":
@@ -1327,6 +1559,8 @@ class AppHandler(BaseHTTPRequestHandler):
                 )
             elif parsed.path == "/api/cloud/settings":
                 self._send_json(self.service.cloud_settings())
+            elif parsed.path == "/api/validation/models":
+                self._send_json(serializable(list_batch_model_options()))
             elif parsed.path == "/api/local-inputs":
                 self._send_json(self.service.local_input_choices())
             elif parsed.path == "/api/cloud-inputs":
@@ -1399,8 +1633,51 @@ class AppHandler(BaseHTTPRequestHandler):
                     cloud_prefix=str(payload.get("cloud_prefix") or ""),
                     cloud_prefixes=tuple(str(item) for item in raw_prefixes if item),
                     continue_dataset=str(payload.get("continue_dataset") or ""),
-                    num_batches=int(num_batches) if num_batches not in {None, ""} else None,
-                    subagents=bool(payload.get("subagents", False)),
+                    num_batches=int(num_batches)
+                    if num_batches not in {None, ""}
+                    else None,
+                    ocr_enabled=bool(
+                        payload.get("ocr_enabled", self.service.settings.ocr_enabled)
+                    ),
+                    subagents=bool(
+                        payload.get("subagents", self.service.settings.subagents)
+                    ),
+                    model_validation_enabled=bool(
+                        payload.get("model_validation_enabled", False)
+                    ),
+                    verification_model=str(
+                        payload.get("verification_model")
+                        or self.service.settings.verification_model
+                    ),
+                    verification_thinking_level=str(
+                        payload.get("verification_thinking_level")
+                        or self.service.settings.verification_thinking_level
+                    ),
+                    verification_scope=str(
+                        payload.get("verification_scope")
+                        or self.service.settings.verification_scope
+                    ),
+                    verification_control_sample_percent=float(
+                        payload.get("verification_control_sample_percent")
+                        if payload.get("verification_control_sample_percent")
+                        is not None
+                        else self.service.settings.verification_control_sample_percent
+                    ),
+                    verification_apply_mode="apply_patches",
+                    verification_max_output_tokens=max(
+                        1,
+                        int(
+                            payload.get("verification_max_output_tokens")
+                            or self.service.settings.verification_max_output_tokens
+                        ),
+                    ),
+                    verification_num_chunks=max(
+                        1,
+                        int(
+                            payload.get("verification_num_chunks")
+                            or self.service.settings.verification_num_chunks
+                        ),
+                    ),
                 )
                 self._task("submit", lambda: self.service.submit_batch(draft), payload)
             elif parsed.path == "/api/cloud/settings":
@@ -1412,16 +1689,16 @@ class AppHandler(BaseHTTPRequestHandler):
                 self._send_json(
                     self.service.start_cloud_browser_login(
                         mode=str(payload.get("mode") or "adc"),
-                        payload=settings_payload if isinstance(settings_payload, dict) else {},
+                        payload=settings_payload
+                        if isinstance(settings_payload, dict)
+                        else {},
                     )
                 )
             elif parsed.path == "/api/schemas/version":
                 self._send_json(self.service.create_schema_version(payload))
             elif parsed.path == "/api/schemas/active":
                 self._send_json(
-                    self.service.set_active_schema(
-                        str(payload.get("version_id") or "")
-                    )
+                    self.service.set_active_schema(str(payload.get("version_id") or ""))
                 )
             elif parsed.path == "/api/submit/preview":
                 self._send_json(self.service.preview_submission(payload))
@@ -1451,16 +1728,69 @@ class AppHandler(BaseHTTPRequestHandler):
                     ),
                     payload,
                 )
+            elif parsed.path == "/api/jobs/model-validation/submit":
+                run_dir = str(payload.get("run_dir") or "")
+                self._task(
+                    "model_validation_submit",
+                    lambda: self.service.submit_model_validation(
+                        run_dir,
+                        model=str(payload.get("model") or ""),
+                        thinking_level=str(payload.get("thinking_level") or ""),
+                        scope=str(
+                            payload.get("verification_scope")
+                            or payload.get("scope")
+                            or ""
+                        ),
+                        control_sample_percent=(
+                            float(payload["verification_control_sample_percent"])
+                            if payload.get("verification_control_sample_percent")
+                            is not None
+                            else (
+                                float(payload["control_sample_percent"])
+                                if payload.get("control_sample_percent") is not None
+                                else None
+                            )
+                        ),
+                        max_output_tokens=max(
+                            1, int(payload.get("max_output_tokens") or 4096)
+                        ),
+                        num_chunks=max(1, int(payload.get("num_chunks") or 1)),
+                    ),
+                    payload,
+                )
+            elif parsed.path == "/api/jobs/model-validation/retrieve":
+                run_dir = str(payload.get("run_dir") or "")
+                self._task(
+                    "model_validation_retrieve",
+                    lambda: self.service.retrieve_model_validation(
+                        run_dir,
+                        wait=bool(payload.get("wait")),
+                        allow_partial=bool(payload.get("allow_partial")),
+                    ),
+                    payload,
+                )
             elif parsed.path == "/api/jobs/finalize-failed":
                 run_dir = str(payload.get("run_dir") or "")
-                self._task("finalize_failed", lambda: self.service.finalize_failed_rows(run_dir), payload)
+                self._task(
+                    "finalize_failed",
+                    lambda: self.service.finalize_failed_rows(run_dir),
+                    payload,
+                )
             elif parsed.path == "/api/jobs/recover-api":
                 run_dir = str(payload.get("run_dir") or "")
-                self._task("recover_api", lambda: self.service.recover_missing_with_api(run_dir), payload)
+                self._task(
+                    "recover_api",
+                    lambda: self.service.recover_missing_with_api(run_dir),
+                    payload,
+                )
             elif parsed.path == "/api/jobs/resubmit-failed":
                 run_dir = str(payload.get("run_dir") or "")
                 count = int(payload.get("num_batches") or 1)
-                self._task("resubmit_failed", lambda: self.service.resubmit_failed(run_dir, num_batches=count), payload)
+                self._task(
+                    "resubmit_failed",
+                    lambda: self.service.resubmit_failed(run_dir, num_batches=count),
+                    payload,
+                )
             elif parsed.path == "/api/datasets/combine":
                 raw_items = payload.get("datasets") or ()
                 if not isinstance(raw_items, list):
@@ -1483,9 +1813,13 @@ class AppHandler(BaseHTTPRequestHandler):
                         results=str(payload.get("results") or ""),
                         image_source=str(payload.get("image_source") or "cloud"),
                         images=str(payload.get("images") or ""),
-                        cloud_prefixes=tuple(str(item) for item in raw_prefixes if item),
+                        cloud_prefixes=tuple(
+                            str(item) for item in raw_prefixes if item
+                        ),
                         corrections=bool(payload.get("corrections", True)),
-                        sampling_mode=str(payload.get("sampling_mode") or "balanced_ucb"),
+                        sampling_mode=str(
+                            payload.get("sampling_mode") or "balanced_ucb"
+                        ),
                         offline=bool(payload.get("offline")),
                     )
                 )
@@ -1511,7 +1845,9 @@ class AppHandler(BaseHTTPRequestHandler):
                         images=str(payload.get("images") or ""),
                         username=str(payload.get("username") or "researcher"),
                         corrections=bool(payload.get("corrections", True)),
-                        sampling_mode=str(payload.get("sampling_mode") or "balanced_ucb"),
+                        sampling_mode=str(
+                            payload.get("sampling_mode") or "balanced_ucb"
+                        ),
                     ),
                     payload,
                 )
@@ -1524,7 +1860,9 @@ class AppHandler(BaseHTTPRequestHandler):
         return
 
 
-def run_server(*, host: str = "127.0.0.1", port: int = 8765, open_browser: bool = True) -> None:
+def run_server(
+    *, host: str = "127.0.0.1", port: int = 8765, open_browser: bool = True
+) -> None:
     settings = load_app_settings()
     service = WorkflowService(settings)
     runner = TaskRunner(service.store)
@@ -1548,7 +1886,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run the PatientJournals web app.")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
-    parser.add_argument("--no-open", action="store_true", help="Do not open a browser tab.")
+    parser.add_argument(
+        "--no-open", action="store_true", help="Do not open a browser tab."
+    )
     args = parser.parse_args()
     run_server(host=args.host, port=args.port, open_browser=not args.no_open)
 

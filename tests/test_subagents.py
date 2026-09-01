@@ -192,6 +192,113 @@ def test_combiner_joins_out_of_order_specialist_results(simple_config):
     assert parsed.metadata["subagent_fields"] == ["patient", "diagnosis"]
 
 
+def test_combiner_withholds_page_with_duplicate_valid_specialist(simple_config):
+    page_key = "pages/001.png"
+    lines = [
+        _gemini_line(
+            encode_specialist_request_key(page_key, "patient"),
+            {"patient": {"name": "Ada"}},
+        ),
+        _gemini_line(
+            encode_specialist_request_key(page_key, "patient"),
+            {"patient": {"name": "Else"}},
+        ),
+        _gemini_line(
+            encode_specialist_request_key(page_key, "diagnosis"),
+            {"diagnosis": "Feber"},
+        ),
+    ]
+
+    combined = combine_subagent_jsonl_sources([("chunk", lines)])
+
+    assert combined.records == ()
+    assert combined.stats["duplicate_valid_specialists"] == 1
+    assert combined.stats["duplicate_pages"] == 1
+    failure = next(
+        item
+        for item in combined.failures
+        if item.get("reason") == "duplicate_valid_specialist"
+        and item.get("specialist") == "patient"
+    )
+    assert failure["retryable"] is False
+
+
+def test_combiner_marks_join_schema_failure_non_retryable(
+    simple_config, monkeypatch
+) -> None:
+    page_key = "pages/001.png"
+    lines = [
+        _gemini_line(
+            encode_specialist_request_key(page_key, "patient"),
+            {"patient": {"name": "Ada"}},
+        ),
+        _gemini_line(
+            encode_specialist_request_key(page_key, "diagnosis"),
+            {"diagnosis": "Feber"},
+        ),
+    ]
+
+    def reject_join(**_kwargs):
+        raise ValueError("cross-field constraint failed")
+
+    monkeypatch.setattr(
+        "patientjournals.batch.subagent_outputs.merge_specialist_payloads",
+        reject_join,
+    )
+
+    combined = combine_subagent_jsonl_sources([("chunk", lines)])
+
+    assert combined.records == ()
+    failure = next(
+        item
+        for item in combined.failures
+        if item.get("reason") == "joined_schema_validation_failed"
+    )
+    assert failure["retryable"] is False
+
+
+def test_preversion_combiner_rejects_truncated_specialist(
+    simple_config, monkeypatch
+) -> None:
+    monkeypatch.setattr(config, "model_validation_enabled", True)
+    page_key = "pages/001.png"
+
+    def line(specialist: str, payload: dict, reason: str) -> str:
+        return json.dumps(
+            {
+                "key": encode_specialist_request_key(page_key, specialist),
+                "response": {
+                    "candidates": [
+                        {
+                            "finishReason": reason,
+                            "content": {
+                                "parts": [{"text": json.dumps(payload)}]
+                            },
+                        }
+                    ]
+                },
+            }
+        )
+
+    combined = combine_subagent_jsonl_sources(
+        [
+            (
+                "chunk",
+                [
+                    line("patient", {"patient": {"name": "Ada"}}, "MAX_TOKENS"),
+                    line("diagnosis", {"diagnosis": "Feber"}, "STOP"),
+                ],
+            )
+        ]
+    )
+
+    assert combined.records == ()
+    assert any(
+        item.get("reason") == "finish_reason_max_tokens"
+        for item in combined.failures
+    )
+
+
 def test_combiner_withholds_page_when_specialist_is_missing(simple_config):
     page_key = "pages/001.png"
     lines = [

@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable
+
+from patientjournals.validation.publication import publication_idempotency_key
 
 
 JOB_STORE_SCHEMA_VERSION = 3
@@ -58,20 +61,36 @@ def _copy_dataset_into_job(
     source_path: Path,
     operation: str,
     version_count: int,
-) -> Path:
+    version_number: int | None = None,
+) -> tuple[Path, Path]:
     if not source_path.exists() or not source_path.is_file():
-        return source_path
+        return source_path, source_path
 
     dataset_dir, versions_dir = _dataset_files(job_dir)
     suffix = source_path.suffix or ".jsonl"
     current_path = dataset_dir / f"current{suffix}"
-    if source_path.resolve() != current_path.resolve():
-        shutil.copy2(source_path, current_path)
+    selected_version = int(version_number or (version_count + 1))
+    if selected_version <= 0:
+        raise ValueError("Dataset version number must be positive.")
+    version_path = versions_dir / f"v{selected_version:03d}_{operation}{suffix}"
+    if version_path.exists() and version_path.read_bytes() != source_path.read_bytes():
+        raise RuntimeError(
+            f"Immutable dataset version already exists with different bytes: {version_path}"
+        )
 
-    version_path = versions_dir / f"v{version_count + 1:03d}_{operation}{suffix}"
-    if current_path.exists():
-        shutil.copy2(current_path, version_path)
-    return current_path
+    def atomic_copy(target: Path) -> None:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temporary = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+        shutil.copy2(source_path, temporary)
+        temporary.replace(target)
+
+    # Establish the immutable version before advancing the mutable current pointer.
+    # A crash at either boundary is therefore safe to replay.
+    if not version_path.exists():
+        atomic_copy(version_path)
+    if source_path.resolve() != current_path.resolve():
+        atomic_copy(current_path)
+    return current_path, version_path
 
 
 def _json_dumps(payload: dict) -> str:
@@ -86,6 +105,67 @@ def _json_loads(value: str | None) -> dict:
     except json.JSONDecodeError:
         return {}
     return payload if isinstance(payload, dict) else {}
+
+
+def _portable_run_id(explicit_id: object, path_value: object) -> str:
+    """Return the run ID used by shared publication, independent of its root."""
+
+    raw_id = str(explicit_id or "").strip()
+    if raw_id:
+        return _safe_job_id(raw_id)
+    raw_path = str(path_value or "").strip()
+    if not raw_path:
+        return ""
+    return _safe_job_id(Path(raw_path).expanduser().name)
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _model_validation_idempotency_key(
+    *,
+    source_run_id: str,
+    verification_run_id: str,
+    candidate_hash: str,
+    verification_model: str,
+    verification_prompt_hash: str,
+) -> str:
+    identity = {
+        "source_run_id": source_run_id,
+        "verification_run_id": verification_run_id,
+        "candidate_hash": candidate_hash,
+        "verification_model": verification_model,
+        "verification_prompt_hash": verification_prompt_hash,
+    }
+    return hashlib.sha256(
+        json.dumps(identity, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+
+
+def _dataset_publication_idempotency_key(
+    *,
+    source_run_id: str,
+    verification_run_id: str,
+    candidate_hash: str,
+    verification_prompt_hash: str,
+    dataset_sha256: str,
+    publication_provenance_sha256: str,
+) -> str:
+    """Use the shared publisher's portable, content-bound identity."""
+
+    return publication_idempotency_key(
+        source_run_id=source_run_id,
+        verification_run_id=verification_run_id,
+        candidate_hash=candidate_hash,
+        verification_prompt_hash=verification_prompt_hash,
+        dataset_sha256=dataset_sha256,
+        publication_provenance_sha256=publication_provenance_sha256,
+    )
 
 
 class JobStore:
@@ -258,12 +338,22 @@ class JobStore:
         updated["job_id"] = safe_id
         updated["updated_at"] = now
 
-        legacy = updated.get("legacy") if isinstance(updated.get("legacy"), dict) else {}
-        input_payload = updated.get("input") if isinstance(updated.get("input"), dict) else {}
-        batches = updated.get("batches") if isinstance(updated.get("batches"), dict) else {}
-        dataset = updated.get("dataset") if isinstance(updated.get("dataset"), dict) else {}
+        legacy = (
+            updated.get("legacy") if isinstance(updated.get("legacy"), dict) else {}
+        )
+        input_payload = (
+            updated.get("input") if isinstance(updated.get("input"), dict) else {}
+        )
+        batches = (
+            updated.get("batches") if isinstance(updated.get("batches"), dict) else {}
+        )
+        dataset = (
+            updated.get("dataset") if isinstance(updated.get("dataset"), dict) else {}
+        )
 
-        run_dir = str(legacy.get("submit_run_dir") or batches.get("source_run_dir") or "")
+        run_dir = str(
+            legacy.get("submit_run_dir") or batches.get("source_run_dir") or ""
+        )
         current_dataset_path = str(dataset.get("current_path") or "")
         current_dataset_gcs_uri = str(dataset.get("current_gcs_uri") or "")
         with self._connect() as conn:
@@ -308,7 +398,9 @@ class JobStore:
                 ),
             )
 
-    def append_event(self, job_id: str, event_type: str, payload: dict | None = None) -> None:
+    def append_event(
+        self, job_id: str, event_type: str, payload: dict | None = None
+    ) -> None:
         safe_id = _safe_job_id(job_id)
         with self._connect() as conn:
             conn.execute(
@@ -401,16 +493,18 @@ class JobStore:
                 else "retrieved_partial"
             )
         record["status"] = canonical_status
-        record["model"] = model or str(batch_meta.get("model") or record.get("model") or "")
-        record["provider"] = str(batch_meta.get("provider") or record.get("provider") or "")
+        record["model"] = model or str(
+            batch_meta.get("model") or record.get("model") or ""
+        )
+        record["provider"] = str(
+            batch_meta.get("provider") or record.get("provider") or ""
+        )
         existing_schema = record.get("schema")
         if not isinstance(existing_schema, dict):
             existing_schema = {}
         record["schema"] = {
             "name": str(
-                batch_meta.get("schema_name")
-                or existing_schema.get("name")
-                or ""
+                batch_meta.get("schema_name") or existing_schema.get("name") or ""
             ),
             "version_id": str(
                 batch_meta.get("schema_version_id")
@@ -419,7 +513,10 @@ class JobStore:
             ),
         }
         record["created_at"] = created_at or str(record.get("created_at") or "")
-        record["legacy"] = {**(record.get("legacy") or {}), "submit_run_dir": str(run_path)}
+        record["legacy"] = {
+            **(record.get("legacy") or {}),
+            "submit_run_dir": str(run_path),
+        }
         record["input"] = {
             "location": input_location,
             "image_count": int(image_count or 0),
@@ -476,7 +573,9 @@ class JobStore:
             "ignore_failed": bool(ignore_failed),
             "duplicate_strategy": duplicate_strategy or "",
         }
-        encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
+        encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False).encode(
+            "utf-8"
+        )
         return hashlib.sha256(encoded).hexdigest()
 
     def cached_retrieval(
@@ -556,6 +655,7 @@ class JobStore:
         *,
         signature: str,
         operation: str = "retrieve",
+        version_number: int | None = None,
     ) -> dict:
         run_path = Path(run_dir).expanduser()
         job_id = self.job_id_for_run_dir(run_path)
@@ -586,48 +686,83 @@ class JobStore:
         if not isinstance(versions, list):
             versions = []
         if dataset_path.is_file():
-            canonical_path = _copy_dataset_into_job(
+            if version_number is not None:
+                occupied = [
+                    item
+                    for item in versions
+                    if isinstance(item, dict)
+                    and int(item.get("version") or 0) == int(version_number)
+                ]
+                if occupied:
+                    raise RuntimeError(
+                        f"Dataset version v{int(version_number):03d} is already recorded."
+                    )
+            canonical_path, version_path = _copy_dataset_into_job(
                 job_dir=self.job_dir(job_id),
                 source_path=dataset_path,
                 operation=operation,
                 version_count=len(versions),
+                version_number=version_number,
             )
             updated_payload["dataset_path"] = str(canonical_path)
             dataset["current_path"] = str(canonical_path)
-            dataset["current_gcs_uri"] = str(updated_payload.get("dataset_gcs_uri") or "")
+            dataset["current_gcs_uri"] = str(
+                updated_payload.get("dataset_gcs_uri") or ""
+            )
             version = {
+                "version": int(version_number or (len(versions) + 1)),
                 "created_at": utc_now_iso(),
                 "operation": operation,
-                "path": str(canonical_path),
+                "path": str(version_path),
                 "source_path": str(dataset_path),
                 "rows_written": int(updated_payload.get("rows_written") or 0),
                 "successful_pages": int(updated_payload.get("successful_pages") or 0),
                 "missing_pages": int(updated_payload.get("missing_pages") or 0),
             }
+            if operation == "model_validation":
+                version.update(
+                    {
+                        "version_id": str(
+                            updated_payload.get("dataset_version_id") or ""
+                        ),
+                        "dataset_sha256": str(
+                            updated_payload.get("dataset_sha256") or ""
+                        ),
+                        "dataset_gcs_uri": str(
+                            updated_payload.get("dataset_gcs_uri") or ""
+                        ),
+                        "dataset_gcs_generation": str(
+                            updated_payload.get("dataset_gcs_generation") or ""
+                        ),
+                        "dataset_version_ledger_gcs_uri": str(
+                            updated_payload.get("dataset_version_ledger_gcs_uri") or ""
+                        ),
+                        "publication_idempotency_key": str(
+                            updated_payload.get("dataset_publication_idempotency_key")
+                            or ""
+                        ),
+                        "publication_provenance_sha256": str(
+                            updated_payload.get("publication_provenance_sha256") or ""
+                        ),
+                        "source_run_id": str(
+                            updated_payload.get("source_run_id") or ""
+                        ),
+                        "verification_run_id": str(
+                            updated_payload.get("verification_run_id") or ""
+                        ),
+                        "candidate_hash": str(
+                            updated_payload.get("candidate_hash") or ""
+                        ),
+                        "verification_prompt_hash": str(
+                            updated_payload.get("verification_prompt_hash") or ""
+                        ),
+                    }
+                )
             versions.append(version)
             dataset["versions"] = versions
             record["dataset"] = dataset
             self.write(job_id, record)
-            with self._connect() as conn:
-                conn.execute(
-                    """
-                    INSERT INTO dataset_versions (
-                        job_id, created_at, operation, path, source_path,
-                        rows_written, successful_pages, missing_pages
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        job_id,
-                        version["created_at"],
-                        operation,
-                        str(canonical_path),
-                        str(dataset_path),
-                        int(updated_payload.get("rows_written") or 0),
-                        int(updated_payload.get("successful_pages") or 0),
-                        int(updated_payload.get("missing_pages") or 0),
-                    ),
-                )
+            self._ensure_dataset_version_index(job_id, version)
 
         self._apply_results_payload(record, updated_payload, operation=operation)
         record["retrieval"] = {
@@ -643,6 +778,923 @@ class JobStore:
         )
         self.write(job_id, record)
         self.append_event(job_id, operation, {"signature": signature})
+        return updated_payload
+
+    def _ensure_dataset_version_index(self, job_id: str, version: dict) -> None:
+        """Idempotently mirror a JSON dataset-version record into SQLite."""
+
+        version_path = str(version.get("path") or "")
+        if not version_path:
+            raise ValueError("Dataset version index record has no path.")
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            existing = conn.execute(
+                """
+                SELECT operation
+                FROM dataset_versions
+                WHERE job_id = ? AND path = ?
+                """,
+                (_safe_job_id(job_id), version_path),
+            ).fetchone()
+            if existing is not None:
+                if str(existing["operation"]) != str(version.get("operation") or ""):
+                    raise RuntimeError(
+                        "Dataset version index path is already bound to a different "
+                        "operation."
+                    )
+                return
+            conn.execute(
+                """
+                INSERT INTO dataset_versions (
+                    job_id, created_at, operation, path, source_path,
+                    rows_written, successful_pages, missing_pages
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    _safe_job_id(job_id),
+                    str(version.get("created_at") or utc_now_iso()),
+                    str(version.get("operation") or ""),
+                    version_path,
+                    str(version.get("source_path") or ""),
+                    int(version.get("rows_written") or 0),
+                    int(version.get("successful_pages") or 0),
+                    int(version.get("missing_pages") or 0),
+                ),
+            )
+
+    def _reconcile_model_validation_version(
+        self,
+        *,
+        job_id: str,
+        record: dict,
+        updated_payload: dict,
+        version_number: int,
+        idempotency_key: str,
+    ) -> tuple[dict, dict] | None:
+        """Finish app recording after a crash that already wrote the shared vNNN.
+
+        The existing app version is reusable only when its content digest and all
+        immutable cloud/publication bindings match. Missing provenance is treated
+        as ambiguous and fails closed.
+        """
+
+        dataset = record.get("dataset")
+        if not isinstance(dataset, dict):
+            return None
+        versions = dataset.get("versions")
+        if not isinstance(versions, list):
+            return None
+        matches = [
+            (index, item)
+            for index, item in enumerate(versions)
+            if isinstance(item, dict)
+            and int(item.get("version") or 0) == int(version_number)
+        ]
+        if not matches:
+            return None
+        if len(matches) != 1:
+            raise RuntimeError(
+                f"Dataset version v{version_number:03d} is recorded more than once."
+            )
+
+        version_index, existing_version = matches[0]
+        if str(existing_version.get("operation") or "") != "model_validation":
+            raise RuntimeError(
+                f"Dataset version v{version_number:03d} belongs to a different "
+                "operation."
+            )
+
+        # A crash may have happened after the final retrieval payload was written
+        # or one write earlier, when only the version record existed. Merge both
+        # locations, preferring the version's immutable fields.
+        recorded_provenance: dict = {}
+        retrieval = record.get("retrieval")
+        if isinstance(retrieval, dict):
+            retrieval_payload = retrieval.get("payload")
+            if isinstance(retrieval_payload, dict) and int(
+                retrieval_payload.get("dataset_version") or 0
+            ) == int(version_number):
+                recorded_provenance.update(retrieval_payload)
+        recorded_provenance.update(existing_version)
+
+        comparisons = (
+            ("version_id", "dataset_version_id"),
+            ("dataset_sha256", "dataset_sha256"),
+            ("dataset_gcs_uri", "dataset_gcs_uri"),
+            ("dataset_gcs_generation", "dataset_gcs_generation"),
+            (
+                "dataset_version_ledger_gcs_uri",
+                "dataset_version_ledger_gcs_uri",
+            ),
+            (
+                "publication_idempotency_key",
+                "dataset_publication_idempotency_key",
+            ),
+            (
+                "publication_provenance_sha256",
+                "publication_provenance_sha256",
+            ),
+            ("source_run_id", "source_run_id"),
+            ("verification_run_id", "verification_run_id"),
+            ("candidate_hash", "candidate_hash"),
+            ("verification_prompt_hash", "verification_prompt_hash"),
+        )
+        for recorded_key, incoming_key in comparisons:
+            recorded_value = str(recorded_provenance.get(recorded_key) or "")
+            incoming_value = str(updated_payload.get(incoming_key) or "")
+            if not recorded_value:
+                raise RuntimeError(
+                    f"Cannot safely reconcile v{version_number:03d}: recorded "
+                    f"publication provenance is missing {recorded_key}."
+                )
+            if recorded_value != incoming_value:
+                raise RuntimeError(
+                    f"Conflicting model-validation replay for v{version_number:03d}: "
+                    f"{incoming_key} changed."
+                )
+
+        source_path = Path(str(updated_payload.get("dataset_path") or "")).expanduser()
+        if not source_path.is_file():
+            raise FileNotFoundError(
+                "Cannot reconcile the recorded dataset version because the shared "
+                f"publication file is missing: {source_path}"
+            )
+        expected_digest = str(updated_payload.get("dataset_sha256") or "")
+        if _file_sha256(source_path) != expected_digest:
+            raise RuntimeError(
+                "Cannot reconcile the recorded dataset version from different bytes."
+            )
+
+        current_path, version_path = _copy_dataset_into_job(
+            job_dir=self.job_dir(job_id),
+            source_path=source_path,
+            operation="model_validation",
+            version_count=len(versions),
+            version_number=version_number,
+        )
+        reconciled_version = {
+            **existing_version,
+            "path": str(version_path),
+            "source_path": str(source_path),
+        }
+        versions[version_index] = reconciled_version
+        dataset["versions"] = versions
+        dataset["current_path"] = str(current_path)
+        dataset["current_gcs_uri"] = str(updated_payload.get("dataset_gcs_uri") or "")
+        record["dataset"] = dataset
+        updated_payload["dataset_path"] = str(current_path)
+        updated_payload["dataset_version_path"] = str(version_path)
+        updated_payload["reconciled_recorded_dataset_version"] = True
+        self._apply_results_payload(
+            record, updated_payload, operation="model_validation"
+        )
+        record["retrieval"] = {
+            "signature": idempotency_key,
+            "retrieved_at": str(updated_payload.get("retrieved_at") or utc_now_iso()),
+            "operation": "model_validation",
+            "payload": updated_payload,
+        }
+        record["status"] = "retrieved_complete"
+        self.write(job_id, record)
+        self._ensure_dataset_version_index(job_id, reconciled_version)
+        self.append_event(
+            job_id,
+            "model_validation_version_reconciled",
+            {
+                "dataset_version": version_number,
+                "publication_idempotency_key": str(
+                    updated_payload.get("dataset_publication_idempotency_key") or ""
+                ),
+            },
+        )
+        return updated_payload, self.read(job_id)
+
+    def record_candidate_retrieval(
+        self,
+        run_dir: str | Path,
+        payload: dict,
+        *,
+        signature: str,
+    ) -> dict:
+        """Record extraction retrieval without publishing a dataset version.
+
+        Model-validation-enabled jobs deliberately keep their extracted dataset
+        as a pre-version candidate.  The first entry in ``dataset_versions`` is
+        created only after the validator has completed and its accepted patches
+        have passed the original output schema again.
+        """
+
+        run_path = Path(run_dir).expanduser()
+        job_id = self.job_id_for_run_dir(run_path)
+        record = self.read(job_id)
+        if not record:
+            record = {
+                "schema_version": JOB_STORE_SCHEMA_VERSION,
+                "job_id": job_id,
+                "kind": "batch",
+                "created_at": "",
+                "legacy": {"submit_run_dir": str(run_path)},
+                "operations": [],
+                "dataset": {"versions": []},
+                "retrieval": {},
+                "metrics": {},
+            }
+
+        updated_payload = dict(payload)
+        expected_pages = int(updated_payload.get("expected_pages") or 0)
+        successful_pages = int(updated_payload.get("successful_pages") or 0)
+        updated_payload.setdefault(
+            "missing_pages", max(0, expected_pages - successful_pages)
+        )
+        candidate_path = str(updated_payload.get("dataset_path") or "")
+        updated_payload["candidate_dataset_path"] = candidate_path
+        candidates_complete = (
+            expected_pages > 0
+            and successful_pages == expected_pages
+            and bool(updated_payload.get("page_candidates_path"))
+            and bool(updated_payload.get("deterministic_routing_path"))
+        )
+        candidate_status = "pending" if candidates_complete else "candidate_incomplete"
+        updated_payload["model_validation_status"] = candidate_status
+
+        self._apply_results_payload(
+            record,
+            updated_payload,
+            operation="candidate_retrieve",
+        )
+        record["retrieval"] = {
+            "signature": signature,
+            "retrieved_at": str(updated_payload.get("retrieved_at") or utc_now_iso()),
+            "operation": "candidate_retrieve",
+            "payload": updated_payload,
+        }
+        validation = record.get("model_validation")
+        if not isinstance(validation, dict):
+            validation = {}
+        record["model_validation"] = {
+            **validation,
+            "enabled": True,
+            "status": candidate_status,
+            "candidate_dataset_path": candidate_path,
+            "page_candidates_path": str(
+                updated_payload.get("page_candidates_path") or ""
+            ),
+            "page_candidates_gcs_uri": str(
+                updated_payload.get("page_candidates_gcs_uri") or ""
+            ),
+            "page_candidates_sha256": str(
+                updated_payload.get("page_candidates_sha256") or ""
+            ),
+            "page_candidates_gcs_generation": str(
+                updated_payload.get("page_candidates_gcs_generation") or ""
+            ),
+            "deterministic_routing_path": str(
+                updated_payload.get("deterministic_routing_path") or ""
+            ),
+            "deterministic_routing_gcs_uri": str(
+                updated_payload.get("deterministic_routing_gcs_uri") or ""
+            ),
+            "deterministic_routing_sha256": str(
+                updated_payload.get("deterministic_routing_sha256") or ""
+            ),
+            "deterministic_routing_gcs_generation": str(
+                updated_payload.get("deterministic_routing_gcs_generation") or ""
+            ),
+            "subagent_combined_gcs_uri": str(
+                updated_payload.get("subagent_combined_gcs_uri") or ""
+            ),
+            "subagent_combined_sha256": str(
+                updated_payload.get("subagent_combined_sha256") or ""
+            ),
+            "subagent_combined_gcs_generation": str(
+                updated_payload.get("subagent_combined_gcs_generation") or ""
+            ),
+            "subagent_failures_gcs_uri": str(
+                updated_payload.get("subagent_failures_gcs_uri") or ""
+            ),
+            "subagent_failures_sha256": str(
+                updated_payload.get("subagent_failures_sha256") or ""
+            ),
+            "subagent_failures_gcs_generation": str(
+                updated_payload.get("subagent_failures_gcs_generation") or ""
+            ),
+            "deterministic_flagged_pages": int(
+                updated_payload.get("deterministic_flagged_pages") or 0
+            ),
+            "deterministic_routine_pages": int(
+                updated_payload.get("deterministic_routine_pages") or 0
+            ),
+        }
+        record["status"] = (
+            "validation_pending"
+            if candidates_complete
+            else "validation_candidate_incomplete"
+        )
+        self.write(job_id, record)
+        self.append_event(job_id, "candidate_retrieve", {"signature": signature})
+        return updated_payload
+
+    def mark_model_validation_submitted(
+        self,
+        run_dir: str | Path,
+        *,
+        verification_run_dir: str | Path,
+        model: str,
+        apply_mode: str,
+        thinking_level: str = "",
+        scope: str = "flagged",
+        control_sample_percent: float = 0.0,
+        max_output_tokens: int | None = None,
+        num_chunks: int | None = None,
+    ) -> dict:
+        """Link a verifier batch to its extraction job without versioning data."""
+
+        job_id = self.job_id_for_run_dir(run_dir)
+        record = self.read(job_id)
+        if not record:
+            raise ValueError(f"Extraction job is not registered: {run_dir}")
+        validation = record.get("model_validation")
+        if not isinstance(validation, dict):
+            validation = {}
+        completed_runs = validation.get("runs")
+        if not isinstance(completed_runs, list):
+            completed_runs = []
+        source_run_id = _portable_run_id(validation.get("source_run_id"), run_dir)
+        verification_run_id = _portable_run_id("", verification_run_dir)
+        record["model_validation"] = {
+            **validation,
+            "enabled": True,
+            "status": "submitted",
+            "verification_run_dir": str(Path(verification_run_dir).expanduser()),
+            "source_run_id": source_run_id,
+            "verification_run_id": verification_run_id,
+            "model": str(model),
+            "apply_mode": str(apply_mode),
+            "thinking_level": str(thinking_level),
+            "scope": str(scope or "flagged"),
+            "control_sample_percent": max(
+                0.0, min(100.0, float(control_sample_percent))
+            ),
+            "max_output_tokens": int(max_output_tokens or 0),
+            "num_chunks": int(num_chunks or 0),
+            "attempt_number": len(completed_runs) + 1,
+            "runs": completed_runs,
+            "submitted_at": utc_now_iso(),
+        }
+        record["status"] = "validation_submitted"
+        self.write(job_id, record)
+        self.append_event(
+            job_id,
+            "model_validation_submitted",
+            {
+                "verification_run_dir": str(Path(verification_run_dir).expanduser()),
+                "source_run_id": source_run_id,
+                "verification_run_id": verification_run_id,
+                "model": str(model),
+                "apply_mode": str(apply_mode),
+                "thinking_level": str(thinking_level),
+                "scope": str(scope or "flagged"),
+                "control_sample_percent": max(
+                    0.0, min(100.0, float(control_sample_percent))
+                ),
+                "max_output_tokens": int(max_output_tokens or 0),
+                "num_chunks": int(num_chunks or 0),
+            },
+        )
+        return record
+
+    def record_model_validation_result(
+        self,
+        run_dir: str | Path,
+        payload: dict,
+        *,
+        publish_dataset: bool,
+    ) -> dict:
+        """Record verifier results and optionally publish a dataset version once."""
+
+        run_path = Path(run_dir).expanduser()
+        job_id = self.job_id_for_run_dir(run_path)
+        record = self.read(job_id)
+        if not record:
+            raise ValueError(f"Extraction job is not registered: {run_dir}")
+
+        updated_payload = dict(payload)
+        validation = record.get("model_validation")
+        if not isinstance(validation, dict):
+            validation = {}
+        completed_runs = validation.get("runs")
+        if not isinstance(completed_runs, list):
+            completed_runs = []
+        verification_run_dir = str(
+            updated_payload.get("verification_run_dir")
+            or validation.get("verification_run_dir")
+            or ""
+        )
+        source_run_id = _portable_run_id("", run_path)
+        provided_source_run_id = str(
+            updated_payload.get("source_run_id")
+            or validation.get("source_run_id")
+            or ""
+        )
+        if (
+            provided_source_run_id
+            and _portable_run_id(provided_source_run_id, "") != source_run_id
+        ):
+            raise ValueError(
+                "Model-validation source_run_id does not match the extraction run."
+            )
+        verification_run_id = _portable_run_id(
+            updated_payload.get("verification_run_id")
+            or validation.get("verification_run_id"),
+            verification_run_dir,
+        )
+        path_verification_run_id = _portable_run_id("", verification_run_dir)
+        if (
+            verification_run_id
+            and path_verification_run_id
+            and verification_run_id != path_verification_run_id
+        ):
+            raise ValueError(
+                "Model-validation verification_run_id does not match its run path."
+            )
+        updated_payload["source_run_id"] = source_run_id
+        updated_payload["verification_run_id"] = verification_run_id
+        verification_model = str(
+            updated_payload.get("verification_model") or validation.get("model") or ""
+        )
+        candidate_hash = str(updated_payload.get("candidate_hash") or "")
+        verification_prompt_hash = str(
+            updated_payload.get("verification_prompt_hash") or ""
+        )
+        claimed_dataset_sha256 = str(updated_payload.get("dataset_sha256") or "")
+        claimed_publication_provenance_sha256 = str(
+            updated_payload.get("publication_provenance_sha256") or ""
+        )
+        publication_idempotency_key = ""
+        if publish_dataset:
+            if updated_payload.get("publishable") is not True:
+                raise ValueError(
+                    "Refusing model-validation publication without publishable=True."
+                )
+            if not claimed_dataset_sha256:
+                raise ValueError(
+                    "Refusing model-validation publication without dataset_sha256."
+                )
+            if not claimed_publication_provenance_sha256:
+                raise ValueError(
+                    "Refusing model-validation publication without "
+                    "publication_provenance_sha256."
+                )
+            publication_idempotency_key = _dataset_publication_idempotency_key(
+                source_run_id=source_run_id,
+                verification_run_id=verification_run_id,
+                candidate_hash=candidate_hash,
+                verification_prompt_hash=verification_prompt_hash,
+                dataset_sha256=claimed_dataset_sha256,
+                publication_provenance_sha256=(claimed_publication_provenance_sha256),
+            )
+            provided_publication_key = str(
+                updated_payload.get("dataset_publication_idempotency_key")
+                or updated_payload.get("publication_idempotency_key")
+                or ""
+            )
+            if (
+                provided_publication_key
+                and provided_publication_key != publication_idempotency_key
+            ):
+                raise ValueError(
+                    "Model-validation publication identity does not match its "
+                    "run IDs, candidate, prompt, and dataset digest."
+                )
+            updated_payload["dataset_publication_idempotency_key"] = (
+                publication_idempotency_key
+            )
+            idempotency_key = publication_idempotency_key
+        else:
+            idempotency_key = _model_validation_idempotency_key(
+                source_run_id=source_run_id,
+                verification_run_id=verification_run_id,
+                candidate_hash=candidate_hash,
+                verification_model=verification_model,
+                verification_prompt_hash=verification_prompt_hash,
+            )
+        updated_payload["model_validation_idempotency_key"] = idempotency_key
+
+        # Retrieval is safe to retry. Once this exact verifier run has published,
+        # reuse its immutable version and original artifacts instead of appending
+        # a new dataset version. Run IDs and the shared publisher's content-bound
+        # identity are portable across relocated run-directory roots.
+        published_run = next(
+            (
+                item
+                for item in completed_runs
+                if isinstance(item, dict)
+                and bool(item.get("published_dataset"))
+                and (
+                    _portable_run_id(item.get("source_run_id"), run_path)
+                    == source_run_id
+                    and _portable_run_id(
+                        item.get("verification_run_id"),
+                        item.get("verification_run_dir"),
+                    )
+                    == verification_run_id
+                )
+            ),
+            None,
+        )
+        if published_run is not None:
+            recorded_payload = published_run.get("recorded_payload")
+            if not isinstance(recorded_payload, dict):
+                recorded_payload = {}
+
+            def recorded_value(summary_key: str, payload_key: str) -> str:
+                return str(
+                    published_run.get(summary_key)
+                    or recorded_payload.get(payload_key)
+                    or ""
+                )
+
+            recorded_candidate_hash = recorded_value("candidate_hash", "candidate_hash")
+            recorded_prompt_hash = recorded_value(
+                "verification_prompt_hash", "verification_prompt_hash"
+            )
+            recorded_dataset_sha = recorded_value("dataset_sha256", "dataset_sha256")
+            recorded_publication_provenance_sha = recorded_value(
+                "publication_provenance_sha256",
+                "publication_provenance_sha256",
+            )
+            recorded_publication_key = recorded_value(
+                "publication_idempotency_key",
+                "dataset_publication_idempotency_key",
+            )
+            if not recorded_publication_key and recorded_dataset_sha:
+                recorded_publication_key = _dataset_publication_idempotency_key(
+                    source_run_id=source_run_id,
+                    verification_run_id=verification_run_id,
+                    candidate_hash=recorded_candidate_hash,
+                    verification_prompt_hash=recorded_prompt_hash,
+                    dataset_sha256=recorded_dataset_sha,
+                    publication_provenance_sha256=(recorded_publication_provenance_sha),
+                )
+
+            for incoming_key, recorded in (
+                ("candidate_hash", recorded_candidate_hash),
+                ("verification_model", recorded_value("model", "verification_model")),
+                ("verification_prompt_hash", recorded_prompt_hash),
+                ("dataset_sha256", recorded_dataset_sha),
+                (
+                    "publication_provenance_sha256",
+                    recorded_publication_provenance_sha,
+                ),
+                (
+                    "dataset_version",
+                    recorded_value("dataset_version", "dataset_version"),
+                ),
+                (
+                    "dataset_version_id",
+                    recorded_value("dataset_version_id", "dataset_version_id"),
+                ),
+                (
+                    "dataset_gcs_uri",
+                    recorded_value("dataset_gcs_uri", "dataset_gcs_uri"),
+                ),
+                (
+                    "dataset_gcs_generation",
+                    recorded_value("dataset_gcs_generation", "dataset_gcs_generation"),
+                ),
+                (
+                    "dataset_version_ledger_gcs_uri",
+                    recorded_value(
+                        "dataset_version_ledger_gcs_uri",
+                        "dataset_version_ledger_gcs_uri",
+                    ),
+                ),
+                (
+                    "dataset_publication_idempotency_key",
+                    recorded_publication_key,
+                ),
+            ):
+                incoming_value = str(updated_payload.get(incoming_key) or "")
+                if incoming_value != recorded:
+                    raise ValueError(
+                        "Conflicting model-validation replay for verification run "
+                        f"{verification_run_id}: {incoming_key} changed."
+                    )
+
+            incoming_dataset_path = Path(
+                str(updated_payload.get("dataset_path") or "")
+            ).expanduser()
+            if (
+                incoming_dataset_path.is_file()
+                and _file_sha256(incoming_dataset_path) != recorded_dataset_sha
+            ):
+                raise ValueError(
+                    "Conflicting model-validation replay has different local "
+                    "dataset bytes."
+                )
+
+            replay_payload = dict(updated_payload)
+            replay_payload.update(recorded_payload)
+            for artifact_key in (
+                "results_path",
+                "failures_path",
+                "summary_path",
+                "field_corrections_path",
+                "field_corrections_gcs_uri",
+                "field_corrections_gcs_generation",
+                "field_corrections_sha256",
+                "patched_candidates_path",
+                "dataset_gcs_uri",
+                "artifact_gcs_uris",
+            ):
+                if artifact_key in published_run:
+                    replay_payload[artifact_key] = published_run[artifact_key]
+            replay_payload.update(
+                {
+                    "verification_run_dir": str(
+                        published_run.get("verification_run_dir") or ""
+                    ),
+                    "model_validation_status": str(
+                        published_run.get("status") or "published"
+                    ),
+                    "publishable": True,
+                    "dataset_version": published_run.get("dataset_version"),
+                    "dataset_version_path": str(
+                        published_run.get("dataset_version_path") or ""
+                    ),
+                    "model_validation_idempotency_key": str(
+                        published_run.get("idempotency_key") or idempotency_key
+                    ),
+                    "dataset_publication_idempotency_key": (recorded_publication_key),
+                    "source_run_id": source_run_id,
+                    "verification_run_id": verification_run_id,
+                    "idempotent_replay": True,
+                }
+            )
+            if replay_payload["dataset_version_path"]:
+                replay_payload["dataset_path"] = replay_payload["dataset_version_path"]
+            self.append_event(
+                job_id,
+                "model_validation_retrieval_reused",
+                {
+                    "verification_run_dir": replay_payload["verification_run_dir"],
+                    "dataset_version": replay_payload["dataset_version"],
+                },
+            )
+            return replay_payload
+
+        if publish_dataset:
+            dataset_path = Path(
+                str(updated_payload.get("dataset_path") or "")
+            ).expanduser()
+            shared_version = int(updated_payload.get("dataset_version") or 0)
+            shared_version_id = str(updated_payload.get("dataset_version_id") or "")
+            expected_pages = int(updated_payload.get("expected_pages") or 0)
+            completed_pages = int(
+                updated_payload.get("completed_pages")
+                or updated_payload.get("successful_pages")
+                or 0
+            )
+            if updated_payload.get("publishable") is not True:
+                raise ValueError(
+                    "Refusing model-validation publication without publishable=True."
+                )
+            if not dataset_path.is_file():
+                raise FileNotFoundError(
+                    f"Publishable model-validation dataset is missing: {dataset_path}"
+                )
+            actual_dataset_sha256 = _file_sha256(dataset_path)
+            if actual_dataset_sha256 != claimed_dataset_sha256:
+                raise ValueError(
+                    "Refusing model-validation publication because dataset_sha256 "
+                    "does not match the local shared-version bytes."
+                )
+            if shared_version <= 0 or shared_version_id != f"v{shared_version:03d}":
+                raise ValueError(
+                    "Refusing model-validation publication without a shared "
+                    "vNNN dataset version allocated by the batch publisher."
+                )
+            for required_key in (
+                "dataset_gcs_uri",
+                "dataset_gcs_generation",
+                "dataset_sha256",
+                "publication_provenance_sha256",
+                "dataset_version_ledger_gcs_uri",
+            ):
+                if not str(updated_payload.get(required_key) or "").strip():
+                    raise ValueError(
+                        "Refusing model-validation publication without immutable "
+                        f"cloud version provenance: {required_key}."
+                    )
+            if (
+                expected_pages <= 0
+                or completed_pages != expected_pages
+                or int(updated_payload.get("missing_pages") or 0) != 0
+                or int(updated_payload.get("failed_pages") or 0) != 0
+                or int(updated_payload.get("unverifiable_pages") or 0) != 0
+            ):
+                raise ValueError(
+                    "Refusing model-validation publication until every expected page "
+                    "is complete, verifiable, and failure-free."
+                )
+            reconciled = self._reconcile_model_validation_version(
+                job_id=job_id,
+                record=record,
+                updated_payload=updated_payload,
+                version_number=shared_version,
+                idempotency_key=idempotency_key,
+            )
+            if reconciled is None:
+                updated_payload = self.record_retrieval(
+                    run_path,
+                    updated_payload,
+                    signature=idempotency_key,
+                    operation="model_validation",
+                    version_number=shared_version,
+                )
+                record = self.read(job_id)
+            else:
+                updated_payload, record = reconciled
+
+        validation = record.get("model_validation")
+        if not isinstance(validation, dict):
+            validation = {}
+        terminal_status = (
+            "published"
+            if publish_dataset
+            else str(updated_payload.get("model_validation_status") or "report_only")
+        )
+        completed_runs = validation.get("runs")
+        if not isinstance(completed_runs, list):
+            completed_runs = []
+        verification_run_dir = str(
+            updated_payload.get("verification_run_dir")
+            or validation.get("verification_run_dir")
+            or ""
+        )
+        dataset = record.get("dataset")
+        versions = dataset.get("versions") if isinstance(dataset, dict) else []
+        if not isinstance(versions, list):
+            versions = []
+        dataset_version = (
+            int(updated_payload.get("dataset_version") or 0)
+            if publish_dataset
+            else None
+        )
+        dataset_version_path = (
+            next(
+                (
+                    str(item.get("path") or "")
+                    for item in versions
+                    if isinstance(item, dict)
+                    and int(item.get("version") or 0) == int(dataset_version or 0)
+                ),
+                "",
+            )
+            if publish_dataset
+            else ""
+        )
+        if publish_dataset:
+            updated_payload["dataset_version"] = dataset_version
+            updated_payload["dataset_version_path"] = dataset_version_path
+        updated_payload["model_validation_idempotency_key"] = idempotency_key
+        run_summary = {
+            "verification_run_dir": verification_run_dir,
+            "source_run_id": source_run_id,
+            "verification_run_id": verification_run_id,
+            "idempotency_key": idempotency_key,
+            "publication_idempotency_key": (
+                publication_idempotency_key if publish_dataset else ""
+            ),
+            "status": terminal_status,
+            "model": str(
+                updated_payload.get("verification_model")
+                or validation.get("model")
+                or ""
+            ),
+            "thinking_level": str(
+                updated_payload.get("verification_thinking_level")
+                or validation.get("thinking_level")
+                or ""
+            ),
+            "scope": str(
+                updated_payload.get("verification_scope")
+                or validation.get("scope")
+                or "all"
+            ),
+            "apply_mode": str(
+                updated_payload.get("apply_mode") or validation.get("apply_mode") or ""
+            ),
+            "max_output_tokens": int(
+                updated_payload.get("verification_max_output_tokens")
+                or validation.get("max_output_tokens")
+                or 0
+            ),
+            "num_chunks": int(
+                updated_payload.get("verification_num_chunks")
+                or validation.get("num_chunks")
+                or 0
+            ),
+            "candidate_hash": str(updated_payload.get("candidate_hash") or ""),
+            "verification_prompt_hash": str(
+                updated_payload.get("verification_prompt_hash") or ""
+            ),
+            "expected_pages": int(updated_payload.get("expected_pages") or 0),
+            "completed_pages": int(updated_payload.get("completed_pages") or 0),
+            "confirmed_pages": int(updated_payload.get("confirmed_pages") or 0),
+            "needs_correction_pages": int(
+                updated_payload.get("needs_correction_pages") or 0
+            ),
+            "unverifiable_pages": int(updated_payload.get("unverifiable_pages") or 0),
+            "published_dataset": bool(publish_dataset),
+            "dataset_version": dataset_version,
+            "dataset_version_id": str(updated_payload.get("dataset_version_id") or ""),
+            "dataset_version_path": dataset_version_path,
+            "dataset_sha256": str(updated_payload.get("dataset_sha256") or ""),
+            "publication_provenance_sha256": str(
+                updated_payload.get("publication_provenance_sha256") or ""
+            ),
+            "results_path": str(updated_payload.get("results_path") or ""),
+            "failures_path": str(updated_payload.get("failures_path") or ""),
+            "summary_path": str(updated_payload.get("summary_path") or ""),
+            "field_corrections_path": str(
+                updated_payload.get("field_corrections_path") or ""
+            ),
+            "field_corrections_gcs_uri": str(
+                updated_payload.get("field_corrections_gcs_uri") or ""
+            ),
+            "field_corrections_gcs_generation": str(
+                updated_payload.get("field_corrections_gcs_generation") or ""
+            ),
+            "field_corrections_sha256": str(
+                updated_payload.get("field_corrections_sha256") or ""
+            ),
+            "corrected_fields": int(updated_payload.get("corrected_fields") or 0),
+            "accepted_correction_fields": int(
+                updated_payload.get("accepted_correction_fields") or 0
+            ),
+            "correction_acceptance_policy": str(
+                updated_payload.get("correction_acceptance_policy") or ""
+            ),
+            "patched_candidates_path": str(
+                updated_payload.get("patched_candidates_path") or ""
+            ),
+            "dataset_gcs_uri": str(updated_payload.get("dataset_gcs_uri") or ""),
+            "dataset_gcs_generation": str(
+                updated_payload.get("dataset_gcs_generation") or ""
+            ),
+            "dataset_version_ledger_gcs_uri": str(
+                updated_payload.get("dataset_version_ledger_gcs_uri") or ""
+            ),
+            "artifact_gcs_uris": (
+                dict(updated_payload.get("artifact_gcs_uris") or {})
+                if isinstance(updated_payload.get("artifact_gcs_uris"), dict)
+                else {}
+            ),
+            "recorded_payload": dict(updated_payload),
+            "submitted_at": str(validation.get("submitted_at") or ""),
+            "completed_at": utc_now_iso(),
+        }
+        previous_index = next(
+            (
+                index
+                for index, item in enumerate(completed_runs)
+                if isinstance(item, dict)
+                and _portable_run_id(item.get("source_run_id"), run_path)
+                == source_run_id
+                and _portable_run_id(
+                    item.get("verification_run_id"),
+                    item.get("verification_run_dir"),
+                )
+                == verification_run_id
+            ),
+            None,
+        )
+        if previous_index is None:
+            completed_runs.append(run_summary)
+        else:
+            completed_runs[previous_index] = run_summary
+        record["model_validation"] = {
+            **validation,
+            **updated_payload,
+            "enabled": True,
+            "status": terminal_status,
+            "runs": completed_runs,
+            "completed_at": run_summary["completed_at"],
+        }
+        record["status"] = (
+            "retrieved_complete" if publish_dataset else f"validation_{terminal_status}"
+        )
+        self.write(job_id, record)
+        self.append_event(
+            job_id,
+            "model_validation_completed",
+            {
+                "status": terminal_status,
+                "published_dataset": bool(publish_dataset),
+            },
+        )
         return updated_payload
 
     def mark_retry_submitted(self, run_dir: str | Path) -> None:
@@ -872,8 +1924,12 @@ def records_by_run_dir(records: Iterable[dict]) -> dict[str, dict]:
     output: dict[str, dict] = {}
     for record in records:
         legacy = record.get("legacy") if isinstance(record.get("legacy"), dict) else {}
-        batches = record.get("batches") if isinstance(record.get("batches"), dict) else {}
-        run_dir = str(legacy.get("submit_run_dir") or batches.get("source_run_dir") or "")
+        batches = (
+            record.get("batches") if isinstance(record.get("batches"), dict) else {}
+        )
+        run_dir = str(
+            legacy.get("submit_run_dir") or batches.get("source_run_dir") or ""
+        )
         if run_dir:
             output[run_dir] = record
     return output

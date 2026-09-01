@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Iterable, Mapping
 
 from patientjournals.config import config
+from patientjournals.batch.output_records import gemini_finish_reason
 from patientjournals.shared.response_parsing import extract_response_metadata
 from patientjournals.shared.subagents import (
     decode_specialist_request_key,
@@ -76,6 +77,10 @@ def _request_key_and_metadata(
         response = result.get("message")
         if response is None:
             return request_key, {}, "missing_response"
+        if bool(getattr(config, "model_validation_enabled", False)):
+            stop_reason = str(response.get("stop_reason") or "").strip().lower()
+            if stop_reason not in {"end_turn", "stop_sequence"}:
+                return request_key, {}, f"stop_reason_{stop_reason or 'missing'}"
         metadata = _anthropic_metadata(response)
         return request_key, metadata, None
 
@@ -87,6 +92,14 @@ def _request_key_and_metadata(
     response = record.get("response")
     if response is None:
         return request_key, {}, "missing_response"
+    if bool(getattr(config, "model_validation_enabled", False)):
+        finish_reason = gemini_finish_reason(response)
+        if finish_reason != "STOP":
+            return (
+                request_key,
+                {},
+                f"finish_reason_{finish_reason.lower() or 'missing'}",
+            )
     return request_key, extract_response_metadata(response), None
 
 
@@ -104,6 +117,7 @@ def combine_subagent_jsonl_sources(
     partials_by_page: dict[str, dict[str, dict[str, object]]] = {}
     metadata_by_page: dict[str, dict[str, dict[str, object]]] = {}
     pages_seen: set[str] = set()
+    pages_with_duplicate_valid_specialists: set[str] = set()
     failures: list[dict[str, object]] = []
     stats: Counter[str] = Counter()
 
@@ -189,11 +203,8 @@ def combine_subagent_jsonl_sources(
                 )
                 continue
             page_partials = partials_by_page.setdefault(page_key, {})
-            if specialist_name in page_partials:
-                stats["duplicate_valid_specialists"] += 1
-                continue
             try:
-                page_partials[specialist_name] = validate_specialist_json(
+                validated_payload = validate_specialist_json(
                     specialist,
                     text_payload,
                     parent_name=config.output_schema_name or "Page",
@@ -212,12 +223,32 @@ def combine_subagent_jsonl_sources(
                     }
                 )
                 continue
+            if specialist_name in page_partials:
+                pages_with_duplicate_valid_specialists.add(page_key)
+                stats["duplicate_valid_specialists"] += 1
+                stats["rejected"] += 1
+                failures.append(
+                    {
+                        "page_key": page_key,
+                        "specialist": specialist_name,
+                        "request_key": request_key,
+                        "source": source,
+                        "line_number": line_number,
+                        "reason": "duplicate_valid_specialist",
+                        "retryable": False,
+                    }
+                )
+                continue
+            page_partials[specialist_name] = validated_payload
             metadata_by_page.setdefault(page_key, {})[specialist_name] = metadata
             stats["valid_specialists"] += 1
 
     records: list[dict[str, object]] = []
     expected_names = {item.name for item in specialists}
     for page_key in sorted(pages_seen):
+        if page_key in pages_with_duplicate_valid_specialists:
+            stats["duplicate_pages"] += 1
+            continue
         partials = partials_by_page.get(page_key, {})
         missing = sorted(expected_names - set(partials))
         if missing:
@@ -241,6 +272,7 @@ def combine_subagent_jsonl_sources(
                 {
                     "page_key": page_key,
                     "reason": "joined_schema_validation_failed",
+                    "retryable": False,
                     "detail": f"{type(exc).__name__}: {exc}",
                 }
             )
@@ -252,7 +284,12 @@ def combine_subagent_jsonl_sources(
             {
                 "key": page_key,
                 "response": {
-                    "candidates": [{"content": {"parts": [{"text": payload_text}]}}]
+                    "candidates": [
+                        {
+                            "finishReason": "STOP",
+                            "content": {"parts": [{"text": payload_text}]},
+                        }
+                    ]
                 },
                 "_patientjournals_metadata": merge_specialist_metadata(
                     {

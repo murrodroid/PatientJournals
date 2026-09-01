@@ -6,8 +6,9 @@ import json
 import mimetypes
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
+from google.api_core.exceptions import PreconditionFailed
 from google.cloud import storage
 from google.genai import types
 
@@ -28,6 +29,15 @@ from patientjournals.shared.subagents import (
     specialist_prompt,
 )
 from patientjournals.shared.tools import create_subfolder, get_run_logger
+from patientjournals.validation.input_manifest import (
+    EXTRACTION_IMAGE_BINDINGS_FILE_NAME,
+    INPUT_IMAGE_MANIFEST_FILE_NAME,
+    ExtractionImageBinding,
+    bindings_by_key,
+    read_extraction_image_bindings,
+    read_input_image_manifest,
+    verify_extraction_image_bindings,
+)
 
 
 def _normalize_key(value: object) -> str | None:
@@ -201,6 +211,8 @@ def _build_retry_gemini_request_line(
     bucket_name: str,
     for_vertex: bool,
     bucket: storage.Bucket | None = None,
+    image_binding: ExtractionImageBinding | None = None,
+    source_blob: storage.Blob | None = None,
 ) -> dict[str, object]:
     decoded = decode_specialist_request_key(key)
     page_key = decoded[0] if decoded is not None else key
@@ -211,8 +223,14 @@ def _build_retry_gemini_request_line(
     )
     media_part = {
         "fileData": {
-            "fileUri": f"gs://{bucket_name}/{page_key}",
-            "mimeType": _guess_key_mime_type(page_key),
+            "fileUri": (
+                image_binding.request_uri
+                if image_binding is not None
+                else f"gs://{bucket_name}/{page_key}"
+            ),
+            "mimeType": _guess_key_mime_type(
+                source_blob.name if source_blob is not None else page_key
+            ),
         }
     }
     parts: list[dict[str, object]] = [media_part]
@@ -226,7 +244,9 @@ def _build_retry_gemini_request_line(
             "is unavailable. Run `uv run invoke batch.ocr` and retry."
         )
     ocr_context = (
-        ocr_context_for_blob(bucket.blob(page_key)) if bucket is not None else ""
+        ocr_context_for_blob(source_blob or bucket.blob(page_key))
+        if bucket is not None
+        else ""
     )
     if specialist is None:
         prompt = prompt_text(ocr_context)
@@ -278,6 +298,8 @@ def _write_retry_requests_file(
     bucket_name: str,
     for_vertex: bool,
     bucket: storage.Bucket | None = None,
+    image_bindings: Mapping[str, ExtractionImageBinding] | None = None,
+    source_blobs: Mapping[str, storage.Blob] | None = None,
 ) -> None:
     with open(output_path, "w", encoding="utf-8") as handle:
         for key in keys:
@@ -291,6 +313,12 @@ def _write_retry_requests_file(
                 else [key]
             )
             for request_key in request_keys:
+                decoded_request = decode_specialist_request_key(request_key)
+                page_key = (
+                    decoded_request[0]
+                    if decoded_request is not None
+                    else request_key
+                )
                 if provider == "anthropic":
                     payload: dict[str, object] = (
                         _build_retry_anthropic_manifest_line(request_key)
@@ -301,6 +329,8 @@ def _write_retry_requests_file(
                         bucket_name=bucket_name,
                         for_vertex=for_vertex,
                         bucket=bucket,
+                        image_binding=(image_bindings or {}).get(page_key),
+                        source_blob=(source_blobs or {}).get(page_key),
                     )
                 handle.write(json.dumps(payload, ensure_ascii=False))
                 handle.write("\n")
@@ -378,6 +408,8 @@ def _build_anthropic_batch_requests_for_retry(
     bucket: storage.Bucket,
     requests_path: Path,
     model_name: str,
+    image_bindings: Mapping[str, ExtractionImageBinding] | None = None,
+    source_blobs: Mapping[str, storage.Blob] | None = None,
 ) -> list[dict[str, Any]]:
     manifest = _iter_anthropic_manifest_entries(requests_path)
     if not manifest:
@@ -406,12 +438,24 @@ def _build_anthropic_batch_requests_for_retry(
             )
         seen_custom_ids.add(custom_id)
 
-        image_blob = bucket.blob(page_key)
-        signed_url = image_blob.generate_signed_url(
-            version="v4",
-            method="GET",
-            expiration=expiration,
-        )
+        binding = (image_bindings or {}).get(page_key)
+        image_blob = (source_blobs or {}).get(page_key) or bucket.blob(page_key)
+        if binding is not None:
+            request_source = binding.request_source
+            image_blob = bucket.blob(
+                request_source.name,
+                generation=int(request_source.generation),
+            )
+        signed_url_kwargs: dict[str, object] = {
+            "version": "v4",
+            "method": "GET",
+            "expiration": expiration,
+        }
+        if binding is not None:
+            signed_url_kwargs["query_parameters"] = {
+                "generation": str(binding.request_source.generation)
+            }
+        signed_url = image_blob.generate_signed_url(**signed_url_kwargs)
         if page_key not in ocr_context_by_page:
             ocr_context_by_page[page_key] = ocr_context_for_blob(image_blob)
         if specialist is None:
@@ -478,6 +522,70 @@ def _upload_requests_to_gcs(
     blob.upload_from_filename(
         str(local_requests_path),
         content_type="application/jsonl",
+    )
+    return f"gs://{bucket.name}/{object_name}"
+
+
+def _upload_immutable_retry_artifact(
+    *,
+    bucket: storage.Bucket,
+    run_dir_name: str,
+    path: Path,
+) -> dict[str, str]:
+    """Upload one retry artifact content-addressed and generation-bound."""
+
+    payload = path.read_bytes()
+    digest = hashlib.sha256(payload).hexdigest()
+    prefix = _normalize_prefix(config.batch_requests_gcs_prefix or "")
+    object_name = f"{prefix}{run_dir_name}/immutable/{digest}/{path.name}"
+    uri = f"gs://{bucket.name}/{object_name}"
+    blob = bucket.blob(object_name)
+    blob.metadata = {
+        "artifact_kind": "failed_page_retry",
+        "sha256": digest,
+        "retry_run_id": run_dir_name,
+    }
+    try:
+        blob.upload_from_filename(
+            str(path),
+            content_type=(
+                "application/jsonl"
+                if path.suffix.lower() == ".jsonl"
+                else "application/json"
+            ),
+            if_generation_match=0,
+        )
+    except Exception as exc:  # noqa: BLE001 - provider wrappers vary
+        if not isinstance(exc, PreconditionFailed) and getattr(exc, "code", None) != 412:
+            raise
+        blob.reload()
+        generation = int(getattr(blob, "generation", 0) or 0)
+        existing = bytes(
+            blob.download_as_bytes(if_generation_match=generation or None)
+        )
+        if hashlib.sha256(existing).hexdigest() != digest:
+            raise RuntimeError(
+                "Content-addressed retry artifact has different bytes."
+            ) from exc
+    blob.reload()
+    generation = str(getattr(blob, "generation", "") or "")
+    if not generation:
+        raise RuntimeError("Immutable retry artifact has no GCS generation.")
+    return {"uri": uri, "sha256": digest, "generation": generation}
+
+
+def _upload_retry_operational_metadata(
+    *,
+    bucket: storage.Bucket,
+    run_dir_name: str,
+    path: Path,
+) -> str:
+    """Publish the latest discoverable metadata; immutable snapshots remain audit truth."""
+
+    prefix = _normalize_prefix(config.batch_requests_gcs_prefix or "")
+    object_name = f"{prefix}{run_dir_name}/{path.name}"
+    bucket.blob(object_name).upload_from_filename(
+        str(path), content_type="application/json"
     )
     return f"gs://{bucket.name}/{object_name}"
 
@@ -570,6 +678,7 @@ def _write_retry_batch_job_meta(
     retry_source_batch_names: list[str],
     retry_failed_keys_file: str,
     num_batches_requested: int,
+    artifact_gcs_bindings: Mapping[str, Mapping[str, str]] | None = None,
 ) -> None:
     if not jobs:
         raise ValueError("Cannot write retry metadata without batch jobs.")
@@ -601,6 +710,10 @@ def _write_retry_batch_job_meta(
         "retry_failed_keys_file": retry_failed_keys_file,
         "retry_source_run_id": retry_source_run_id,
         "retry_source_batch_names": retry_source_batch_names,
+        "artifact_gcs_bindings": {
+            name: dict(binding)
+            for name, binding in (artifact_gcs_bindings or {}).items()
+        },
     }
     if retry_source_run:
         meta["retry_source_run"] = retry_source_run
@@ -632,6 +745,7 @@ def _append_retry_to_source_metadata(
     retry_run_dir: Path,
     jobs_to_append: list[dict[str, object]],
     retry_failed_keys_file: str,
+    retry_artifact_gcs_bindings: Mapping[str, Mapping[str, str]] | None = None,
 ) -> None:
     if submit_run_dir is None:
         return
@@ -688,6 +802,12 @@ def _append_retry_to_source_metadata(
                 "retry_failed_keys_file": retry_failed_keys_file,
             }
         )
+        request_file_name = str(retry_entry.get("requests_file") or "").strip()
+        request_binding = (retry_artifact_gcs_bindings or {}).get(
+            request_file_name
+        )
+        if request_binding:
+            retry_entry["requests_gcs_binding"] = dict(request_binding)
         jobs.append(retry_entry)
         existing_names.add(job_name)
         appended_names.append(job_name)
@@ -719,6 +839,12 @@ def _append_retry_to_source_metadata(
                     int(job.get("request_count") or 0) for job in retry_jobs
                 ),
                 "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                "artifact_gcs_bindings": {
+                    name: dict(binding)
+                    for name, binding in (
+                        retry_artifact_gcs_bindings or {}
+                    ).items()
+                },
             }
         )
 
@@ -820,6 +946,7 @@ def _submit_failed_pages_as_batch(
         provider == "anthropic"
         or bool(getattr(client, "vertexai", False))
         or bool(config.ocr_enabled)
+        or bool(config.model_validation_enabled)
     )
     if needs_bucket:
         try:
@@ -839,7 +966,53 @@ def _submit_failed_pages_as_batch(
             ):
                 raise
 
+    retry_image_bindings: dict[str, ExtractionImageBinding] = {}
+    retry_source_blobs: dict[str, storage.Blob] = {}
+    if bool(config.model_validation_enabled):
+        if submit_run_dir is None or bucket is None:
+            raise RuntimeError(
+                "Validation-enabled failed-page retry requires its root extraction "
+                "run and GCS evidence bindings."
+            )
+        page_keys = {
+            decoded[0] if (decoded := decode_specialist_request_key(key)) else key
+            for key in normalized_keys
+        }
+        all_bindings = bindings_by_key(
+            read_extraction_image_bindings(
+                submit_run_dir / EXTRACTION_IMAGE_BINDINGS_FILE_NAME
+            )
+        )
+        manifest_records = {
+            record.key: record
+            for record in read_input_image_manifest(
+                submit_run_dir / INPUT_IMAGE_MANIFEST_FILE_NAME
+            )
+        }
+        missing_bindings = sorted(page_keys - set(all_bindings))
+        missing_manifest = sorted(page_keys - set(manifest_records))
+        if missing_bindings or missing_manifest:
+            raise RuntimeError(
+                "Failed-page retry is missing immutable extraction evidence for "
+                f"{len(set(missing_bindings + missing_manifest))} page(s)."
+            )
+        retry_image_bindings = {
+            key: all_bindings[key] for key in page_keys
+        }
+        verify_extraction_image_bindings(
+            bucket=bucket,
+            bindings=tuple(retry_image_bindings.values()),
+            expected_keys=tuple(page_keys),
+        )
+        for key in page_keys:
+            source = manifest_records[key].source
+            retry_source_blobs[key] = bucket.blob(
+                source.name,
+                generation=int(source.generation),
+            )
+
     jobs: list[dict[str, object]] = []
+    requests_paths: list[Path] = []
     client_backend = "anthropic" if provider == "anthropic" else "mldev"
     vertex_location = None
     if provider != "anthropic" and bool(getattr(client, "vertexai", False)):
@@ -870,7 +1043,10 @@ def _submit_failed_pages_as_batch(
             bucket_name=bucket_name,
             for_vertex=bool(getattr(client, "vertexai", False)),
             bucket=bucket,
+            image_bindings=retry_image_bindings,
+            source_blobs=retry_source_blobs,
         )
+        requests_paths.append(requests_path)
         request_count, request_bytes = _count_requests_file(requests_path)
         retry_log(
             "Prepared failed-page retry request file "
@@ -893,6 +1069,8 @@ def _submit_failed_pages_as_batch(
                 bucket=bucket,
                 requests_path=requests_path,
                 model_name=model_name,
+                image_bindings=retry_image_bindings,
+                source_blobs=retry_source_blobs,
             )
             batch_job = client.messages.batches.create(requests=requests)
             batch_job_name = batch_job.id
@@ -975,12 +1153,28 @@ def _submit_failed_pages_as_batch(
             }
         )
 
-    _append_retry_to_source_metadata(
-        submit_run_dir=submit_run_dir,
-        retry_run_dir=run_dir,
-        jobs_to_append=jobs,
-        retry_failed_keys_file=retry_keys_file.name,
-    )
+    retry_artifact_gcs_bindings: dict[str, dict[str, str]] = {}
+    if bool(config.model_validation_enabled):
+        if bucket is None:
+            raise RuntimeError(
+                "Validation-enabled retry artifacts require GCS bucket access."
+            )
+        for artifact_path in (retry_keys_file, *requests_paths):
+            retry_artifact_gcs_bindings[artifact_path.name] = (
+                _upload_immutable_retry_artifact(
+                    bucket=bucket,
+                    run_dir_name=run_dir.name,
+                    path=artifact_path,
+                )
+            )
+        for job in jobs:
+            requests_file = str(job.get("requests_file") or "").strip()
+            binding = retry_artifact_gcs_bindings.get(requests_file)
+            if binding:
+                # Keep request identity beside the provider job that consumes it.
+                # The top-level map remains the whole-run audit index, while this
+                # binding disambiguates retry attempts that reuse a file name.
+                job["requests_gcs_binding"] = dict(binding)
     _write_retry_batch_job_meta(
         run_dir=run_dir,
         jobs=jobs,
@@ -993,7 +1187,44 @@ def _submit_failed_pages_as_batch(
         retry_source_batch_names=batch_names,
         retry_failed_keys_file=retry_keys_file.name,
         num_batches_requested=num_batches,
+        artifact_gcs_bindings=retry_artifact_gcs_bindings,
     )
+    retry_metadata_path = run_dir / "batch_job.json"
+    if bool(config.model_validation_enabled):
+        assert bucket is not None
+        retry_artifact_gcs_bindings[retry_metadata_path.name] = (
+            _upload_immutable_retry_artifact(
+                bucket=bucket,
+                run_dir_name=run_dir.name,
+                path=retry_metadata_path,
+            )
+        )
+    _append_retry_to_source_metadata(
+        submit_run_dir=submit_run_dir,
+        retry_run_dir=run_dir,
+        jobs_to_append=jobs,
+        retry_failed_keys_file=retry_keys_file.name,
+        retry_artifact_gcs_bindings=retry_artifact_gcs_bindings,
+    )
+    if bool(config.model_validation_enabled):
+        assert bucket is not None
+        _upload_retry_operational_metadata(
+            bucket=bucket,
+            run_dir_name=run_dir.name,
+            path=retry_metadata_path,
+        )
+        if submit_run_dir is not None:
+            source_metadata_path = submit_run_dir / "batch_job.json"
+            _upload_immutable_retry_artifact(
+                bucket=bucket,
+                run_dir_name=submit_run_dir.name,
+                path=source_metadata_path,
+            )
+            _upload_retry_operational_metadata(
+                bucket=bucket,
+                run_dir_name=submit_run_dir.name,
+                path=source_metadata_path,
+            )
     batch_job_names = [
         str(job.get("batch_job_name")) for job in jobs if job.get("batch_job_name")
     ]

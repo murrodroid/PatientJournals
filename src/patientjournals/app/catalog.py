@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from patientjournals.app.models import ModelOption, SchemaOption
-from patientjournals.config.models import registered_google_models
+from patientjournals.config.models import all_registered_models, registered_google_models
 from patientjournals.config.schemas import list_output_schemas, resolve_output_schema
 
 
@@ -74,4 +74,19 @@ def list_google_model_options(*, include_live: bool = False) -> list[ModelOption
             supports_thoughts=spec.supports_thoughts,
         )
         for spec in registered_google_models()
+    ]
+
+
+def list_batch_model_options() -> list[ModelOption]:
+    """Models suitable for provider batch jobs, including model validation."""
+    return [
+        ModelOption(
+            name=spec.name,
+            provider=spec.provider,
+            supports_batch=spec.supports_batch,
+            supports_confidence_scores=spec.supports_confidence_scores,
+            supports_thoughts=spec.supports_thoughts,
+        )
+        for spec in all_registered_models()
+        if spec.supports_batch
     ]

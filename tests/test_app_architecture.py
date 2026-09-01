@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from patientjournals.app import datasets as app_datasets
 from patientjournals.app.access import resolve_validator_identity, run_access_checks
 from patientjournals.app.catalog import (
+    list_batch_model_options,
     list_google_model_options,
     list_schema_options,
     resolve_schema_class,
@@ -27,6 +28,7 @@ from patientjournals.app.jobs import (
     read_recorded_results,
     read_run_error,
     record_batch_chunk_statuses,
+    repair_recorded_results,
     resolve_batch_run_readiness,
     reusable_recorded_results,
     run_retrieve_direct,
@@ -57,6 +59,15 @@ def test_google_model_catalog_is_google_only() -> None:
     assert {model.provider for model in models} == {"gemini"}
     assert "gemini-3.1-pro" in {model.name for model in models}
     assert "gemini-3.5-flash" in {model.name for model in models}
+
+
+def test_validation_model_catalog_lists_all_batch_capable_providers() -> None:
+    models = list_batch_model_options()
+
+    assert models
+    assert {model.provider for model in models} >= {"gemini", "anthropic"}
+    assert all(model.supports_batch for model in models)
+    assert "claude-sonnet-4-5" in {model.name for model in models}
 
 
 def test_submit_command_carries_job_overrides() -> None:
@@ -90,7 +101,14 @@ def test_submit_command_carries_selected_cloud_prefixes() -> None:
         cloud_prefix="pages/folder-a",
         cloud_prefixes=("pages/folder-a", "pages/folder-b"),
         num_batches=2,
+        ocr_enabled=False,
         subagents=True,
+        model_validation_enabled=True,
+        verification_model="claude-sonnet-4-5",
+        verification_thinking_level="medium",
+        verification_apply_mode="apply_patches",
+        verification_max_output_tokens=2048,
+        verification_num_chunks=3,
     )
 
     command = build_submit_command(draft, settings)
@@ -102,7 +120,42 @@ def test_submit_command_carries_selected_cloud_prefixes() -> None:
         "pages/folder-a",
         "pages/folder-b",
     )
+    assert command.config_overrides["ocr_enabled"] is False
     assert command.config_overrides["subagents"] is True
+    assert command.config_overrides["model_validation_enabled"] is True
+    assert command.config_overrides["verification_model"] == "claude-sonnet-4-5"
+    assert command.config_overrides["verification_thinking_level"] == "medium"
+    assert command.config_overrides["verification_scope"] == "flagged"
+    assert command.config_overrides["verification_apply_mode"] == "apply_patches"
+    assert command.config_overrides["verification_max_output_tokens"] == 2048
+    assert command.config_overrides["verification_num_chunks"] == 3
+
+
+def test_optional_job_stages_are_snapshotted_independently() -> None:
+    settings = AppSettings(gcs_bucket_name="bucket")
+
+    for ocr_enabled in (False, True):
+        for subagents in (False, True):
+            for model_validation_enabled in (False, True):
+                draft = SubmitJobDraft(
+                    dataset_source="cloud",
+                    run_mode="cloud_batch",
+                    schema_name="TextPage",
+                    model_name="gemini-3.5-flash",
+                    cloud_prefix="pages",
+                    ocr_enabled=ocr_enabled,
+                    subagents=subagents,
+                    model_validation_enabled=model_validation_enabled,
+                )
+
+                overrides = build_submit_command(draft, settings).config_overrides
+
+                assert overrides["ocr_enabled"] is ocr_enabled
+                assert overrides["subagents"] is subagents
+                assert (
+                    overrides["model_validation_enabled"]
+                    is model_validation_enabled
+                )
 
 
 def test_cloud_dataset_choices_are_newest_first(monkeypatch) -> None:
@@ -762,6 +815,12 @@ def test_list_submit_jobs_only_returns_submits(tmp_path) -> None:
                     "gcs_pages_prefix": "pages",
                     "batch_restrict_image_names": ["a.png", "b.png"],
                     "target_folder": "/data/folder-x",
+                    "model_validation_enabled": True,
+                    "verification_model": "claude-sonnet-4-5",
+                    "verification_thinking_level": "medium",
+                    "verification_apply_mode": "apply_patches",
+                    "verification_max_output_tokens": 2048,
+                    "verification_num_chunks": 3,
                 }
             }
         },
@@ -782,6 +841,12 @@ def test_list_submit_jobs_only_returns_submits(tmp_path) -> None:
     assert job.model == "gemini-3.1-pro-preview"
     assert job.retrieved is False
     assert job.succeeded is None and job.failed is None
+    assert job.model_validation_enabled is True
+    assert job.verification_model == "claude-sonnet-4-5"
+    assert job.verification_thinking_level == "medium"
+    assert job.verification_apply_mode == "apply_patches"
+    assert job.verification_max_output_tokens == 2048
+    assert job.verification_num_chunks == 3
     assert "folder-x" in job.input_location and "2 scoped" in job.input_location
 
 
@@ -894,6 +959,133 @@ def test_run_retrieve_direct_reuses_job_store_cache(tmp_path, monkeypatch) -> No
 
     assert result["dataset_path"] == cached["dataset_path"]
     assert result["successful_pages"] == 1
+
+
+def test_run_retrieve_direct_keeps_validation_candidate_before_v1(
+    tmp_path, monkeypatch
+) -> None:
+    run_dir = _write_submit_run(
+        tmp_path,
+        "submit_20260101_000000",
+        batch_meta={
+            "model": "gemini-3.7-flash",
+            "provider": "gemini",
+            "request_count": 1,
+            "model_validation_enabled": True,
+            "batch_jobs": [
+                {
+                    "chunk_index": 1,
+                    "total_chunks": 1,
+                    "batch_job_name": "b1",
+                    "request_count": 1,
+                }
+            ],
+        },
+    )
+    dataset = run_dir / "candidate_dataset.jsonl"
+    dataset.write_text('{"image_name":"a.png"}\n', encoding="utf-8")
+    candidates = run_dir / "page_candidates.jsonl"
+    candidates.write_text(
+        '{"key":"pages/a.png","candidate":{"name":"A"}}\n',
+        encoding="utf-8",
+    )
+
+    from patientjournals.batch import service as batch_service
+
+    monkeypatch.setattr(
+        batch_service.BatchResultService,
+        "retrieve",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            dataset_path=dataset,
+            provider="gemini",
+            batch_count=1,
+            rows_written=1,
+            error_rows=0,
+            expected_pages=1,
+            observed_pages=1,
+            successful_pages=1,
+            recovered_pages=0,
+            failed_rows_included=0,
+            dataset_gcs_uri="gs://bucket/candidate.jsonl",
+            page_candidates_path=candidates,
+            page_candidates_gcs_uri="gs://bucket/page_candidates.jsonl",
+            deterministic_routing_path=run_dir / "deterministic_routing.jsonl",
+            deterministic_routing_gcs_uri=(
+                "gs://bucket/deterministic_routing.jsonl"
+            ),
+            deterministic_flagged_pages=1,
+            deterministic_routine_pages=0,
+        ),
+    )
+
+    result = run_retrieve_direct(
+        run_dir,
+        AppSettings(batch_duplicate_strategy="first_successful"),
+        allow_partial=True,
+    )
+
+    record = JobStore(tmp_path).record_for_run_dir(run_dir)
+    assert result["model_validation_status"] == "pending"
+    assert result["page_candidates_path"] == str(candidates)
+    assert record["status"] == "validation_pending"
+    assert record["dataset"].get("versions", []) == []
+    assert not record["dataset"].get("current_path")
+
+
+def test_finalize_validation_job_rebuilds_candidates_without_publishing(
+    tmp_path, monkeypatch
+) -> None:
+    from patientjournals.app import jobs as app_jobs
+
+    run_dir = _write_submit_run(
+        tmp_path,
+        "submit_validation_finalize",
+        batch_meta={"model_validation_enabled": True, "batch_jobs": []},
+    )
+    seen = {}
+
+    def fake_retrieve(selected_run_dir, _settings, **kwargs):
+        seen["run_dir"] = selected_run_dir
+        seen.update(kwargs)
+        return {"model_validation_status": "pending"}
+
+    monkeypatch.setattr(app_jobs, "run_retrieve_direct", fake_retrieve)
+
+    result = finalize_dataset_with_failed_rows(run_dir, AppSettings())
+
+    assert result["model_validation_status"] == "pending"
+    assert seen == {
+        "run_dir": run_dir,
+        "allow_partial": True,
+        "ignore_failed": True,
+        "force": True,
+    }
+
+
+def test_recover_validation_job_rebuilds_candidates_without_publishing(
+    tmp_path, monkeypatch
+) -> None:
+    from patientjournals.app import jobs as app_jobs
+
+    run_dir = _write_submit_run(
+        tmp_path,
+        "submit_validation_recover",
+        batch_meta={"model_validation_enabled": True, "batch_jobs": []},
+    )
+    seen = {}
+
+    def fake_recover(selected_run_dir, selected_settings):
+        seen["run_dir"] = selected_run_dir
+        seen["settings"] = selected_settings
+        return {"model_validation_status": "pending"}
+
+    monkeypatch.setattr(app_jobs, "recover_failed_via_api", fake_recover)
+    settings = AppSettings()
+
+    result = app_jobs.recover_dataset_gaps(run_dir, settings)
+
+    assert result["model_validation_status"] == "pending"
+    assert seen == {"run_dir": run_dir, "settings": settings}
 
 
 def test_reusable_recorded_results_survives_retry_submitted_state(tmp_path) -> None:
@@ -1274,6 +1466,70 @@ def test_read_recorded_results_derives_missing_batch_results(tmp_path) -> None:
     assert job.failed == 1
 
 
+def test_read_recorded_results_keeps_validation_artifact_as_candidate(tmp_path) -> None:
+    run_dir = _write_submit_run(
+        tmp_path,
+        "submit_validation_read",
+        batch_meta={"model_validation_enabled": True, "batch_jobs": []},
+    )
+    candidate = run_dir / "candidate.jsonl"
+    candidate.write_text('{"image_name":"a.png"}\n', encoding="utf-8")
+    (run_dir / "batch_results.json").write_text(
+        json.dumps(
+            {
+                "dataset_path": str(candidate),
+                "expected_pages": 1,
+                "successful_pages": 1,
+                "missing_pages": 0,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = read_recorded_results(run_dir)
+
+    record = JobStore(tmp_path).record_for_run_dir(run_dir)
+    assert result["model_validation_status"] == "candidate_incomplete"
+    assert result["candidate_operation"] == "legacy_retrieval"
+    assert record["dataset"].get("versions", []) == []
+    assert not record["dataset"].get("current_path")
+
+
+def test_repair_recorded_results_keeps_validation_artifact_as_candidate(
+    tmp_path,
+) -> None:
+    run_dir = _write_submit_run(
+        tmp_path,
+        "submit_validation_repair",
+        batch_meta={
+            "model_validation_enabled": True,
+            "request_count": 1,
+            "batch_jobs": [
+                {
+                    "batch_job_name": "b1",
+                    "request_count": 1,
+                    "requests_file": "batch_requests.jsonl",
+                }
+            ],
+        },
+    )
+    (run_dir / "batch_requests.jsonl").write_text(
+        json.dumps({"key": "pages/a.png"}) + "\n", encoding="utf-8"
+    )
+    (run_dir / "batch_output_001.jsonl").write_text("{}\n", encoding="utf-8")
+    (run_dir / "submit_validation_repair_dataset.jsonl").write_text(
+        '{"image_name":"a.png"}\n', encoding="utf-8"
+    )
+
+    result = repair_recorded_results(run_dir)
+
+    record = JobStore(tmp_path).record_for_run_dir(run_dir)
+    assert result["model_validation_status"] == "candidate_incomplete"
+    assert result["candidate_operation"] == "legacy_retrieval"
+    assert record["dataset"].get("versions", []) == []
+    assert not record["dataset"].get("current_path")
+
+
 def test_read_run_error_falls_back_to_failure_diagnostics(tmp_path) -> None:
     manifest = tmp_path / "image_processing_manifest.jsonl"
     manifest.write_text(
@@ -1338,6 +1594,47 @@ def test_app_settings_api_recovery_threshold_roundtrip(tmp_path) -> None:
     path = tmp_path / "app_config.json"
     save_app_settings(AppSettings(api_recovery_threshold=8), path)
     assert load_app_settings(path).api_recovery_threshold == 8
+
+
+def test_app_settings_model_validation_roundtrip_and_legacy_defaults(tmp_path) -> None:
+    path = tmp_path / "app_config.json"
+    save_app_settings(
+        AppSettings(
+            ocr_enabled=False,
+            subagents=True,
+            model_validation_enabled=True,
+            verification_model="claude-sonnet-4-5",
+            verification_thinking_level="medium",
+            verification_apply_mode="apply_patches",
+            verification_max_output_tokens=2048,
+            verification_num_chunks=4,
+        ),
+        path,
+    )
+
+    loaded = load_app_settings(path)
+    assert loaded.ocr_enabled is False
+    assert loaded.subagents is True
+    assert loaded.model_validation_enabled is True
+    assert loaded.verification_model == "claude-sonnet-4-5"
+    assert loaded.verification_thinking_level == "medium"
+    assert loaded.verification_scope == "flagged"
+    assert loaded.verification_apply_mode == "apply_patches"
+    assert loaded.verification_max_output_tokens == 2048
+    assert loaded.verification_num_chunks == 4
+
+    path.write_text(
+        '{"gcs_bucket_name": "legacy", "verification_scope": "flagged", '
+        '"verification_apply_mode": "report_only"}',
+        encoding="utf-8",
+    )
+    legacy = load_app_settings(path)
+    assert legacy.ocr_enabled is True
+    assert legacy.subagents is False
+    assert legacy.model_validation_enabled is False
+    assert legacy.verification_model == "gemini-3.1-pro-preview"
+    assert legacy.verification_scope == "flagged"
+    assert legacy.verification_apply_mode == "apply_patches"
 
 
 def test_recover_dataset_gaps_only_targets_missing_pages(tmp_path, monkeypatch) -> None:

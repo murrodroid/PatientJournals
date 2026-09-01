@@ -185,6 +185,40 @@ def retrieve(
     _run_module(context, "patientjournals.batch.retrieve", args)
 
 
+@task(name="verify")
+def verify_batch(
+    context,
+    retrieve: bool = False,
+    source_run_dir: str | None = None,
+    candidate_file: str | None = None,
+    input_manifest_file: str | None = None,
+    run_dir: str | None = None,
+    model: str | None = None,
+    thinking_level: str | None = None,
+    scope: str | None = None,
+    max_output_tokens: int | None = None,
+    num_chunks: int | None = None,
+    wait: bool = False,
+    allow_partial: bool = False,
+    extra: str = "",
+) -> None:
+    args: list[str] = []
+    _add_flag(args, "--retrieve", retrieve)
+    _add_option(args, "--source-run-dir", source_run_dir)
+    _add_option(args, "--candidate-file", candidate_file)
+    _add_option(args, "--input-manifest-file", input_manifest_file)
+    _add_option(args, "--run-dir", run_dir)
+    _add_option(args, "--model", model)
+    _add_option(args, "--thinking-level", thinking_level)
+    _add_option(args, "--scope", scope)
+    _add_option(args, "--max-output-tokens", max_output_tokens)
+    _add_option(args, "--num-chunks", num_chunks)
+    _add_flag(args, "--wait", wait)
+    _add_flag(args, "--allow-partial", allow_partial)
+    args.extend(_split_extra(extra))
+    _run_module(context, "patientjournals.batch.verify", args)
+
+
 @task(name="collect-outputs")
 def collect_outputs(
     context,
@@ -293,6 +327,7 @@ batch.add_task(prepare_ocr)
 batch.add_task(submit)
 batch.add_task(status)
 batch.add_task(retrieve)
+batch.add_task(verify_batch, "verify")
 batch.add_task(collect_outputs)
 batch.add_task(check_models)
 

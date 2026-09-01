@@ -95,7 +95,21 @@ class Config:
     api_retry_initial_delay_seconds: float = 2.0
     api_retry_max_delay_seconds: float = 30.0
     api_retry_jitter_seconds: float = 0.5
-    verification_model: str = ""
+    # Candidate-aware second-pass model validation. The first extraction and
+    # deterministic checks remain unchanged unless this is explicitly enabled.
+    model_validation_enabled: bool = False
+    verification_model: str = "gemini-3.1-pro-preview"
+    verification_thinking_level: Literal["low", "medium", "high"] = "high"
+    verification_max_output_tokens: int = 4096
+    # ``flagged`` is the batch-efficient production path: deterministic routing
+    # escalates risky pages plus a stable control sample. ``all`` remains
+    # selectable for full-population experiments.
+    verification_scope: Literal["all", "flagged"] = "flagged"
+    verification_control_sample_percent: float = 2.0
+    # Final-stage verifier corrections are accepted automatically after the
+    # corrected page validates against the original extraction schema.
+    verification_apply_mode: Literal["report_only", "apply_patches"] = "apply_patches"
+    verification_num_chunks: int = 1
     batch_size: int = 2048
     flush_every: int = 1
     dataset_file_name: str = "dataset"
@@ -232,6 +246,9 @@ class Config:
             for hint in raw_ocr_hints
             if str(hint).strip()
         )
+        self.verification_control_sample_percent = max(
+            0.0, min(100.0, float(self.verification_control_sample_percent or 0.0))
+        )
         if not (self.api_key or "").strip():
             self.api_key = self.provider_api_keys.get("gemini", "")
         if self.output_schema_override:
@@ -317,6 +334,7 @@ def _apply_external_json_config(cfg: Config) -> None:
         "target_folder",
         "upload_images_folder",
         "model",
+        "thinking_level",
         "output_format",
         "batch_duplicate_strategy",
         "output_schema_name",
@@ -328,6 +346,14 @@ def _apply_external_json_config(cfg: Config) -> None:
         "ocr_backend",
         "ocr_language_hints",
         "ocr_sidecar_suffix",
+        "model_validation_enabled",
+        "verification_model",
+        "verification_thinking_level",
+        "verification_max_output_tokens",
+        "verification_scope",
+        "verification_control_sample_percent",
+        "verification_apply_mode",
+        "verification_num_chunks",
     }
     aliases = {
         "auth_mode": "gcp_auth_mode",

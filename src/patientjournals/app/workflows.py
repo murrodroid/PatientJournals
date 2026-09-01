@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, is_dataclass, replace
 from pathlib import Path
+from threading import RLock
 from typing import Any
 
 from patientjournals.app.access import resolve_validator_identity, run_access_checks
@@ -25,6 +27,7 @@ from patientjournals.app.jobs import (
     _restore_runtime_overrides,
     build_validation_command,
     cancel_batch_run,
+    command_overrides_for_run,
     finalize_dataset_with_failed_rows,
     list_batch_chunks,
     list_batch_chunks_with_state,
@@ -46,7 +49,11 @@ from patientjournals.app.settings_store import (
     save_app_settings,
 )
 from patientjournals.config import config
+from patientjournals.config.models import resolve_model_spec
 from patientjournals.validation.browser import BrowserValidationManager
+
+
+_RUNTIME_CONFIG_LOCK = RLock()
 
 
 def serializable(value: Any) -> Any:
@@ -106,9 +113,47 @@ class WorkflowService:
             "validations_gcs_prefix",
             "schemas_gcs_prefix",
             "upload_validation_to_gcs",
+            "ocr_enabled",
+            "subagents",
+            "model_validation_enabled",
+            "verification_model",
+            "verification_thinking_level",
+            "verification_scope",
+            "verification_control_sample_percent",
+            "verification_max_output_tokens",
+            "verification_num_chunks",
         }
         updates = {key: payload[key] for key in allowed if key in payload}
-        self.settings = replace(self.settings, **updates)
+        if "verification_thinking_level" in updates and updates[
+            "verification_thinking_level"
+        ] not in {"low", "medium", "high"}:
+            raise ValueError("Verification thinking must be low, medium, or high.")
+        if "verification_scope" in updates and updates["verification_scope"] not in {
+            "all",
+            "flagged",
+        }:
+            raise ValueError("Verification scope must be all or flagged.")
+        # Automatic acceptance is a pipeline invariant, not a user preference.
+        updates["verification_apply_mode"] = "apply_patches"
+        for key in ("verification_max_output_tokens", "verification_num_chunks"):
+            if key in updates:
+                updates[key] = max(1, int(updates[key]))
+        if "verification_control_sample_percent" in updates:
+            updates["verification_control_sample_percent"] = max(
+                0.0,
+                min(100.0, float(updates["verification_control_sample_percent"])),
+            )
+        next_settings = replace(self.settings, **updates)
+        if (
+            next_settings.model_validation_enabled
+            and next_settings.verification_scope == "flagged"
+            and next_settings.verification_control_sample_percent <= 0.0
+        ):
+            raise ValueError(
+                "Risk-routed verification requires a positive routine-page "
+                "control sample. Choose all-page scope to use 0%."
+            )
+        self.settings = next_settings
         save_app_settings(self.settings, self.settings_path)
         self.store = JobStore(self.settings.local_runs_root)
         self.schema_service = SchemaService(
@@ -190,6 +235,34 @@ class WorkflowService:
         }
 
     def submit_batch(self, draft: SubmitJobDraft) -> dict[str, Any]:
+        if draft.model_validation_enabled:
+            draft = replace(draft, verification_apply_mode="apply_patches")
+            if draft.run_mode != "cloud_batch":
+                raise ValueError("Second-pass model validation requires Cloud batch.")
+            verifier = resolve_model_spec(draft.verification_model)
+            if not verifier.supports_batch:
+                raise ValueError(
+                    f"Verifier model does not support batch jobs: {verifier.name}"
+                )
+            if draft.verification_scope not in {"all", "flagged"}:
+                raise ValueError("Verification scope must be all or flagged.")
+            if not 0.0 <= draft.verification_control_sample_percent <= 100.0:
+                raise ValueError("Control sample percent must be between 0 and 100.")
+            if (
+                draft.verification_scope == "flagged"
+                and draft.verification_control_sample_percent <= 0.0
+            ):
+                raise ValueError(
+                    "Risk-routed verification requires a positive routine-page "
+                    "control sample so an all-routine job still has a final-model "
+                    "validation batch."
+                )
+            if draft.verification_thinking_level not in {"low", "medium", "high"}:
+                raise ValueError("Verifier thinking must be low, medium, or high.")
+            if draft.verification_max_output_tokens < 1:
+                raise ValueError("Verifier max output tokens must be at least 1.")
+            if draft.verification_num_chunks < 1:
+                raise ValueError("Validation batch chunks must be at least 1.")
         previous = _apply_runtime_overrides(command_override_payload(self.settings))
         try:
             self.schema_service.sync_from_cloud()
@@ -286,10 +359,17 @@ class WorkflowService:
         duplicate_strategy: str = "",
         force: bool = False,
     ) -> dict[str, Any]:
+        readiness = self._resolve_run_readiness(run_dir)
+        if readiness.state not in {"succeeded", "failed"}:
+            detail = f" ({readiness.detail})" if readiness.detail else ""
+            raise RuntimeError(
+                "Batch retrieval is not ready: "
+                f"state={readiness.state or 'unknown'}{detail}."
+            )
         payload = run_retrieve_direct(
             run_dir,
             self.settings,
-            allow_partial=True,
+            allow_partial=readiness.state == "failed",
             ignore_failed=ignore_failed,
             duplicate_strategy=duplicate_strategy,
             force=force,
@@ -340,6 +420,194 @@ class WorkflowService:
             "failures": failures,
         }
 
+    def submit_model_validation(
+        self,
+        run_dir: str,
+        *,
+        model: str = "",
+        thinking_level: str = "",
+        scope: str = "",
+        control_sample_percent: float | None = None,
+        max_output_tokens: int | None = None,
+        num_chunks: int | None = None,
+    ) -> dict[str, Any]:
+        """Submit the candidate-aware verifier batch for a retrieved extraction."""
+        from patientjournals.batch.verify import (
+            ModelValidationSubmitRequest,
+            submit_model_validation,
+        )
+
+        selected_model = model or self.settings.verification_model
+        selected_thinking = thinking_level or self.settings.verification_thinking_level
+        selected_scope = scope or self.settings.verification_scope
+        if selected_scope not in {"all", "flagged"}:
+            raise ValueError("Verification scope must be all or flagged.")
+        selected_control_sample = max(
+            0.0,
+            min(
+                100.0,
+                float(
+                    self.settings.verification_control_sample_percent
+                    if control_sample_percent is None
+                    else control_sample_percent
+                ),
+            ),
+        )
+        results_path = Path(run_dir).expanduser() / "batch_results.json"
+        if results_path.is_file():
+            results_payload = json.loads(results_path.read_text(encoding="utf-8"))
+            expected_pages = int(results_payload.get("expected_pages") or 0)
+            successful_pages = int(results_payload.get("successful_pages") or 0)
+            if (
+                expected_pages <= 0
+                or successful_pages != expected_pages
+                or not str(results_payload.get("page_candidates_path") or "")
+                or not str(results_payload.get("deterministic_routing_path") or "")
+            ):
+                raise RuntimeError(
+                    "Final-model submission requires one routed deterministic "
+                    "candidate for every expected page. Recover or resubmit failed "
+                    "pages, then retrieve the complete routing sweep first."
+                )
+        selected_chunks = max(
+            1, int(num_chunks or self.settings.verification_num_chunks)
+        )
+        selected_tokens = max(
+            1,
+            int(
+                max_output_tokens
+                or self.settings.verification_max_output_tokens
+            ),
+        )
+        verifier = resolve_model_spec(selected_model)
+        if not verifier.supports_batch:
+            raise ValueError(
+                f"Verifier model does not support batch jobs: {verifier.name}"
+            )
+
+        overrides = command_overrides_for_run(self.settings, run_dir)
+        routed_control_sample = max(
+            0.0,
+            min(
+                100.0,
+                float(
+                    overrides.get("verification_control_sample_percent")
+                    if overrides.get("verification_control_sample_percent") is not None
+                    else self.settings.verification_control_sample_percent
+                ),
+            ),
+        )
+        if (
+            control_sample_percent is not None
+            and abs(selected_control_sample - routed_control_sample) > 1e-9
+        ):
+            raise ValueError(
+                "The routine-page control sample is fixed when extraction retrieval "
+                "writes deterministic routing. Select it during job submission, or "
+                "retrieve the extraction again with the desired value."
+            )
+        selected_control_sample = routed_control_sample
+        overrides.update(
+            {
+                "model_validation_enabled": True,
+                "verification_model": selected_model,
+                "verification_thinking_level": selected_thinking,
+                "verification_scope": selected_scope,
+                "verification_control_sample_percent": selected_control_sample,
+                "verification_apply_mode": "apply_patches",
+                "verification_max_output_tokens": selected_tokens,
+                "verification_num_chunks": selected_chunks,
+            }
+        )
+        with _RUNTIME_CONFIG_LOCK:
+            previous = _apply_runtime_overrides(overrides)
+            try:
+                result = submit_model_validation(
+                    ModelValidationSubmitRequest(
+                        source_run_dir=run_dir,
+                        model=selected_model,
+                        thinking_level=selected_thinking,
+                        scope=selected_scope,
+                        apply_mode="apply_patches",
+                        max_output_tokens=selected_tokens,
+                        num_chunks=selected_chunks,
+                    )
+                )
+            finally:
+                _restore_runtime_overrides(previous)
+
+        payload = serializable(result)
+        self.store.mark_model_validation_submitted(
+            run_dir,
+            verification_run_dir=str(payload.get("run_dir") or ""),
+            model=selected_model,
+            apply_mode="apply_patches",
+            thinking_level=selected_thinking,
+            scope=selected_scope,
+            control_sample_percent=selected_control_sample,
+            max_output_tokens=selected_tokens,
+            num_chunks=selected_chunks,
+        )
+        return payload
+
+    def retrieve_model_validation(
+        self,
+        run_dir: str,
+        *,
+        wait: bool = False,
+        allow_partial: bool = False,
+    ) -> dict[str, Any]:
+        """Retrieve and record the verifier batch linked to an extraction job."""
+        from patientjournals.batch.verify import (
+            ModelValidationRetrieveRequest,
+            retrieve_model_validation,
+        )
+
+        record = self.store.record_for_run_dir(run_dir)
+        validation = (
+            record.get("model_validation")
+            if isinstance(record.get("model_validation"), dict)
+            else {}
+        )
+        verification_run_dir = str(
+            validation.get("verification_run_dir") or ""
+        )
+        if not verification_run_dir:
+            raise ValueError(f"No verifier batch is linked to extraction job: {run_dir}")
+        overrides = command_overrides_for_run(self.settings, run_dir)
+        with _RUNTIME_CONFIG_LOCK:
+            previous = _apply_runtime_overrides(overrides)
+            try:
+                result = retrieve_model_validation(
+                    ModelValidationRetrieveRequest(
+                        run_dir=verification_run_dir,
+                        wait=wait,
+                        allow_partial=allow_partial,
+                    )
+                )
+            finally:
+                _restore_runtime_overrides(previous)
+
+        payload = serializable(result)
+        payload["verification_run_dir"] = verification_run_dir
+        payload.setdefault(
+            "verification_model",
+            str(payload.get("model") or validation.get("model") or ""),
+        )
+        payload.setdefault("model_validation_status", str(payload.get("status") or ""))
+        payload.setdefault("rows_written", int(payload.get("dataset_rows") or 0))
+        publish_dataset = bool(payload.get("publishable"))
+        if publish_dataset and not payload.get("dataset_path"):
+            raise RuntimeError(
+                "Verifier marked the result publishable without a dataset_path."
+            )
+        payload = self.store.record_model_validation_result(
+            run_dir,
+            payload,
+            publish_dataset=publish_dataset,
+        )
+        return payload
+
     def finalize_failed_rows(self, run_dir: str) -> dict[str, Any]:
         return serializable(finalize_dataset_with_failed_rows(run_dir, self.settings))
 
@@ -355,11 +623,46 @@ class WorkflowService:
         return {"cancelled": cancel_batch_run(run_dir, self.settings)}
 
     def job_chunks(self, run_dir: str, *, live: bool = False) -> list[dict[str, Any]]:
-        chunks = list_batch_chunks_with_state(run_dir) if live else list_batch_chunks(run_dir)
+        if not live:
+            return serializable(list_batch_chunks(run_dir))
+        previous = _apply_runtime_overrides(
+            command_overrides_for_run(self.settings, run_dir)
+        )
+        try:
+            chunks = list_batch_chunks_with_state(run_dir)
+        finally:
+            _restore_runtime_overrides(previous)
         return serializable(chunks)
 
     def readiness(self, run_dir: str) -> dict[str, Any]:
-        return serializable(resolve_batch_run_readiness(run_dir))
+        return serializable(self._resolve_run_readiness(run_dir))
+
+    def live_batch_status(self, run_dir: str) -> dict[str, Any]:
+        """Resolve live chunk states and output readiness under one run snapshot."""
+
+        previous = _apply_runtime_overrides(
+            command_overrides_for_run(self.settings, run_dir)
+        )
+        try:
+            chunks = list_batch_chunks_with_state(run_dir)
+            readiness = resolve_batch_run_readiness(run_dir, chunks=chunks)
+        finally:
+            _restore_runtime_overrides(previous)
+        return {
+            "chunks": serializable(chunks),
+            "readiness": serializable(readiness),
+        }
+
+    def _resolve_run_readiness(self, run_dir: str):
+        """Read provider/GCS state while the source run's config snapshot is active."""
+
+        previous = _apply_runtime_overrides(
+            command_overrides_for_run(self.settings, run_dir)
+        )
+        try:
+            return resolve_batch_run_readiness(run_dir)
+        finally:
+            _restore_runtime_overrides(previous)
 
     def list_datasets(self, *, include_cloud: bool = False) -> dict[str, Any]:
         local_items = list_local_dataset_library(self.settings.local_runs_root)

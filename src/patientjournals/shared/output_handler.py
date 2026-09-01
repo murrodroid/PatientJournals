@@ -158,15 +158,21 @@ def data_to_rows(
     data: BaseModel,
     file_name: str,
     field_confidence_by_pointer: FieldConfidenceByPointer | None = None,
+    *,
+    schema_name: str | None = None,
 ) -> list[dict]:
     # The parsed model is the strongest signal. This also keeps direct callers
     # correct when another workflow has temporarily selected a managed schema.
     for model_type, handler in _HANDLERS.items():
         if isinstance(data, model_type):
             return handler(data, file_name, field_confidence_by_pointer)
-    schema_name = str(getattr(config, "output_schema_name", "") or "").lower()
-    if schema_name == "textpage" and hasattr(data, "page_lines"):
+    selected_schema_name = str(
+        schema_name
+        if schema_name is not None
+        else (getattr(config, "output_schema_name", "") or "")
+    ).lower()
+    if selected_schema_name == "textpage" and hasattr(data, "page_lines"):
         return text_page_rows(data, file_name, field_confidence_by_pointer)
-    if schema_name == "frontpage":
+    if selected_schema_name == "frontpage":
         return journal_rows(data, file_name, field_confidence_by_pointer)
     return default_rows(data, file_name, field_confidence_by_pointer)

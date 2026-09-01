@@ -1,8 +1,10 @@
 import json
+from types import SimpleNamespace
 
 from pydantic import BaseModel
 
 from patientjournals.batch.collect_outputs import (
+    collect_outputs,
     collect_valid_outputs_from_jsonl_sources,
     write_collected_dataset,
 )
@@ -45,6 +47,47 @@ def test_parse_gemini_output_record_validates_configured_schema(monkeypatch) -> 
     assert result.is_valid
     assert result.key == "pages/a.png"
     assert result.parsed_model == SimpleOutput(value="ok")
+
+
+def test_preversion_gemini_candidate_requires_clean_finish_reason(monkeypatch) -> None:
+    monkeypatch.setattr(config, "output_model", SimpleOutput)
+    monkeypatch.setattr(config, "model_validation_enabled", True)
+    response = gemini_response({"value": "truncated-but-valid-json"})
+    response["candidates"][0]["finishReason"] = "MAX_TOKENS"
+
+    result = parse_gemini_output_record(
+        {"key": "pages/a.png", "response": response}
+    )
+
+    assert not result.is_valid
+    assert result.reason == "finish_reason_max_tokens"
+
+
+def test_preversion_gemini_candidate_accepts_stop(monkeypatch) -> None:
+    monkeypatch.setattr(config, "output_model", SimpleOutput)
+    monkeypatch.setattr(config, "model_validation_enabled", True)
+    response = gemini_response({"value": "complete"})
+    response["candidates"][0]["finishReason"] = "STOP"
+
+    result = parse_gemini_output_record(
+        {"key": "pages/a.png", "response": response}
+    )
+
+    assert result.is_valid
+
+
+def test_collect_outputs_cannot_bypass_preversion_validation_gate(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(config, "model_validation_enabled", True)
+
+    try:
+        collect_outputs(SimpleNamespace())
+    except RuntimeError as exc:
+        assert "batch.retrieve" in str(exc)
+        assert "batch.verify" in str(exc)
+    else:
+        raise AssertionError("validation-enabled collection unexpectedly published")
 
 
 def test_collect_outputs_uses_later_valid_candidate_for_same_key(monkeypatch) -> None:

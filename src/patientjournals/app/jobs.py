@@ -9,6 +9,7 @@ from collections import Counter
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
+from threading import RLock
 from typing import Iterable
 
 from patientjournals.app.models import (
@@ -39,6 +40,9 @@ from patientjournals.shared.processing_metrics import (
     write_processing_summary,
 )
 from patientjournals.shared import run_layout
+
+
+_RUNTIME_CONFIG_LOCK = RLock()
 
 
 @dataclass(frozen=True)
@@ -120,7 +124,18 @@ def build_submit_command(
         local_path=draft.local_path,
         cloud_prefix=draft.cloud_prefix,
         cloud_prefixes=draft.cloud_prefixes,
+        ocr_enabled=draft.ocr_enabled,
         subagents=draft.subagents,
+        model_validation_enabled=draft.model_validation_enabled,
+        verification_model=draft.verification_model,
+        verification_thinking_level=draft.verification_thinking_level,
+        verification_scope=draft.verification_scope,
+        verification_control_sample_percent=(
+            draft.verification_control_sample_percent
+        ),
+        verification_apply_mode=draft.verification_apply_mode,
+        verification_max_output_tokens=draft.verification_max_output_tokens,
+        verification_num_chunks=draft.verification_num_chunks,
     )
 
     if draft.run_mode == "local_api":
@@ -148,6 +163,7 @@ def build_submit_command(
 
 
 def _apply_runtime_overrides(payload: dict[str, object]) -> dict[str, object]:
+    _RUNTIME_CONFIG_LOCK.acquire()
     keys = {
         "batch_backend",
         "gcp_auth_mode",
@@ -180,47 +196,70 @@ def _apply_runtime_overrides(payload: dict[str, object]) -> dict[str, object]:
         "batch_duplicate_strategy",
         "batch_restrict_image_names",
         "api_recovery_enabled",
+        "ocr_enabled",
         "subagents",
+        "model_validation_enabled",
+        "verification_model",
+        "verification_thinking_level",
+        "verification_scope",
+        "verification_control_sample_percent",
+        "verification_apply_mode",
+        "verification_max_output_tokens",
+        "verification_num_chunks",
     }
     previous = {key: getattr(config, key) for key in keys if hasattr(config, key)}
-    aliases = {
-        "auth_mode": "gcp_auth_mode",
-        "local_runs_root": "output_root",
-    }
-    schema_name = str(payload.get("schema_name") or "").strip()
-    schema_payload = payload.get("schema_payload") or payload.get("output_schema_override")
-    for key, value in payload.items():
-        target_key = aliases.get(key, key)
-        if target_key == "schema_name":
-            continue
-        if hasattr(config, target_key) and value is not None:
-            setattr(config, target_key, value)
-    if isinstance(schema_payload, dict) and schema_payload:
-        config.output_schema_override = schema_payload
-        config.output_schema_name = schema_name or str(
-            payload.get("output_schema_name") or "ManagedSchema"
+    try:
+        aliases = {
+            "auth_mode": "gcp_auth_mode",
+            "local_runs_root": "output_root",
+        }
+        schema_name = str(payload.get("schema_name") or "").strip()
+        schema_payload = payload.get("schema_payload") or payload.get(
+            "output_schema_override"
         )
-        config.output_schema_version_id = str(
-            payload.get("schema_version_id")
-            or payload.get("output_schema_version_id")
-            or ""
-        )
-    elif schema_name:
-        config.output_schema_override = None
-        config.output_schema_version_id = ""
-        config.output_model = resolve_output_schema(schema_name)
-        config.output_schema_name = schema_name
-    prompt_name = schema_name.lower()
-    if prompt_name in config.prompts:
-        config.input_prompt_name = prompt_name
-    config.__post_init__()
-    return previous
+        for key, value in payload.items():
+            target_key = aliases.get(key, key)
+            if target_key == "schema_name":
+                continue
+            if hasattr(config, target_key) and value is not None:
+                setattr(config, target_key, value)
+        if isinstance(schema_payload, dict) and schema_payload:
+            config.output_schema_override = schema_payload
+            config.output_schema_name = schema_name or str(
+                payload.get("output_schema_name") or "ManagedSchema"
+            )
+            config.output_schema_version_id = str(
+                payload.get("schema_version_id")
+                or payload.get("output_schema_version_id")
+                or ""
+            )
+        elif schema_name:
+            config.output_schema_override = None
+            config.output_schema_version_id = ""
+            config.output_model = resolve_output_schema(schema_name)
+            config.output_schema_name = schema_name
+        prompt_name = schema_name.lower()
+        if prompt_name in config.prompts:
+            config.input_prompt_name = prompt_name
+        config.__post_init__()
+        return previous
+    except Exception:
+        try:
+            for key, value in previous.items():
+                setattr(config, key, value)
+            config.__post_init__()
+        finally:
+            _RUNTIME_CONFIG_LOCK.release()
+        raise
 
 
 def _restore_runtime_overrides(previous: dict[str, object]) -> None:
-    for key, value in previous.items():
-        setattr(config, key, value)
-    config.__post_init__()
+    try:
+        for key, value in previous.items():
+            setattr(config, key, value)
+        config.__post_init__()
+    finally:
+        _RUNTIME_CONFIG_LOCK.release()
 
 
 async def run_local_draft_direct(
@@ -241,7 +280,18 @@ async def run_local_draft_direct(
         local_path=draft.local_path,
         cloud_prefix=draft.cloud_prefix,
         cloud_prefixes=draft.cloud_prefixes,
+        ocr_enabled=draft.ocr_enabled,
         subagents=draft.subagents,
+        model_validation_enabled=draft.model_validation_enabled,
+        verification_model=draft.verification_model,
+        verification_thinking_level=draft.verification_thinking_level,
+        verification_scope=draft.verification_scope,
+        verification_control_sample_percent=(
+            draft.verification_control_sample_percent
+        ),
+        verification_apply_mode=draft.verification_apply_mode,
+        verification_max_output_tokens=draft.verification_max_output_tokens,
+        verification_num_chunks=draft.verification_num_chunks,
     )
     previous = _apply_runtime_overrides(overrides)
     try:
@@ -352,7 +402,18 @@ def run_batch_draft_direct(
         local_path=draft.local_path,
         cloud_prefix=draft.cloud_prefix,
         cloud_prefixes=draft.cloud_prefixes,
+        ocr_enabled=draft.ocr_enabled,
         subagents=draft.subagents,
+        model_validation_enabled=draft.model_validation_enabled,
+        verification_model=draft.verification_model,
+        verification_thinking_level=draft.verification_thinking_level,
+        verification_scope=draft.verification_scope,
+        verification_control_sample_percent=(
+            draft.verification_control_sample_percent
+        ),
+        verification_apply_mode=draft.verification_apply_mode,
+        verification_max_output_tokens=draft.verification_max_output_tokens,
+        verification_num_chunks=draft.verification_num_chunks,
     )
     # Scope a local-folder batch to exactly the images in that folder so it can
     # never expand to every object under the bucket prefix.
@@ -515,6 +576,55 @@ def _failure_reasons_by_key(run_dir: Path) -> dict[str, str]:
     return reasons
 
 
+def _run_has_model_validation_enabled(run_dir: str | Path) -> bool:
+    """Read the immutable job snapshot without falling back to app defaults."""
+    run_path = Path(run_dir).expanduser()
+    store_record = JobStore.for_run_dir(run_path).record_for_run_dir(run_path)
+    validation = (
+        store_record.get("model_validation")
+        if isinstance(store_record.get("model_validation"), dict)
+        else {}
+    )
+    if validation.get("enabled") is True:
+        return True
+
+    batch_meta = _read_json_file(run_path / "batch_job.json")
+    if "model_validation_enabled" in batch_meta:
+        return bool(batch_meta.get("model_validation_enabled"))
+
+    metadata = _read_json_file(run_path / "metadata.json")
+    config_values = metadata.get("config_values")
+    if isinstance(config_values, dict):
+        config_values = config_values.get("config")
+    if isinstance(config_values, dict) and "model_validation_enabled" in config_values:
+        return bool(config_values.get("model_validation_enabled"))
+    return False
+
+
+def _record_retrieval_with_validation_gate(
+    store: JobStore,
+    run_dir: str | Path,
+    payload: dict[str, object],
+    *,
+    signature: str,
+    operation: str,
+) -> dict[str, object]:
+    """Record a pre-v001 candidate or a normal published retrieval as configured."""
+    if _run_has_model_validation_enabled(run_dir):
+        candidate_payload = {**payload, "candidate_operation": operation}
+        return store.record_candidate_retrieval(
+            run_dir,
+            candidate_payload,
+            signature=signature,
+        )
+    return store.record_retrieval(
+        run_dir,
+        payload,
+        signature=signature,
+        operation=operation,
+    )
+
+
 def finalize_dataset_with_failed_rows(
     run_dir: str | Path,
     settings: AppSettings,
@@ -527,6 +637,17 @@ def finalize_dataset_with_failed_rows(
     """
     from patientjournals.batch import retrieve as retrieve_module
     from patientjournals.shared.tools import get_run_logger, load_existing_dataset
+
+    if _run_has_model_validation_enabled(run_dir):
+        # Rebuild canonical page candidates through the normal retrieval path;
+        # directly patching a flattened dataset would bypass candidate binding.
+        return run_retrieve_direct(
+            run_dir,
+            settings,
+            allow_partial=True,
+            ignore_failed=True,
+            force=True,
+        )
 
     recorded = read_recorded_results(run_dir)
     dataset_path_value = find_dataset_near(recorded.get("dataset_path") or "")
@@ -654,7 +775,8 @@ def finalize_dataset_with_failed_rows(
             ignore_failed=True,
             duplicate_strategy=str(config.batch_duplicate_strategy or ""),
         )
-        payload = store.record_retrieval(
+        payload = _record_retrieval_with_validation_gate(
+            store,
             run_path,
             payload,
             signature=signature,
@@ -713,6 +835,14 @@ def run_retrieve_direct(
         run_dir,
         duplicate_strategy=str(effective_strategy),
     )
+    model_validation_enabled = bool(
+        overrides.get("model_validation_enabled", False)
+    )
+    if model_validation_enabled and effective_strategy != "first_successful":
+        raise ValueError(
+            "Candidate-aware model validation requires duplicate_strategy="
+            "first_successful so there is exactly one canonical candidate per page."
+        )
     overrides["api_recovery_enabled"] = bool(recover_missing_with_api)
     previous = _apply_runtime_overrides(overrides)
     try:
@@ -745,6 +875,52 @@ def run_retrieve_direct(
         "failed_rows_included": result.failed_rows_included,
         "missing_pages": max(0, result.expected_pages - result.successful_pages),
         "dataset_gcs_uri": result.dataset_gcs_uri,
+        "page_candidates_path": (
+            str(result.page_candidates_path) if result.page_candidates_path else ""
+        ),
+        "page_candidates_gcs_uri": result.page_candidates_gcs_uri,
+        "page_candidates_sha256": str(
+            getattr(result, "page_candidates_sha256", "") or ""
+        ),
+        "page_candidates_gcs_generation": str(
+            getattr(result, "page_candidates_gcs_generation", "") or ""
+        ),
+        "deterministic_routing_path": (
+            str(getattr(result, "deterministic_routing_path", "") or "")
+        ),
+        "deterministic_routing_gcs_uri": str(
+            getattr(result, "deterministic_routing_gcs_uri", "") or ""
+        ),
+        "deterministic_routing_sha256": str(
+            getattr(result, "deterministic_routing_sha256", "") or ""
+        ),
+        "deterministic_routing_gcs_generation": str(
+            getattr(result, "deterministic_routing_gcs_generation", "") or ""
+        ),
+        "subagent_combined_gcs_uri": str(
+            getattr(result, "subagent_combined_gcs_uri", "") or ""
+        ),
+        "subagent_combined_sha256": str(
+            getattr(result, "subagent_combined_sha256", "") or ""
+        ),
+        "subagent_combined_gcs_generation": str(
+            getattr(result, "subagent_combined_gcs_generation", "") or ""
+        ),
+        "subagent_failures_gcs_uri": str(
+            getattr(result, "subagent_failures_gcs_uri", "") or ""
+        ),
+        "subagent_failures_sha256": str(
+            getattr(result, "subagent_failures_sha256", "") or ""
+        ),
+        "subagent_failures_gcs_generation": str(
+            getattr(result, "subagent_failures_gcs_generation", "") or ""
+        ),
+        "deterministic_flagged_pages": int(
+            getattr(result, "deterministic_flagged_pages", 0) or 0
+        ),
+        "deterministic_routine_pages": int(
+            getattr(result, "deterministic_routine_pages", 0) or 0
+        ),
         "submit_failed": bool(submit_failed),
         "ignore_failed": bool(ignore_failed),
     }
@@ -754,12 +930,19 @@ def run_retrieve_direct(
         payload["api_recovered_row_count"] = int(result.recovered_pages or 0)
         payload["api_recovered_rows"] = []
     if record_results and not submit_failed:
-        payload = store.record_retrieval(
-            run_dir,
-            payload,
-            signature=signature,
-            operation="api_recovery" if recover_missing_with_api else "retrieve",
-        )
+        if model_validation_enabled:
+            payload = store.record_candidate_retrieval(
+                run_dir,
+                payload,
+                signature=signature,
+            )
+        else:
+            payload = store.record_retrieval(
+                run_dir,
+                payload,
+                signature=signature,
+                operation="api_recovery" if recover_missing_with_api else "retrieve",
+            )
     if record_results:
         results_path = Path(run_dir).expanduser() / BATCH_RESULTS_FILE
         results_path.write_text(
@@ -871,6 +1054,11 @@ def recover_dataset_gaps(
         get_run_logger,
         load_existing_dataset,
     )
+
+    if _run_has_model_validation_enabled(run_dir):
+        # Full recovery recreates page_candidates.jsonl and its durable cloud
+        # sidecar; the incremental flattened-row path cannot do that safely.
+        return recover_failed_via_api(run_dir, settings)
 
     recorded = read_recorded_results(run_dir)
     dataset_path = find_dataset_near(recorded.get("dataset_path") or "")
@@ -1003,7 +1191,8 @@ def recover_dataset_gaps(
             recover_missing_with_api=True,
             duplicate_strategy=str(config.batch_duplicate_strategy or ""),
         )
-        payload = store.record_retrieval(
+        payload = _record_retrieval_with_validation_gate(
+            store,
             run_path,
             payload,
             signature=signature,
@@ -1244,7 +1433,8 @@ def read_recorded_results(run_dir: str | Path) -> dict:
             or ""
         ),
     )
-    return store.record_retrieval(
+    return _record_retrieval_with_validation_gate(
+        store,
         run_path,
         results,
         signature=signature,
@@ -1287,10 +1477,12 @@ def repair_recorded_results(run_dir: str | Path) -> dict:
         return read_recorded_results(run_path)
     derived = _derived_results_from_artifacts(run_path)
     if derived:
-        derived = JobStore.for_run_dir(run_path).record_retrieval(
+        store = JobStore.for_run_dir(run_path)
+        derived = _record_retrieval_with_validation_gate(
+            store,
             run_path,
             derived,
-            signature=JobStore.for_run_dir(run_path).build_retrieval_signature(
+            signature=store.build_retrieval_signature(
                 run_path,
                 allow_partial=True,
                 duplicate_strategy=str(config.batch_duplicate_strategy or ""),
@@ -1549,8 +1741,61 @@ def command_overrides_for_run(
         schema_version_id=schema_version_id,
         schema_payload=schema_payload,
         duplicate_strategy=duplicate_strategy,
+        ocr_enabled=bool(
+            batch_meta.get(
+                "ocr_enabled",
+                config_values.get("ocr_enabled", settings.ocr_enabled),
+            )
+        ),
         subagents=bool(
             batch_meta.get("subagents", config_values.get("subagents", False))
+        ),
+        model_validation_enabled=bool(
+            batch_meta.get(
+                "model_validation_enabled",
+                config_values.get(
+                    "model_validation_enabled", settings.model_validation_enabled
+                ),
+            )
+        ),
+        verification_model=str(
+            batch_meta.get("verification_model")
+            or config_values.get("verification_model")
+            or settings.verification_model
+        ),
+        verification_thinking_level=str(
+            batch_meta.get("verification_thinking_level")
+            or config_values.get("verification_thinking_level")
+            or settings.verification_thinking_level
+        ),
+        verification_scope=str(
+            batch_meta.get("verification_scope")
+            or config_values.get("verification_scope")
+            or settings.verification_scope
+        ),
+        verification_control_sample_percent=float(
+            batch_meta.get("verification_control_sample_percent")
+            if batch_meta.get("verification_control_sample_percent") is not None
+            else (
+                config_values.get("verification_control_sample_percent")
+                if config_values.get("verification_control_sample_percent") is not None
+                else settings.verification_control_sample_percent
+            )
+        ),
+        verification_apply_mode=str(
+            batch_meta.get("verification_apply_mode")
+            or config_values.get("verification_apply_mode")
+            or settings.verification_apply_mode
+        ),
+        verification_max_output_tokens=int(
+            batch_meta.get("verification_max_output_tokens")
+            or config_values.get("verification_max_output_tokens")
+            or settings.verification_max_output_tokens
+        ),
+        verification_num_chunks=int(
+            batch_meta.get("verification_num_chunks")
+            or config_values.get("verification_num_chunks")
+            or settings.verification_num_chunks
         ),
     )
 
@@ -2089,11 +2334,14 @@ def resolve_batch_run_readiness(
         progress = _batch_model_progress(run_dir)
     except Exception as exc:  # noqa: BLE001
         return BatchRunReadiness(
-            state="succeeded",
+            state="finalizing",
             detail=f"output readiness unavailable: {type(exc).__name__}",
         )
     if progress is None:
-        return BatchRunReadiness(state="succeeded")
+        return BatchRunReadiness(
+            state="finalizing",
+            detail="provider reports success but output readiness is unavailable",
+        )
 
     if (
         progress.processed is not None
@@ -2234,8 +2482,6 @@ def _import_submit_artifacts_into_store(root: Path, store: JobStore) -> int:
         retrieved = bool(results)
         succeeded: int | None = None
         failed: int | None = None
-        recovered = 0
-        failed_included = 0
         status = _run_dir_status(run_dir)
         if retrieved:
             succeeded = int(results.get("successful_pages") or 0)
@@ -2244,8 +2490,6 @@ def _import_submit_artifacts_into_store(root: Path, store: JobStore) -> int:
                 failed = int(results.get("missing_pages") or 0)
             else:
                 failed = max(0, expected - succeeded)
-            recovered = int(results.get("recovered_pages") or 0)
-            failed_included = int(results.get("failed_rows_included") or 0)
             status = "retrieved"
         if retry_count and failed:
             status = "retry_submitted"
@@ -2271,6 +2515,11 @@ def _summary_from_store_record(record: dict) -> JobSummary:
     batches = record.get("batches") if isinstance(record.get("batches"), dict) else {}
     legacy = record.get("legacy") if isinstance(record.get("legacy"), dict) else {}
     schema = record.get("schema") if isinstance(record.get("schema"), dict) else {}
+    model_validation = (
+        record.get("model_validation")
+        if isinstance(record.get("model_validation"), dict)
+        else {}
+    )
     status = str(record.get("status") or "unknown")
     retrieved = status.startswith("retrieved") or bool(record.get("retrieval"))
     image_count = int(input_payload.get("image_count") or 0)
@@ -2283,6 +2532,36 @@ def _summary_from_store_record(record: dict) -> JobSummary:
     failed = int(metrics.get("missing_pages") or 0) if retrieved else None
     recovered = int(metrics.get("recovered_pages") or 0) if retrieved else 0
     failed_included = int(metrics.get("failed_rows_included") or 0) if retrieved else 0
+    run_dir = str(legacy.get("submit_run_dir") or batches.get("source_run_dir") or "")
+    ocr_enabled = True
+    subagents = False
+    model_validation_enabled = False
+    validation_config_values: dict = {}
+    if run_dir:
+        run_path = Path(run_dir).expanduser()
+        batch_meta = _read_json_file(run_path / "batch_job.json")
+        metadata = _read_json_file(run_path / "metadata.json")
+        config_values = metadata.get("config_values")
+        if isinstance(config_values, dict):
+            config_values = config_values.get("config")
+        if not isinstance(config_values, dict):
+            config_values = {}
+        validation_config_values = config_values
+        ocr_enabled = bool(
+            batch_meta.get("ocr_enabled", config_values.get("ocr_enabled", True))
+        )
+        subagents = bool(
+            batch_meta.get("subagents", config_values.get("subagents", False))
+        )
+        model_validation_enabled = bool(
+            batch_meta.get(
+                "model_validation_enabled",
+                config_values.get("model_validation_enabled", False),
+            )
+        )
+    model_validation_enabled = bool(
+        model_validation.get("enabled", model_validation_enabled)
+    )
 
     detail = f"{image_count} image(s)"
     if chunk_count:
@@ -2300,7 +2579,7 @@ def _summary_from_store_record(record: dict) -> JobSummary:
         model=str(record.get("model") or ""),
         schema_name=str(schema.get("name") or ""),
         schema_version_id=str(schema.get("version_id") or ""),
-        run_dir=str(legacy.get("submit_run_dir") or batches.get("source_run_dir") or ""),
+        run_dir=run_dir,
         detail=detail,
         input_location=str(input_payload.get("location") or ""),
         image_count=image_count,
@@ -2310,6 +2589,69 @@ def _summary_from_store_record(record: dict) -> JobSummary:
         failed=failed,
         recovered=recovered,
         failed_included=failed_included,
+        ocr_enabled=ocr_enabled,
+        subagents=subagents,
+        model_validation_enabled=model_validation_enabled,
+        model_validation_status=str(model_validation.get("status") or ""),
+        verification_run_dir=str(
+            model_validation.get("verification_run_dir") or ""
+        ),
+        verification_model=str(
+            model_validation.get("model")
+            or validation_config_values.get("verification_model")
+            or ""
+        ),
+        verification_thinking_level=str(
+            model_validation.get("thinking_level")
+            or validation_config_values.get("verification_thinking_level")
+            or "high"
+        ),
+        verification_scope=str(
+            model_validation.get("scope")
+            or validation_config_values.get("verification_scope")
+            or "flagged"
+        ),
+        verification_control_sample_percent=max(
+            0.0,
+            min(
+                100.0,
+                float(
+                    model_validation.get("control_sample_percent")
+                    if model_validation.get("control_sample_percent") is not None
+                    else (
+                        validation_config_values.get(
+                            "verification_control_sample_percent"
+                        )
+                        if validation_config_values.get(
+                            "verification_control_sample_percent"
+                        )
+                        is not None
+                        else 0.0
+                    )
+                ),
+            ),
+        ),
+        verification_apply_mode=str(
+            model_validation.get("apply_mode")
+            or validation_config_values.get("verification_apply_mode")
+            or "report_only"
+        ),
+        verification_max_output_tokens=max(
+            1,
+            int(
+                model_validation.get("max_output_tokens")
+                or validation_config_values.get("verification_max_output_tokens")
+                or 4096
+            ),
+        ),
+        verification_num_chunks=max(
+            1,
+            int(
+                model_validation.get("num_chunks")
+                or validation_config_values.get("verification_num_chunks")
+                or 1
+            ),
+        ),
     )
 
 

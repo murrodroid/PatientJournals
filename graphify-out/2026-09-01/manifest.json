@@ -1,0 +1,686 @@
+{
+  ".claude/settings.local.json": {
+    "mtime": 1781268304.2711556,
+    "seen": 1787822260.762385,
+    "ast_hash": "f1ddd233430069db2fc4591da345a48a",
+    "semantic_hash": "f1ddd233430069db2fc4591da345a48a"
+  },
+  "pyproject.toml": {
+    "mtime": 1787826936.5337548,
+    "seen": 1787827146.557194,
+    "ast_hash": "1aaf806bba65f23dddb2f9f564562ed1",
+    "semantic_hash": ""
+  },
+  "src/patientjournals/__init__.py": {
+    "mtime": 1777365954.0040283,
+    "seen": 1787822260.762389,
+    "ast_hash": "ef05899d4c6026c02e75ea2afde192b5",
+    "semantic_hash": "ef05899d4c6026c02e75ea2afde192b5"
+  },
+  "src/patientjournals/app/__init__.py": {
+    "mtime": 1780593085.12778,
+    "seen": 1787822260.762389,
+    "ast_hash": "fd1ad60b3500159c4b6529b155051ea1",
+    "semantic_hash": "fd1ad60b3500159c4b6529b155051ea1"
+  },
+  "src/patientjournals/app/access.py": {
+    "mtime": 1785849529.7756748,
+    "seen": 1787822260.76239,
+    "ast_hash": "dc11f46dc123e65a1087d7e2a4158f54",
+    "semantic_hash": "dc11f46dc123e65a1087d7e2a4158f54"
+  },
+  "src/patientjournals/app/catalog.py": {
+    "mtime": 1787839491.287331,
+    "seen": 1787840231.3605618,
+    "ast_hash": "9cbdc748c6c4bd258569536505851325",
+    "semantic_hash": ""
+  },
+  "src/patientjournals/app/dashboard.py": {
+    "mtime": 1786014919.4779785,
+    "seen": 1787822260.76239,
+    "ast_hash": "8eb570c86b7a88ac5dc1916b3a659f34",
+    "semantic_hash": "8eb570c86b7a88ac5dc1916b3a659f34"
+  },
+  "src/patientjournals/app/datasets.py": {
+    "mtime": 1787863696.8148494,
+    "seen": 1787863725.86555,
+    "ast_hash": "f43a223a3c759c1ed112685caf95c424",
+    "semantic_hash": ""
+  },
+  "src/patientjournals/app/image_access.py": {
+    "mtime": 1785850400.848796,
+    "seen": 1787822260.762391,
+    "ast_hash": "056e0c37d63030b246f12c9b48a11d62",
+    "semantic_hash": "056e0c37d63030b246f12c9b48a11d62"
+  },
+  "src/patientjournals/app/job_store.py": {
+    "mtime": 1788175559.6493757,
+    "seen": 1788177591.5469,
+    "ast_hash": "764b0dd29b6b2fdf9e515ab9ffd83c16",
+    "semantic_hash": ""
+  },
+  "src/patientjournals/app/jobs.py": {
+    "mtime": 1788177958.8766758,
+    "seen": 1788177959.3144488,
+    "ast_hash": "7d14866f91987159a9bfdac607b6471e",
+    "semantic_hash": ""
+  },
+  "src/patientjournals/app/models.py": {
+    "mtime": 1788172446.3671854,
+    "seen": 1788173247.431084,
+    "ast_hash": "d64de0b771778148ec1d7b51b0534e9e",
+    "semantic_hash": ""
+  },
+  "src/patientjournals/app/schemas.py": {
+    "mtime": 1785850694.0706325,
+    "seen": 1787822260.762393,
+    "ast_hash": "da701871e6634357c929f4aef03a286b",
+    "semantic_hash": "da701871e6634357c929f4aef03a286b"
+  },
+  "src/patientjournals/app/settings_store.py": {
+    "mtime": 1788172446.429733,
+    "seen": 1788173247.431086,
+    "ast_hash": "66564014edeae5b75e55c62261216b55",
+    "semantic_hash": ""
+  },
+  "src/patientjournals/app/task_runner.py": {
+    "mtime": 1782728008.305347,
+    "seen": 1787822260.7623942,
+    "ast_hash": "42729155f51a85fc9eba6c69149c192e",
+    "semantic_hash": "42729155f51a85fc9eba6c69149c192e"
+  },
+  "src/patientjournals/app/ui.py": {
+    "mtime": 1788177699.308106,
+    "seen": 1788177709.813397,
+    "ast_hash": "ee806203fd6ea3018174fed5d71ca8b6",
+    "semantic_hash": ""
+  },
+  "src/patientjournals/app/web.py": {
+    "mtime": 1788176328.8172529,
+    "seen": 1788177591.546904,
+    "ast_hash": "459d0e4aa08d17e2200efc75f3578cb7",
+    "semantic_hash": ""
+  },
+  "src/patientjournals/app/workflows.py": {
+    "mtime": 1788177699.2463925,
+    "seen": 1788177709.8133981,
+    "ast_hash": "7c2f024bc9e82528197ff53378353f08",
+    "semantic_hash": ""
+  },
+  "src/patientjournals/batch/__init__.py": {
+    "mtime": 1777365954.004312,
+    "seen": 1787822260.762395,
+    "ast_hash": "d23d18646d6241aa7528ee90f35cb2e8",
+    "semantic_hash": "d23d18646d6241aa7528ee90f35cb2e8"
+  },
+  "src/patientjournals/batch/check_models.py": {
+    "mtime": 1777365954.0046508,
+    "seen": 1787822260.7623959,
+    "ast_hash": "e25f222ea14230bf05a27fb38d7bce49",
+    "semantic_hash": "e25f222ea14230bf05a27fb38d7bce49"
+  },
+  "src/patientjournals/batch/client.py": {
+    "mtime": 1780594712.4826765,
+    "seen": 1787822260.7623959,
+    "ast_hash": "565fe6e13bb017a6130f2770b455d07a",
+    "semantic_hash": "565fe6e13bb017a6130f2770b455d07a"
+  },
+  "src/patientjournals/batch/collect_outputs.py": {
+    "mtime": 1787863576.1138394,
+    "seen": 1787863725.865559,
+    "ast_hash": "b0269f73461838a3e10e9eba8b09408c",
+    "semantic_hash": ""
+  },
+  "src/patientjournals/batch/output_records.py": {
+    "mtime": 1787862612.7540083,
+    "seen": 1787863725.86556,
+    "ast_hash": "cb1fd902a4119a40ce3904319831c4f5",
+    "semantic_hash": ""
+  },
+  "src/patientjournals/batch/results.py": {
+    "mtime": 1788177800.3112445,
+    "seen": 1788177862.681825,
+    "ast_hash": "f256ada08771f2b76719b6f6b667a571",
+    "semantic_hash": ""
+  },
+  "src/patientjournals/batch/retrieve.py": {
+    "mtime": 1788177914.8325393,
+    "seen": 1788177959.3144581,
+    "ast_hash": "815fa15d92828a87c2461aaee0b097e9",
+    "semantic_hash": ""
+  },
+  "src/patientjournals/batch/retry.py": {
+    "mtime": 1788176051.3359368,
+    "seen": 1788177591.54691,
+    "ast_hash": "162acf4215a0bce6d09db0101c3c8644",
+    "semantic_hash": ""
+  },
+  "src/patientjournals/batch/service.py": {
+    "mtime": 1782642190.6394017,
+    "seen": 1787822260.762398,
+    "ast_hash": "3fedec6b75bdfadc16a8518c0362829d",
+    "semantic_hash": "3fedec6b75bdfadc16a8518c0362829d"
+  },
+  "src/patientjournals/batch/status.py": {
+    "mtime": 1781265608.4235537,
+    "seen": 1787822260.762399,
+    "ast_hash": "c77cd8d70d634dd874ba952997c91f48",
+    "semantic_hash": "c77cd8d70d634dd874ba952997c91f48"
+  },
+  "src/patientjournals/batch/submit.py": {
+    "mtime": 1788176303.5815117,
+    "seen": 1788177591.546912,
+    "ast_hash": "c30d97b0d3f77f26ca47e25aa4a50406",
+    "semantic_hash": ""
+  },
+  "src/patientjournals/batch/submit_inputs.py": {
+    "mtime": 1781184884.179549,
+    "seen": 1787822260.762399,
+    "ast_hash": "4b56fc9b6cf9cba0230cfa249118a201",
+    "semantic_hash": "4b56fc9b6cf9cba0230cfa249118a201"
+  },
+  "src/patientjournals/batch/submit_requests.py": {
+    "mtime": 1787863606.2442737,
+    "seen": 1787863725.8655648,
+    "ast_hash": "ab617cb85def9f94e1d574485c77cc5c",
+    "semantic_hash": ""
+  },
+  "src/patientjournals/batch/upload.py": {
+    "mtime": 1787827210.530611,
+    "seen": 1787827235.003555,
+    "ast_hash": "4217ebda7089f872aa77bc9f85a8d14c",
+    "semantic_hash": ""
+  },
+  "src/patientjournals/batch/upload_tuning.py": {
+    "mtime": 1777365954.007666,
+    "seen": 1787822260.762401,
+    "ast_hash": "0e25c3ebbcb9bd51c0af997d97593851",
+    "semantic_hash": "0e25c3ebbcb9bd51c0af997d97593851"
+  },
+  "src/patientjournals/config/__init__.py": {
+    "mtime": 1777365954.0079448,
+    "seen": 1787822260.762401,
+    "ast_hash": "66e4250ffcd200524b0d3f6d8cb5738e",
+    "semantic_hash": "66e4250ffcd200524b0d3f6d8cb5738e"
+  },
+  "src/patientjournals/config/models.py": {
+    "mtime": 1787839930.8341362,
+    "seen": 1787840231.3605802,
+    "ast_hash": "492143515e22146e66474d844d0f07bc",
+    "semantic_hash": ""
+  },
+  "src/patientjournals/config/schemas.py": {
+    "mtime": 1788173932.7736394,
+    "seen": 1788177591.5469172,
+    "ast_hash": "ba7969aa1a0ee15fd16cae9f359d090c",
+    "semantic_hash": ""
+  },
+  "src/patientjournals/config/settings.py": {
+    "mtime": 1788174077.3212123,
+    "seen": 1788177591.5469172,
+    "ast_hash": "b353340e6161770324843261b6661381",
+    "semantic_hash": ""
+  },
+  "src/patientjournals/data/__init__.py": {
+    "mtime": 1777366991.2624707,
+    "seen": 1787822260.762402,
+    "ast_hash": "90f96aace203471ea40e71fe64619d6b",
+    "semantic_hash": "90f96aace203471ea40e71fe64619d6b"
+  },
+  "src/patientjournals/data/batch.py": {
+    "mtime": 1777972045.4410462,
+    "seen": 1787822260.762403,
+    "ast_hash": "edf74c76fd2508e5d710bf7867430d7a",
+    "semantic_hash": "edf74c76fd2508e5d710bf7867430d7a"
+  },
+  "src/patientjournals/data/bucket.py": {
+    "mtime": 1780594947.042496,
+    "seen": 1787822260.762403,
+    "ast_hash": "7947a1032a1b914067e77bc6c958cc9a",
+    "semantic_hash": "7947a1032a1b914067e77bc6c958cc9a"
+  },
+  "src/patientjournals/data/inspection.py": {
+    "mtime": 1780580911.6349478,
+    "seen": 1787822260.7624042,
+    "ast_hash": "e624aa9c5a78f71c36dd87ed182dcf3d",
+    "semantic_hash": "e624aa9c5a78f71c36dd87ed182dcf3d"
+  },
+  "src/patientjournals/local/__init__.py": {
+    "mtime": 1777365954.0092542,
+    "seen": 1787822260.7624042,
+    "ast_hash": "1243f6dd573f40207cb7e3505be6fd1e",
+    "semantic_hash": "1243f6dd573f40207cb7e3505be6fd1e"
+  },
+  "src/patientjournals/local/cli.py": {
+    "mtime": 1780594868.3431807,
+    "seen": 1787822260.7624042,
+    "ast_hash": "9040d3886e48d6f6938feb882c1e10ba",
+    "semantic_hash": "9040d3886e48d6f6938feb882c1e10ba"
+  },
+  "src/patientjournals/local/generate.py": {
+    "mtime": 1787829723.6726215,
+    "seen": 1787830117.372457,
+    "ast_hash": "b7946847870b55af8878fdfd201368e4",
+    "semantic_hash": ""
+  },
+  "src/patientjournals/local/model_client.py": {
+    "mtime": 1787829703.0779505,
+    "seen": 1787830117.372458,
+    "ast_hash": "db4248f50bebffc051f56ff2979a95d9",
+    "semantic_hash": ""
+  },
+  "src/patientjournals/local/service.py": {
+    "mtime": 1786014924.9231114,
+    "seen": 1787822260.7624059,
+    "ast_hash": "48afa9572642241c92e1d3f685754d8d",
+    "semantic_hash": "48afa9572642241c92e1d3f685754d8d"
+  },
+  "src/patientjournals/shared/__init__.py": {
+    "mtime": 1777365954.0108335,
+    "seen": 1787822260.7624059,
+    "ast_hash": "a42da2103418c026eb475b733e79c1c5",
+    "semantic_hash": "a42da2103418c026eb475b733e79c1c5"
+  },
+  "src/patientjournals/shared/api_retry.py": {
+    "mtime": 1778577195.6142547,
+    "seen": 1787822260.7624059,
+    "ast_hash": "a4d70077fc7580d95f0f5f0a67c428d2",
+    "semantic_hash": "a4d70077fc7580d95f0f5f0a67c428d2"
+  },
+  "src/patientjournals/shared/dataset_coverage.py": {
+    "mtime": 1780581100.900454,
+    "seen": 1787822260.7624068,
+    "ast_hash": "1e0c8601ad29a29de65694969812db7d",
+    "semantic_hash": "1e0c8601ad29a29de65694969812db7d"
+  },
+  "src/patientjournals/shared/field_classification.py": {
+    "mtime": 1786014922.435324,
+    "seen": 1787822260.7624068,
+    "ast_hash": "fb68dc66dd0f78adb52277b1260db423",
+    "semantic_hash": "fb68dc66dd0f78adb52277b1260db423"
+  },
+  "src/patientjournals/shared/generation_spec.py": {
+    "mtime": 1787829525.3035326,
+    "seen": 1787830117.372461,
+    "ast_hash": "bd6463f7dc0205b994f6d4aba434efc1",
+    "semantic_hash": ""
+  },
+  "src/patientjournals/shared/identity.py": {
+    "mtime": 1780581076.715027,
+    "seen": 1787822260.762408,
+    "ast_hash": "2a1e1a2e03395fb51f6541cb3b14f2e7",
+    "semantic_hash": "2a1e1a2e03395fb51f6541cb3b14f2e7"
+  },
+  "src/patientjournals/shared/local_secrets.py": {
+    "mtime": 1782230567.9420724,
+    "seen": 1787822260.762408,
+    "ast_hash": "2157428bb5729f9b9d8b5c8a1dac1b48",
+    "semantic_hash": "2157428bb5729f9b9d8b5c8a1dac1b48"
+  },
+  "src/patientjournals/shared/output_handler.py": {
+    "mtime": 1787841904.790779,
+    "seen": 1787841963.594329,
+    "ast_hash": "e3b9d1f6a20fa1678f3dd62bb04a3def",
+    "semantic_hash": ""
+  },
+  "src/patientjournals/shared/preprocess.py": {
+    "mtime": 1787826566.5876272,
+    "seen": 1787827146.557225,
+    "ast_hash": "7ea2544b49d8f413bf16fd47652e86da",
+    "semantic_hash": ""
+  },
+  "src/patientjournals/shared/processing_metrics.py": {
+    "mtime": 1786014921.3683827,
+    "seen": 1787822260.762409,
+    "ast_hash": "08f694de5be4f705ee04147940581753",
+    "semantic_hash": "08f694de5be4f705ee04147940581753"
+  },
+  "src/patientjournals/shared/response_parsing.py": {
+    "mtime": 1777384014.3022418,
+    "seen": 1787822260.76241,
+    "ast_hash": "7095c8493e91155525a757ea191e26cc",
+    "semantic_hash": "7095c8493e91155525a757ea191e26cc"
+  },
+  "src/patientjournals/shared/run_layout.py": {
+    "mtime": 1781267669.405204,
+    "seen": 1787822260.76241,
+    "ast_hash": "d9e926a1218326fe74724fadeb04b9bd",
+    "semantic_hash": "d9e926a1218326fe74724fadeb04b9bd"
+  },
+  "src/patientjournals/shared/tools.py": {
+    "mtime": 1785849275.2395191,
+    "seen": 1787822260.762411,
+    "ast_hash": "be91e748070a8517eb92a78dd15e3d12",
+    "semantic_hash": "be91e748070a8517eb92a78dd15e3d12"
+  },
+  "src/patientjournals/tasks.py": {
+    "mtime": 1788172909.0180488,
+    "seen": 1788173247.431116,
+    "ast_hash": "29b2792abde039f087171a1541203cfc",
+    "semantic_hash": ""
+  },
+  "src/patientjournals/validation/__init__.py": {
+    "mtime": 1777365954.01264,
+    "seen": 1787822260.762411,
+    "ast_hash": "cd252d52cce17194991ad81f1a50f99c",
+    "semantic_hash": "cd252d52cce17194991ad81f1a50f99c"
+  },
+  "src/patientjournals/validation/analysis.py": {
+    "mtime": 1777365954.0129607,
+    "seen": 1787822260.762412,
+    "ast_hash": "c9d6e1e4e0e628d74cda6ceaec06db6e",
+    "semantic_hash": "c9d6e1e4e0e628d74cda6ceaec06db6e"
+  },
+  "src/patientjournals/validation/browser.py": {
+    "mtime": 1786014923.1869907,
+    "seen": 1787822260.762412,
+    "ast_hash": "260e1e509bb91fec896a971515caa9bb",
+    "semantic_hash": "260e1e509bb91fec896a971515caa9bb"
+  },
+  "src/patientjournals/validation/cli.py": {
+    "mtime": 1785850958.3452964,
+    "seen": 1787822260.762412,
+    "ast_hash": "85258d12db0b025ce105f39409088f1e",
+    "semantic_hash": "85258d12db0b025ce105f39409088f1e"
+  },
+  "src/patientjournals/validation/sync.py": {
+    "mtime": 1782995847.3540454,
+    "seen": 1787822260.762413,
+    "ast_hash": "9e9aca2f42114f61140fa199e0fb4db7",
+    "semantic_hash": "9e9aca2f42114f61140fa199e0fb4db7"
+  },
+  "tasks.py": {
+    "mtime": 1777366531.3778615,
+    "seen": 1787822260.762413,
+    "ast_hash": "7458f6d773691b9c4715c75a528b9450",
+    "semantic_hash": "7458f6d773691b9c4715c75a528b9450"
+  },
+  "tests/test_app_architecture.py": {
+    "mtime": 1788174579.3609033,
+    "seen": 1788177591.546936,
+    "ast_hash": "7b22bfd769235d1887aa39ec3b65cd83",
+    "semantic_hash": ""
+  },
+  "tests/test_app_workflows.py": {
+    "mtime": 1788177933.9715936,
+    "seen": 1788177959.314484,
+    "ast_hash": "813eaaebdedcca888a7467b313d0f897",
+    "semantic_hash": ""
+  },
+  "tests/test_batch_client.py": {
+    "mtime": 1780594894.9242594,
+    "seen": 1787822260.762414,
+    "ast_hash": "ffdce9f8d485c51b3a68fb7129afb944",
+    "semantic_hash": "ffdce9f8d485c51b3a68fb7129afb944"
+  },
+  "tests/test_batch_output_collection.py": {
+    "mtime": 1787863583.9838543,
+    "seen": 1787863725.865589,
+    "ast_hash": "eb9a34079d9ddad9d4786471c7a2866e",
+    "semantic_hash": ""
+  },
+  "tests/test_batch_retrieve_recovery.py": {
+    "mtime": 1788177592.6570692,
+    "seen": 1788177709.813431,
+    "ast_hash": "a74ab4be371aebb2da722673190858e1",
+    "semantic_hash": ""
+  },
+  "tests/test_batch_service.py": {
+    "mtime": 1782642232.0041828,
+    "seen": 1787822260.7624152,
+    "ast_hash": "839a9786cd59cf3258df703d2123d5f2",
+    "semantic_hash": "839a9786cd59cf3258df703d2123d5f2"
+  },
+  "tests/test_batch_status.py": {
+    "mtime": 1777987617.8593633,
+    "seen": 1787822260.7624161,
+    "ast_hash": "d046b8587bfe62750c0ae9d9ffbe3f7c",
+    "semantic_hash": "d046b8587bfe62750c0ae9d9ffbe3f7c"
+  },
+  "tests/test_batch_submit_inputs.py": {
+    "mtime": 1781185103.3577578,
+    "seen": 1787822260.7624161,
+    "ast_hash": "3d1d767eb95c5cb2ccbf077f5710707b",
+    "semantic_hash": "3d1d767eb95c5cb2ccbf077f5710707b"
+  },
+  "tests/test_config.py": {
+    "mtime": 1782231899.2678504,
+    "seen": 1787822260.7624161,
+    "ast_hash": "c8a3c01fe33f694f40ccdc20eea74380",
+    "semantic_hash": "c8a3c01fe33f694f40ccdc20eea74380"
+  },
+  "tests/test_data_inspection.py": {
+    "mtime": 1777982605.1382372,
+    "seen": 1787822260.7624168,
+    "ast_hash": "3a72faf891aad3429d53ad7895a1227b",
+    "semantic_hash": "3a72faf891aad3429d53ad7895a1227b"
+  },
+  "tests/test_dataset_coverage.py": {
+    "mtime": 1780581044.5844877,
+    "seen": 1787822260.7624168,
+    "ast_hash": "28e7d36d582b9a1e5fba29288fd491f3",
+    "semantic_hash": "28e7d36d582b9a1e5fba29288fd491f3"
+  },
+  "tests/test_output_handler.py": {
+    "mtime": 1780581062.421038,
+    "seen": 1787822260.762418,
+    "ast_hash": "82cbf39c97da04292722431e719f647e",
+    "semantic_hash": "82cbf39c97da04292722431e719f647e"
+  },
+  "tests/test_run_layout.py": {
+    "mtime": 1781267695.2526593,
+    "seen": 1787822260.762418,
+    "ast_hash": "778f4d4d0a3222c3511686527bcda569",
+    "semantic_hash": "778f4d4d0a3222c3511686527bcda569"
+  },
+  "tests/test_schema_management.py": {
+    "mtime": 1788174553.2804275,
+    "seen": 1788177591.546947,
+    "ast_hash": "90f75c57e39def4e17a3dec39d5361c3",
+    "semantic_hash": ""
+  },
+  "tests/test_tasks.py": {
+    "mtime": 1787870240.170868,
+    "seen": 1787871889.20829,
+    "ast_hash": "87fe4f184f70c7616686eed9e86024bd",
+    "semantic_hash": ""
+  },
+  "tests/test_tools.py": {
+    "mtime": 1782642259.2529054,
+    "seen": 1787822260.762419,
+    "ast_hash": "2686cac728b9c89aa51a39d4d3a1414c",
+    "semantic_hash": "2686cac728b9c89aa51a39d4d3a1414c"
+  },
+  "tests/test_validation_sampling.py": {
+    "mtime": 1786014923.1867614,
+    "seen": 1787822260.76242,
+    "ast_hash": "8c972793cd6c936b4ddf4ab14cb2304f",
+    "semantic_hash": "8c972793cd6c936b4ddf4ab14cb2304f"
+  },
+  "README.md": {
+    "mtime": 1787871762.2405477,
+    "seen": 1787871889.2082932,
+    "ast_hash": "efd9c2543b97dd034398564e6c686cf2",
+    "semantic_hash": ""
+  },
+  "environment.yml": {
+    "mtime": 1773744886.3099277,
+    "seen": 1787822260.76242,
+    "ast_hash": "ade7ff8176791114f26f3591c7dc0fad",
+    "semantic_hash": "ade7ff8176791114f26f3591c7dc0fad"
+  },
+  "visualizations/PatientJournals.png": {
+    "mtime": 1769606172.7359557,
+    "seen": 1787822260.762421,
+    "ast_hash": "46f0af1d307bbc60ca4641517cd3cb59",
+    "semantic_hash": "46f0af1d307bbc60ca4641517cd3cb59"
+  },
+  "visualizations/PatientJournals_Schema.png": {
+    "mtime": 1769601605.0090263,
+    "seen": 1787822260.762421,
+    "ast_hash": "d4191fae1d25468762df27ee669d3435",
+    "semantic_hash": "d4191fae1d25468762df27ee669d3435"
+  },
+  ".codex/hooks.json": {
+    "mtime": 1787822297.8952525,
+    "seen": 1787827146.557193,
+    "ast_hash": "29d7d0e34fb287964d67ef8f2cc61c17",
+    "semantic_hash": ""
+  },
+  "src/patientjournals/batch/ocr_context.py": {
+    "mtime": 1787828831.1672695,
+    "seen": 1787828946.429437,
+    "ast_hash": "2e4b6ae5006555a7c12cbbf92e3e1af6",
+    "semantic_hash": ""
+  },
+  "src/patientjournals/shared/ocr.py": {
+    "mtime": 1787830769.984031,
+    "seen": 1787830998.050105,
+    "ast_hash": "96592e4280baece4935cc519c015fa04",
+    "semantic_hash": ""
+  },
+  "tests/test_ocr.py": {
+    "mtime": 1787828862.4403322,
+    "seen": 1787828946.429468,
+    "ast_hash": "c3c03e231f034e45fe5894e5d2c54f00",
+    "semantic_hash": ""
+  },
+  "AGENTS.md": {
+    "mtime": 1788177569.7584374,
+    "seen": 1788177591.5469499,
+    "ast_hash": "1f7bbc0d71625883462e81cbd997d06f",
+    "semantic_hash": ""
+  },
+  "graphify-out/memory/query_20260827_092502_provide_a_clear_path_for_the_implementation_of_the.md": {
+    "mtime": 1787822702.8996449,
+    "seen": 1787827146.5572422,
+    "ast_hash": "fda4e4dac00724ba26011a0817b53171",
+    "semantic_hash": ""
+  },
+  "src/patientjournals/batch/prepare_ocr.py": {
+    "mtime": 1787828806.659758,
+    "seen": 1787828946.4294379,
+    "ast_hash": "5dbbd0e33a4c3a9070f955fbd414f26f",
+    "semantic_hash": ""
+  },
+  "graphify-out/memory/query_20260827_104102_implement_ocr__with_the_goal_of_providing_addition.md": {
+    "mtime": 1787827262.149629,
+    "seen": 1787828259.81729,
+    "ast_hash": "3d2b3a2b5af6846fd5716eaa6c1c2c23",
+    "semantic_hash": ""
+  },
+  "graphify-out/memory/query_20260827_105830_implement_the_ocr_method_to_work_with_batch_jobs_b.md": {
+    "mtime": 1787828310.9384234,
+    "seen": 1787828946.429475,
+    "ast_hash": "03b43ca23e9498b360801074316aa304",
+    "semantic_hash": ""
+  },
+  "src/patientjournals/batch/subagent_outputs.py": {
+    "mtime": 1788177450.1041808,
+    "seen": 1788177591.546911,
+    "ast_hash": "58725dc9ee71c4fa6abf5f3706633e5a",
+    "semantic_hash": ""
+  },
+  "src/patientjournals/shared/subagents.py": {
+    "mtime": 1787830764.5356703,
+    "seen": 1787830998.050108,
+    "ast_hash": "2e851a850683c73a755ad7eaae361b98",
+    "semantic_hash": ""
+  },
+  "tests/test_subagents.py": {
+    "mtime": 1788177612.2949464,
+    "seen": 1788177709.813439,
+    "ast_hash": "36d58621489f4774031876eca328ac46",
+    "semantic_hash": ""
+  },
+  "graphify-out/memory/query_20260827_110937_is_ocr_done_linearly__and_why_not_parallelize_all.md": {
+    "mtime": 1787828977.2168097,
+    "seen": 1787830117.372483,
+    "ast_hash": "b67f2e230043379aa02aaf4d62b9c245",
+    "semantic_hash": ""
+  },
+  "src/patientjournals/config/prompts.py": {
+    "mtime": 1787866595.7480497,
+    "seen": 1787867468.0646641,
+    "ast_hash": "36696176b06ad727edf30617592672ab",
+    "semantic_hash": ""
+  },
+  "tests/test_prompts.py": {
+    "mtime": 1787830933.548395,
+    "seen": 1787830998.0501199,
+    "ast_hash": "6764b94ad8efbce319cdb2e7b1a46f44",
+    "semantic_hash": ""
+  },
+  "src/patientjournals/validation/candidates.py": {
+    "mtime": 1788177634.6064577,
+    "seen": 1788177709.8134248,
+    "ast_hash": "9327f38d39c7fd765401e2731f3f8ae2",
+    "semantic_hash": ""
+  },
+  "src/patientjournals/validation/input_manifest.py": {
+    "mtime": 1788173166.5936518,
+    "seen": 1788173247.4311192,
+    "ast_hash": "73bdd88639b7e474a15624c52bb208c5",
+    "semantic_hash": ""
+  },
+  "tests/test_model_validation_job_store.py": {
+    "mtime": 1788174832.5457933,
+    "seen": 1788177591.546944,
+    "ast_hash": "e234cf6e9129b983f0c5f9958df2977f",
+    "semantic_hash": ""
+  },
+  "src/patientjournals/batch/verify.py": {
+    "mtime": 1788177618.3544102,
+    "seen": 1788177709.813408,
+    "ast_hash": "a9f831a07278202200d45a2508e27f9c",
+    "semantic_hash": ""
+  },
+  "tests/test_batch_verify.py": {
+    "mtime": 1788177756.8337736,
+    "seen": 1788177862.681855,
+    "ast_hash": "6692a3d801e065c151eb54c8a9021812",
+    "semantic_hash": ""
+  },
+  "src/patientjournals/validation/publication.py": {
+    "mtime": 1787871536.6699111,
+    "seen": 1787871889.208278,
+    "ast_hash": "045895ca75f0d82be2693095c69fb3b3",
+    "semantic_hash": ""
+  },
+  "tests/test_extraction_image_bindings.py": {
+    "mtime": 1787866840.702554,
+    "seen": 1787867468.0646899,
+    "ast_hash": "628c69f708a7c1bf3b807c903b2331a1",
+    "semantic_hash": ""
+  },
+  "tests/test_validation_publication.py": {
+    "mtime": 1787871523.2001204,
+    "seen": 1787871889.208291,
+    "ast_hash": "585f2445ac62040e18831f6c467a1930",
+    "semantic_hash": ""
+  },
+  "PIPELINE.md": {
+    "mtime": 1788177569.8190064,
+    "seen": 1788177591.5469499,
+    "ast_hash": "f924e3da2c43ec62067c47a35aee2366",
+    "semantic_hash": ""
+  },
+  "src/patientjournals/validation/routing.py": {
+    "mtime": 1788174077.21306,
+    "seen": 1788177591.5469341,
+    "ast_hash": "a4bd5fae6f500bcba9d98ea1a60e0a4b",
+    "semantic_hash": ""
+  },
+  "tests/test_app_verification_controls.py": {
+    "mtime": 1788177802.4506724,
+    "seen": 1788177862.681851,
+    "ast_hash": "04c8dd2cf851327a457561a7c44a27c5",
+    "semantic_hash": ""
+  },
+  "tests/test_deterministic_routing.py": {
+    "mtime": 1788173489.84145,
+    "seen": 1788177591.546943,
+    "ast_hash": "acb1672a6d104393e548febdf049729d",
+    "semantic_hash": ""
+  }
+}

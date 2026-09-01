@@ -7,7 +7,7 @@ import mimetypes
 import re
 from datetime import timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from google.cloud import storage
 from tqdm import tqdm
@@ -27,6 +27,7 @@ from patientjournals.shared.subagents import (
     schema_specialists,
     specialist_prompt,
 )
+from patientjournals.validation.input_manifest import ExtractionImageBinding
 
 
 _ANTHROPIC_CUSTOM_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
@@ -143,11 +144,12 @@ def _build_request_line(
     prompt_override: str | None = None,
     schema_payload: object | None = None,
     ocr_context: object = _OCR_CONTEXT_UNSET,
+    media_uri_override: str | None = None,
 ) -> dict:
     mime_type = _guess_mime_type(blob)
     media_part = {
         "fileData": {
-            "fileUri": f"gs://{bucket_name}/{blob.name}",
+            "fileUri": media_uri_override or f"gs://{bucket_name}/{blob.name}",
             "mimeType": mime_type,
         }
     }
@@ -186,9 +188,19 @@ def _build_request_lines(
     *,
     for_vertex: bool,
     specialists: tuple[SchemaSpecialist, ...] | None = None,
+    image_binding: ExtractionImageBinding | None = None,
 ) -> list[dict]:
     if not bool(config.subagents):
-        return [_build_request_line(blob, bucket_name, for_vertex=for_vertex)]
+        return [
+            _build_request_line(
+                blob,
+                bucket_name,
+                for_vertex=for_vertex,
+                media_uri_override=(
+                    image_binding.request_uri if image_binding is not None else None
+                ),
+            )
+        ]
 
     specialists = specialists or schema_specialists(config.output_schema)
     ocr_context = ocr_context_for_blob(blob)
@@ -205,6 +217,9 @@ def _build_request_lines(
             ),
             schema_payload=specialist.schema,
             ocr_context=ocr_context,
+            media_uri_override=(
+                image_binding.request_uri if image_binding is not None else None
+            ),
         )
         for specialist in specialists
     ]
@@ -214,34 +229,42 @@ def _build_anthropic_manifest_line(
     blob: storage.Blob,
     *,
     request_key: str | None = None,
-) -> dict[str, str]:
+    image_binding: ExtractionImageBinding | None = None,
+) -> dict[str, object]:
     key = request_key or blob.name
-    return {
+    row: dict[str, object] = {
         "key": key,
         "mime_type": _guess_mime_type(blob),
         "custom_id": _anthropic_custom_id_for_key(key),
     }
+    if image_binding is not None:
+        row["image_source"] = image_binding.request_source.to_dict()
+    return row
 
 
 def _build_anthropic_manifest_lines(
     blob: storage.Blob,
     *,
     specialists: tuple[SchemaSpecialist, ...] | None = None,
-) -> list[dict[str, str]]:
+    image_binding: ExtractionImageBinding | None = None,
+) -> list[dict[str, object]]:
     if not bool(config.subagents):
-        return [_build_anthropic_manifest_line(blob)]
+        return [
+            _build_anthropic_manifest_line(blob, image_binding=image_binding)
+        ]
     specialists = specialists or schema_specialists(config.output_schema)
     return [
         _build_anthropic_manifest_line(
             blob,
             request_key=encode_specialist_request_key(blob.name, specialist.name),
+            image_binding=image_binding,
         )
-        for specialist in schema_specialists(config.output_schema)
+        for specialist in specialists
     ]
 
 
-def _iter_anthropic_manifest_entries(path: Path) -> list[dict[str, str]]:
-    entries: list[dict[str, str]] = []
+def _iter_anthropic_manifest_entries(path: Path) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
     with open(path, "r", encoding="utf-8") as handle:
         for line_number, line in enumerate(handle, start=1):
             raw = line.strip()
@@ -281,6 +304,11 @@ def _iter_anthropic_manifest_entries(path: Path) -> list[dict[str, str]]:
                     "key": key,
                     "mime_type": mime_type.strip(),
                     "custom_id": custom_id,
+                    "image_source": (
+                        payload.get("image_source")
+                        if isinstance(payload.get("image_source"), dict)
+                        else None
+                    ),
                 }
             )
     return entries
@@ -350,12 +378,33 @@ def _build_anthropic_batch_requests(
                 f"{custom_id}"
             )
         seen_custom_ids.add(custom_id)
-        image_blob = bucket.blob(page_key)
-        signed_url = image_blob.generate_signed_url(
-            version="v4",
-            method="GET",
-            expiration=expiration,
-        )
+        image_source = row.get("image_source")
+        if isinstance(image_source, dict):
+            source_name = str(image_source.get("name") or "")
+            if source_name != page_key:
+                raise ValueError(
+                    "Anthropic manifest image binding does not match its page key: "
+                    f"{source_name!r} != {page_key!r}."
+                )
+            generation = int(str(image_source.get("generation") or "0"))
+            if generation <= 0:
+                raise ValueError(
+                    f"Anthropic manifest has no image generation for {page_key!r}."
+                )
+            image_blob = bucket.blob(page_key, generation=generation)
+            signed_url = image_blob.generate_signed_url(
+                version="v4",
+                method="GET",
+                expiration=expiration,
+                query_parameters={"generation": str(generation)},
+            )
+        else:
+            image_blob = bucket.blob(page_key)
+            signed_url = image_blob.generate_signed_url(
+                version="v4",
+                method="GET",
+                expiration=expiration,
+            )
         if page_key not in ocr_context_by_page:
             ocr_context_by_page[page_key] = ocr_context_for_blob(image_blob)
         if specialist is None:
@@ -445,6 +494,7 @@ def _write_requests_file(
     *,
     for_vertex: bool,
     provider: str,
+    image_bindings: Mapping[str, ExtractionImageBinding] | None = None,
 ) -> tuple[int, int]:
     max_bytes = int(config.batch_input_max_bytes or 0)
     total_bytes = 0
@@ -453,9 +503,20 @@ def _write_requests_file(
 
     with open(output_path, "w", encoding="utf-8") as handle:
         for blob in tqdm(blobs, desc="Building batch JSONL", unit="img"):
+            image_binding = (
+                image_bindings.get(blob.name) if image_bindings is not None else None
+            )
+            if bool(config.model_validation_enabled) and image_binding is None:
+                raise RuntimeError(
+                    f"Missing exact extraction image binding for {blob.name!r}."
+                )
             if provider == "anthropic":
                 line_objects: list[dict[str, object]] = list(
-                    _build_anthropic_manifest_lines(blob, specialists=specialists)
+                    _build_anthropic_manifest_lines(
+                        blob,
+                        specialists=specialists,
+                        image_binding=image_binding,
+                    )
                 )
             else:
                 line_objects = _build_request_lines(
@@ -463,6 +524,7 @@ def _write_requests_file(
                     bucket_name,
                     for_vertex=for_vertex,
                     specialists=specialists,
+                    image_binding=image_binding,
                 )
             for line_obj in line_objects:
                 line = json.dumps(line_obj, ensure_ascii=False)

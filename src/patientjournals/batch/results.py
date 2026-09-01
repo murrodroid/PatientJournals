@@ -31,6 +31,22 @@ class RetrieveBatchResult:
     expected_pages: int
     observed_pages: int
     successful_pages: int
+    page_candidates_path: Path | None = None
+    page_candidates_gcs_uri: str = ""
+    page_candidates_sha256: str = ""
+    page_candidates_gcs_generation: str = ""
+    deterministic_routing_path: Path | None = None
+    deterministic_routing_gcs_uri: str = ""
+    deterministic_routing_sha256: str = ""
+    deterministic_routing_gcs_generation: str = ""
+    subagent_combined_gcs_uri: str = ""
+    subagent_combined_sha256: str = ""
+    subagent_combined_gcs_generation: str = ""
+    subagent_failures_gcs_uri: str = ""
+    subagent_failures_sha256: str = ""
+    subagent_failures_gcs_generation: str = ""
+    deterministic_flagged_pages: int = 0
+    deterministic_routine_pages: int = 0
     duplicate_rows_skipped: int = 0
     recovered_pages: int = 0
     failed_rows_included: int = 0
