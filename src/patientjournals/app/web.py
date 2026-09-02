@@ -63,6 +63,34 @@ APP_HTML = """<!doctype html>
     .inline-control select, .inline-control input { width:auto; }
     .option-group { border:1px solid var(--line); background:white; padding:12px; margin:12px 0; }
     .option-group h3 { margin:0 0 8px; font-size:15px; }
+    .setup-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; margin:18px 0; }
+    .setup-card { border:1px solid var(--line); background:var(--soft); padding:18px; }
+    .setup-card h2 { margin:0 0 4px; font-size:19px; }
+    .setup-card > .small-note { margin-bottom:14px; }
+    .setting-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:16px; align-items:center; border-top:1px solid var(--line); padding:13px 0; }
+    .setting-row:first-of-type { border-top:0; }
+    .setting-row label { margin:0 0 3px; }
+    .toggle-input { position:absolute; opacity:0; pointer-events:none; }
+    .toggle-btn { display:inline-flex; align-items:center; justify-content:space-between; gap:9px; min-width:94px; min-height:42px; padding:7px 9px 7px 12px; border:1px solid var(--line); background:white; color:var(--muted); font-weight:800; cursor:pointer; }
+    .toggle-btn .toggle-track { position:relative; width:34px; height:20px; border-radius:12px; background:#C9D4D7; transition:background .15s ease; }
+    .toggle-btn .toggle-track::after { content:""; position:absolute; width:14px; height:14px; left:3px; top:3px; border-radius:50%; background:white; transition:transform .15s ease; }
+    .toggle-btn.active { border-color:var(--accent); color:var(--ink); }
+    .toggle-btn.active .toggle-track { background:var(--accent); }
+    .toggle-btn.active .toggle-track::after { transform:translateX(14px); }
+    .toggle-btn:disabled { opacity:.45; cursor:not-allowed; }
+    .dependent-disabled { opacity:.5; }
+    .pipeline-summary { border-left:4px solid var(--accent); background:white; padding:11px 12px; margin:12px 0 0; }
+    .page-selection-card { margin:18px 0; }
+    .boundary-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+    .segmented-control { display:inline-flex; border:1px solid var(--line); background:white; }
+    .segmented-control button { min-height:42px; border:0; border-right:1px solid var(--line); padding:9px 15px; background:white; color:var(--muted); font-weight:800; cursor:pointer; }
+    .segmented-control button:last-child { border-right:0; }
+    .segmented-control button.active { background:var(--accent); color:var(--ink); }
+    .segmented-control button:disabled { opacity:.45; cursor:not-allowed; }
+    .selection-counts { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin-top:14px; }
+    .selection-count { border:1px solid var(--line); background:white; padding:12px; }
+    .selection-count strong { display:block; font-size:23px; }
+    [hidden] { display:none !important; }
     .notice { border:1px solid var(--line); background:var(--soft); padding:12px; margin:12px 0; }
     .pill { display:inline-flex; align-items:center; border:1px solid var(--line); background:var(--soft); padding:4px 8px; margin-right:6px; font-size:12px; font-weight:800; }
     .race { display:grid; gap:12px; }
@@ -137,7 +165,7 @@ APP_HTML = """<!doctype html>
     .diff-added { background:#ECFDF3; }
     .diff-removed { background:#FFEBE9; }
     .diff-changed { background:#FFF8C5; }
-    @media (max-width: 900px) { .app { grid-template-columns:1fr; } aside { position:static; } .grid,.split,.validator,.schema-layout { grid-template-columns:1fr; } .schema-field { grid-template-columns:64px minmax(0,1fr) 44px; } .schema-field > .schema-change-label { grid-column:1; grid-row:1; } .schema-field > input { grid-column:2 / -1; grid-row:1; min-width:0; } .schema-field > select { grid-column:2; grid-row:2; min-width:0; } .schema-field > .inline-control { grid-column:2; grid-row:3; } .schema-field > .star-btn { grid-column:3; grid-row:2; } .schema-field textarea { grid-column:2 / -1; grid-row:4; } }
+    @media (max-width: 900px) { .app { grid-template-columns:1fr; } aside { position:static; } .grid,.split,.validator,.schema-layout,.setup-grid,.boundary-grid,.selection-counts { grid-template-columns:1fr; } .schema-field { grid-template-columns:64px minmax(0,1fr) 44px; } .schema-field > .schema-change-label { grid-column:1; grid-row:1; } .schema-field > input { grid-column:2 / -1; grid-row:1; min-width:0; } .schema-field > select { grid-column:2; grid-row:2; min-width:0; } .schema-field > .inline-control { grid-column:2; grid-row:3; } .schema-field > .star-btn { grid-column:3; grid-row:2; } .schema-field textarea { grid-column:2 / -1; grid-row:4; } }
   </style>
 </head>
 <body>
@@ -185,7 +213,8 @@ const state = {
   datasetInspect: null,
   validationModels: [],
   validationDefaults: {},
-  optionalDefaults: {}
+  optionalDefaults: {},
+  submissionPopulation: null
 };
 const $ = (sel) => document.querySelector(sel);
 const VERIFICATION_THINKING_LEVELS = ['low', 'medium', 'high'];
@@ -210,9 +239,28 @@ function setVerificationThinking(id, level) {
   if (control) control.value = String(verificationThinkingIndex(level));
   updateVerificationThinking(id);
 }
-function verificationThinkingSlider(id, level='high') {
+function verificationThinkingSlider(id, level='high', label='Thinking level') {
   const index = verificationThinkingIndex(level);
-  return `<div class="thinking-slider"><input id="${id}" type="range" min="0" max="2" step="1" value="${index}" oninput="updateVerificationThinking('${id}')" aria-label="Verifier thinking level"><div class="thinking-scale-labels"><span>Low</span><span>Medium</span><span>Maximum (default)</span></div><div id="${id}Value" class="thinking-current">${verificationThinkingLabel(VERIFICATION_THINKING_LEVELS[index])}</div></div>`;
+  return `<div class="thinking-slider"><input id="${id}" type="range" min="0" max="2" step="1" value="${index}" oninput="updateVerificationThinking('${id}')" aria-label="${esc(label)}"><div class="thinking-scale-labels"><span>Low</span><span>Medium</span><span>Maximum (default)</span></div><div id="${id}Value" class="thinking-current">${verificationThinkingLabel(VERIFICATION_THINKING_LEVELS[index])}</div></div>`;
+}
+function onOffControl(id, enabled, onChange='') {
+  return `<input class="toggle-input" id="${id}" type="checkbox" ${enabled ? 'checked' : ''} onchange="syncOnOff('${id}');${onChange}"><button id="${id}Button" class="toggle-btn" type="button" aria-pressed="${enabled ? 'true' : 'false'}" onclick="toggleOnOff('${id}')"><span class="toggle-value">${enabled ? 'On' : 'Off'}</span><span class="toggle-track" aria-hidden="true"></span></button>`;
+}
+function syncOnOff(id) {
+  const input = $('#' + id);
+  const button = $('#' + id + 'Button');
+  if (!input || !button) return;
+  button.classList.toggle('active', Boolean(input.checked));
+  button.disabled = Boolean(input.disabled);
+  button.setAttribute('aria-pressed', input.checked ? 'true' : 'false');
+  const value = button.querySelector('.toggle-value');
+  if (value) value.textContent = input.checked ? 'On' : 'Off';
+}
+function toggleOnOff(id) {
+  const input = $('#' + id);
+  if (!input || input.disabled) return;
+  input.checked = !input.checked;
+  input.dispatchEvent(new Event('change'));
 }
 function verificationScopeOptions(selected='flagged') {
   return `<option value="flagged" ${selected === 'flagged' ? 'selected' : ''}>Risk-routed + control sample</option><option value="all" ${selected === 'all' ? 'selected' : ''}>All pages</option>`;
@@ -1122,36 +1170,71 @@ async function combineSelectedDatasets() {
 }
 
 async function submit() {
-  $('#main').innerHTML = `<h1>Submit</h1><div class="sub">Start a local API or cloud batch run from selectable inputs.</div><div id="status" class="status">Loading choices...</div><div id="submitBody"></div>`;
+  $('#main').innerHTML = `<h1>Submit</h1><div class="sub">Configure a cloud batch run for the page population.</div><div id="status" class="status">Loading choices...</div><div id="submitBody"></div>`;
   try {
-    const [opts, localInputs] = await Promise.all([api('/api/options'), api('/api/local-inputs').catch(() => [])]);
+    const opts = await api('/api/options');
     state.validationModels = opts.validation_models || [];
     state.validationDefaults = opts.validation_defaults || {};
     state.optionalDefaults = opts.optional_defaults || {};
-    state.localInputs = localInputs || [];
-    if (!state.selectedLocalPath && state.localInputs.length) state.selectedLocalPath = state.localInputs[0].path;
+    state.submissionPopulation = {
+      source: 'cloud',
+      cloud_prefixes: [opts.default_cloud_prefix || ''].filter(Boolean),
+      selection_count: null
+    };
     $('#submitBody').innerHTML = `<section class="panel">
-      <label>Source</label><select id="source" onchange="renderInputChoices()"><option value="local">Local</option><option value="cloud">Cloud</option></select>
-      <label>Run mode</label><select id="mode" onchange="updateModelValidationControls()"><option value="local_api">Local API</option><option value="cloud_batch">Cloud batch</option></select>
-      <div id="inputChoices"></div>
-      <div class="toolbar"><button class="btn secondary" onclick="previewSubmission()">Preview random pages</button></div><div id="submitPreview"></div>
-      <label>Schema version</label><select id="schema">${(opts.schemas || []).map(s=>`<option value="${esc(s.version_id)}" data-name="${esc(s.name)}" ${s.is_active ? 'selected' : ''}>${esc(s.name)} v${esc(s.version_number)}${s.is_active ? ' - Active' : ''}</option>`).join('')}</select>
-      <label>Model</label><select id="model">${(opts.models || []).map(m=>`<option ${m.name === opts.default_model ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select>
+      <section class="setup-card page-selection-card" aria-labelledby="pageSelectionHeading">
+        <h2 id="pageSelectionHeading">Page population</h2>
+        <div class="small-note">The current range includes all images under the configured cloud pages prefix. Date boundaries will activate when the masterlist is connected.</div>
+        <label>Page range</label><select id="pageRangeMode" disabled><option selected>All images</option></select>
+        <div class="boundary-grid">
+          <div><label>From year</label><input id="rangeStartYear" inputmode="numeric" placeholder="Earliest" disabled></div>
+          <div><label>To year</label><input id="rangeEndYear" inputmode="numeric" placeholder="Latest" disabled></div>
+        </div>
+        <div class="small-note">Masterlist status: not connected. No date filter is applied.</div>
+        <label>Submission Type</label>
+        <input id="submissionType" type="hidden" value="complete">
+        <div class="segmented-control" role="group" aria-label="Submission Type">
+          <button id="submissionTypeCompleteButton" class="active" type="button" aria-pressed="true" onclick="setSubmissionType('complete')">Complete</button>
+          <button id="submissionTypeSampleButton" type="button" aria-pressed="false" onclick="setSubmissionType('sample')">Sample</button>
+        </div>
+        <div id="sampleSettings" class="boundary-grid" hidden>
+          <div><label>Sample seed</label><input id="sampleSeed" value="42" oninput="updatePageSelectionSummary()"></div>
+          <div><label>Sample size (% of selected images)</label><input id="samplePercent" type="number" min="0.1" max="100" step="0.1" value="10" oninput="updatePageSelectionSummary()"></div>
+        </div>
+        <div class="selection-counts">
+          <div class="selection-count"><strong id="rangeImageCount">0</strong><span>Images in current range</span></div>
+          <div class="selection-count"><strong id="submissionImageCount">0</strong><span>Pages in this submission</span></div>
+        </div>
+        <div id="selectionCountNote" class="small-note"></div>
+        <div class="toolbar"><button class="btn secondary" onclick="previewSubmission()">Preview random pages</button><button class="btn secondary" onclick="loadSubmissionPopulation()">Refresh page count</button></div>
+        <div id="submitPreview"></div>
+      </section>
+      <div class="setup-grid">
+        <section class="setup-card" aria-labelledby="generalSetupHeading">
+          <h2 id="generalSetupHeading">General setup</h2>
+          <div class="small-note">Define the page extraction structure and optional evidence stages.</div>
+          <label>Schema Version</label><select id="schema">${(opts.schemas || []).map(s=>`<option value="${esc(s.version_id)}" data-name="${esc(s.name)}" ${s.is_active ? 'selected' : ''}>${esc(s.name)} v${esc(s.version_number)}${s.is_active ? ' - Active' : ''}</option>`).join('')}</select>
+          <label>Job type</label><select id="jobType" onchange="updateSubmissionSummary()"><option value="single" ${state.optionalDefaults.subagents ? '' : 'selected'}>Single</option><option value="subagentic" ${state.optionalDefaults.subagents ? 'selected' : ''}>Subagentic</option></select>
+          <div class="small-note">Single sends the full schema once per page. Subagentic sends parallel top-level field specialists, then joins and validates their complete page.</div>
+          <div class="setting-row"><div><label>Validation</label><div class="small-note">Route selected complete pages to the final-authority model.</div></div>${onOffControl('modelValidationEnabled', Boolean(state.optionalDefaults.model_validation_enabled), 'updateModelValidationControls()')}</div>
+          <div class="setting-row"><div><label>OCR</label><div class="small-note">Add generation-bound positional text prepared for the exact image bytes.</div></div>${onOffControl('ocrUsage', Boolean(state.optionalDefaults.ocr_enabled), 'updateSubmissionSummary()')}</div>
+          <div id="pipelineSummary" class="pipeline-summary"></div>
+        </section>
+        <section class="setup-card" aria-labelledby="modelSetupHeading">
+          <h2 id="modelSetupHeading">Model setup</h2>
+          <div class="small-note">Configure extraction and final validation independently.</div>
+          <label>Main Model</label><select id="mainModel">${(opts.models || []).map(m=>`<option ${m.name === opts.default_model ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select>
+          <label>Main Model thinking</label>${verificationThinkingSlider('mainThinking', state.optionalDefaults.thinking_level || 'high', 'Main model thinking level')}
+          <div id="validationModelSettings" class="validation-model-settings">
+            <label>Validation Model</label><select id="verificationModel">${state.validationModels.map(m=>`<option value="${esc(m.name)}" ${m.name === state.validationDefaults.verification_model ? 'selected' : ''}>${esc(m.name)} (${esc(m.provider)})</option>`).join('')}</select>
+            <label>Validation Model thinking</label>${verificationThinkingSlider('verificationThinking', state.validationDefaults.verification_thinking_level || 'high', 'Validation model thinking level')}
+          </div>
+        </section>
+      </div>
       <details><summary>Advanced</summary>
         <label>Batch chunks</label><input id="chunks" type="number" min="1" placeholder="optional">
-        <div class="option-group"><h3>OCR context</h3>
-          <label class="inline-control"><input id="ocrUsage" type="checkbox" ${state.optionalDefaults.ocr_enabled ? 'checked' : ''}> Include positional OCR</label>
-          <div class="small-note">Adds generation-bound text and coordinates to extraction prompts. Cloud jobs require prepared OCR sidecars only when this is enabled.</div>
-        </div>
-        <div class="option-group"><h3>Schema specialists</h3>
-          <label class="inline-control"><input id="subagentUsage" type="checkbox" ${state.optionalDefaults.subagents ? 'checked' : ''}> Use schema subagents</label>
-          <div class="small-note">Runs one parallel request per top-level schema field, then joins and validates the page before dataset insertion.</div>
-        </div>
-        <div class="option-group"><h3>Second-pass verification</h3>
-          <label class="inline-control"><input id="modelValidationEnabled" type="checkbox" ${state.optionalDefaults.model_validation_enabled ? 'checked' : ''} onchange="updateModelValidationControls()"> Enable model verification</label>
-          <div class="small-note">Cloud batch only. The verifier checks the exact image and candidate, optionally using OCR when OCR context is enabled.</div>
-          <label>Verifier model</label><select id="verificationModel">${state.validationModels.map(m=>`<option value="${esc(m.name)}" ${m.name === state.validationDefaults.verification_model ? 'selected' : ''}>${esc(m.name)} (${esc(m.provider)})</option>`).join('')}</select>
-          <label>Verifier thinking</label>${verificationThinkingSlider('verificationThinking', state.validationDefaults.verification_thinking_level || 'high')}
+        <div id="validationPolicySettings" class="option-group"><h3>Validation policy</h3>
+          <div class="small-note">Cloud batch only. The final model checks the exact image and candidate, optionally using OCR when OCR is enabled.</div>
           <label>Verification scope</label><select id="verificationScope">${verificationScopeOptions(state.validationDefaults.verification_scope || 'flagged')}</select>
           <label>Routine-page control sample (%)</label><input id="verificationControlSample" type="number" min="0" max="100" step="0.1" value="${esc(state.validationDefaults.verification_control_sample_percent ?? 2)}">
           <div class="small-note">Risk-routed mode verifies all flagged pages plus this deterministic sample of routine pages. All-pages mode ignores the sample.</div>
@@ -1163,29 +1246,70 @@ async function submit() {
       </details>
       <div class="toolbar"><button class="btn" onclick="submitRun()">Submit</button><button class="btn secondary" onclick="submit()">Refresh choices</button></div>
     </section>`;
-    renderInputChoices();
+    setVerificationThinking('mainThinking', state.optionalDefaults.thinking_level || 'high');
     setVerificationThinking('verificationThinking', state.validationDefaults.verification_thinking_level || 'high');
+    syncOnOff('ocrUsage');
+    syncOnOff('modelValidationEnabled');
+    setSubmissionType('complete');
     updateModelValidationControls();
-    setStatus('Choices loaded.');
+    setStatus('Configuration loaded. Counting the cloud page population...');
+    await loadSubmissionPopulation();
   } catch (e) { setStatus(e.message, true); }
 }
-function renderInputChoices() {
-  const source = $('#source')?.value || 'local';
-  const mode = $('#mode');
-  if (mode) {
-    const localOption = [...mode.options].find(option => option.value === 'local_api');
-    if (localOption) localOption.disabled = source === 'cloud';
-    if (source === 'cloud') mode.value = 'cloud_batch';
+async function loadSubmissionPopulation() {
+  try {
+    const population = await api('/api/submit/population');
+    state.submissionPopulation = population;
+    updatePageSelectionSummary();
+    setStatus(`Cloud page population ready: ${Number(population.selection_count || 0).toLocaleString()} image(s).`);
+  } catch (e) {
+    updatePageSelectionSummary();
+    setStatus(`Could not count the cloud page population: ${e.message}`, true);
   }
-  updateModelValidationControls();
-  if (source === 'cloud') {
-    if (!state.cloudInputs.length) return loadCloudInputs();
-    return renderCloudInputs();
+}
+function selectedSubmissionImageCount() {
+  const count = state.submissionPopulation?.selection_count;
+  if (count === null || count === undefined || count === '') return null;
+  return Number.isFinite(Number(count)) ? Number(count) : null;
+}
+function setSubmissionType(value) {
+  const normalized = value === 'sample' ? 'sample' : 'complete';
+  const sampleButton = $('#submissionTypeSampleButton');
+  if (normalized === 'sample' && sampleButton?.disabled) return;
+  const input = $('#submissionType');
+  if (input) input.value = normalized;
+  ['complete', 'sample'].forEach(choice => {
+    const button = $('#submissionType' + choice.charAt(0).toUpperCase() + choice.slice(1) + 'Button');
+    const active = choice === normalized;
+    button?.classList.toggle('active', active);
+    button?.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+  const settings = $('#sampleSettings');
+  if (settings) settings.hidden = normalized !== 'sample';
+  updatePageSelectionSummary();
+}
+function updatePageSelectionSummary() {
+  const rangeCount = selectedSubmissionImageCount();
+  const rangeOutput = $('#rangeImageCount');
+  const submissionOutput = $('#submissionImageCount');
+  const note = $('#selectionCountNote');
+  if (rangeCount === null) {
+    if (rangeOutput) rangeOutput.textContent = 'Unknown';
+    if (submissionOutput) submissionOutput.textContent = 'Unknown';
+    if (note) note.textContent = 'Refresh the configured cloud population to resolve its exact image count.';
+    return;
   }
-  return renderLocalInputs();
+  const sample = ($('#submissionType')?.value || 'complete') === 'sample';
+  const percent = Number($('#samplePercent')?.value || 0);
+  const submitCount = sample && percent > 0
+    ? Math.min(rangeCount, Math.max(rangeCount ? 1 : 0, Math.ceil(rangeCount * percent / 100)))
+    : rangeCount;
+  if (rangeOutput) rangeOutput.textContent = rangeCount.toLocaleString();
+  if (submissionOutput) submissionOutput.textContent = Number.isFinite(submitCount) ? submitCount.toLocaleString() : '—';
+  if (note) note.textContent = 'The count covers the configured cloud pages prefix and removes duplicate image names. The immutable request population is recorded at submission.';
 }
 function updateModelValidationControls() {
-  const batchMode = ($('#mode')?.value || 'local_api') === 'cloud_batch';
+  const batchMode = true;
   const enabledControl = $('#modelValidationEnabled');
   if (enabledControl) enabledControl.disabled = !batchMode;
   const enabled = batchMode && Boolean(enabledControl?.checked);
@@ -1193,100 +1317,58 @@ function updateModelValidationControls() {
     const control = $('#' + id);
     if (control) control.disabled = !enabled;
   });
-}
-function renderLocalInputs() {
-  const rows = state.localInputs.map((item, i) => {
-    const checked = state.selectedLocalPath === item.path ? 'checked' : '';
-    return `<tr class="clickable ${checked ? 'selected' : ''}" onclick="selectLocalInput(${i})">
-      <td class="select-cell"><input type="radio" name="localInput" ${checked} onclick="event.stopPropagation(); selectLocalInput(${i})"></td>
-      <td>${esc(item.name)}</td><td>${esc(item.image_count)}</td><td>${esc(item.updated_at)}</td><td>${esc(item.path)}</td>
-    </tr>`;
-  }).join('');
-  $('#inputChoices').innerHTML = `<label>Local folder</label>${rawTable(['<th class="select-cell"></th>','<th>Name</th>','<th>Images</th>','<th>Updated</th>','<th>Path</th>'], rows)}
-    <details><summary>Advanced</summary><label>Custom local folder</label><input id="customLocal" placeholder="Only use if the folder is not listed"></details>`;
-}
-function selectLocalInput(index) {
-  const item = state.localInputs[index];
-  if (item) state.selectedLocalPath = item.path;
-  renderLocalInputs();
-}
-async function loadCloudInputs() {
-  setStatus('Loading cloud folders...');
-  try {
-    state.cloudInputs = await api('/api/cloud-inputs');
-    state.selectedCloudPrefixes = new Set([...state.selectedCloudPrefixes].filter(prefix => state.cloudInputs.some(c => c.prefix === prefix)));
-    renderCloudInputs();
-    setStatus(`Loaded ${state.cloudInputs.length} cloud folder(s).`);
-  } catch (e) { setStatus(e.message, true); }
-}
-function renderCloudInputs() {
-  if (!state.cloudInputs.length) {
-    $('#inputChoices').innerHTML = `<label>Cloud folders</label><div class="toolbar"><button class="btn secondary" onclick="loadCloudInputs()">Load cloud folders</button></div><div class="muted">Load the bucket choices, then select one or more folders.</div>
-      <details><summary>Advanced</summary><label>Custom cloud prefix</label><input id="customCloud" placeholder="Only use if the folder is not listed"></details>`;
-    return;
+  $('#validationModelSettings')?.classList.toggle('dependent-disabled', !enabled);
+  $('#validationPolicySettings')?.classList.toggle('dependent-disabled', !enabled);
+  const sampleButton = $('#submissionTypeSampleButton');
+  if (sampleButton) sampleButton.disabled = !batchMode;
+  if (!batchMode && ($('#submissionType')?.value || 'complete') === 'sample') {
+    setSubmissionType('complete');
   }
-  const allChecked = state.cloudInputs.length > 0 && state.cloudInputs.every(c => state.selectedCloudPrefixes.has(c.prefix));
-  const rows = state.cloudInputs.map((item, i) => {
-    const checked = state.selectedCloudPrefixes.has(item.prefix) ? 'checked' : '';
-    return `<tr class="clickable ${checked ? 'selected' : ''}" onclick="toggleCloudInput(${i})">
-      <td class="select-cell"><input type="checkbox" ${checked} onclick="event.stopPropagation(); toggleCloudInput(${i}, this.checked)"></td>
-      <td>${esc(item.prefix)}</td><td>${esc(item.image_count)}</td><td>${esc(item.updated_at)}</td>
-    </tr>`;
-  }).join('');
-  $('#inputChoices').innerHTML = `<label>Cloud folders</label>${rawTable([`<th class="select-cell"><input type="checkbox" ${allChecked ? 'checked' : ''} onchange="toggleAllCloudInputs(this.checked)"></th>`, '<th>Prefix</th>', '<th>Images</th>', '<th>Updated</th>'], rows)}
-    <details><summary>Advanced</summary><label>Custom cloud prefix</label><input id="customCloud" placeholder="Only use if the folder is not listed"></details>`;
+  syncOnOff('modelValidationEnabled');
+  syncOnOff('ocrUsage');
+  updateSubmissionSummary();
 }
-function toggleCloudInput(index, checked=null) {
-  const item = state.cloudInputs[index];
-  if (!item) return;
-  const next = checked === null ? !state.selectedCloudPrefixes.has(item.prefix) : checked;
-  if (next) state.selectedCloudPrefixes.add(item.prefix); else state.selectedCloudPrefixes.delete(item.prefix);
-  renderCloudInputs();
-  setStatus(`${state.selectedCloudPrefixes.size} cloud folder(s) selected.`);
-}
-function toggleAllCloudInputs(checked) {
-  state.selectedCloudPrefixes = checked ? new Set(state.cloudInputs.map(c => c.prefix)) : new Set();
-  renderCloudInputs();
-  setStatus(`${state.selectedCloudPrefixes.size} cloud folder(s) selected.`);
-}
-function selectedSubmissionInput() {
-  const source = $('#source')?.value || 'local';
-  let localPath = '';
-  let cloudPrefixes = [];
-  if (source === 'local') {
-    localPath = state.selectedLocalPath || ($('#customLocal')?.value || '').trim();
-  } else {
-    cloudPrefixes = [...state.selectedCloudPrefixes];
-    const custom = ($('#customCloud')?.value || '').trim();
-    if (!cloudPrefixes.length && custom) cloudPrefixes = [custom];
-  }
-  return {source, localPath, cloudPrefixes};
+function updateSubmissionSummary() {
+  const subagentic = ($('#jobType')?.value || 'single') === 'subagentic';
+  const validating = Boolean($('#modelValidationEnabled')?.checked);
+  const ocr = Boolean($('#ocrUsage')?.checked);
+  const stages = [
+    subagentic ? 'parallel schema specialists + deterministic join' : 'single full-schema extraction',
+    'deterministic checks',
+    ...(validating ? ['final-model validation and correction'] : [])
+  ];
+  const summary = $('#pipelineSummary');
+  if (summary) summary.innerHTML = `<strong>Selected flow</strong><div>${esc(stages.join(' → '))}${ocr ? ' · positional OCR context enabled' : ''}</div>`;
 }
 async function previewSubmission() {
-  const selection = selectedSubmissionInput();
-  if (selection.source === 'local' && !selection.localPath) return setStatus('Select a local folder.', true);
-  if (selection.source === 'cloud' && !selection.cloudPrefixes.length) return setStatus('Select one or more cloud folders.', true);
+  const cloudPrefixes = state.submissionPopulation?.cloud_prefixes || [];
+  if (!cloudPrefixes.length) return setStatus('Configure a cloud pages prefix in Cloud settings.', true);
   const preview = $('#submitPreview');
   if (preview) preview.innerHTML = '<div class="muted">Drawing a random sample...</div>';
   try {
     const result = await api('/api/submit/preview', {method:'POST', body:JSON.stringify({
-      dataset_source: selection.source,
-      local_path: selection.localPath,
-      cloud_prefixes: selection.cloudPrefixes,
+      dataset_source: 'cloud',
+      local_path: '',
+      cloud_prefixes: cloudPrefixes,
       sample_size: 6
     }), headers:{'Content-Type':'application/json'}});
-    if (preview) preview.innerHTML = `<div class="notice"><strong>${esc(result.selection_count)} selected image(s)</strong><div class="muted">Random sample from the exact folders currently selected.</div></div><div class="preview-grid">${(result.samples || []).map(item => `<div class="preview-item"><img src="${esc(item.url)}" alt="${esc(item.image_name)}"><strong>${esc(item.image_name)}</strong><div class="muted mono">${esc(shortText(item.location, 55))}</div></div>`).join('')}</div>`;
+    state.submissionPopulation = {...state.submissionPopulation, selection_count: result.selection_count};
+    updatePageSelectionSummary();
+    if (preview) preview.innerHTML = `<div class="notice"><strong>${esc(result.selection_count)} selected image(s)</strong><div class="muted">Random sample from the configured cloud page population.</div></div><div class="preview-grid">${(result.samples || []).map(item => `<div class="preview-item"><img src="${esc(item.url)}" alt="${esc(item.image_name)}"><strong>${esc(item.image_name)}</strong><div class="muted mono">${esc(shortText(item.location, 55))}</div></div>`).join('')}</div>`;
     setStatus(`Previewed ${(result.samples || []).length} of ${result.selection_count} selected image(s).`);
   } catch (e) { if (preview) preview.innerHTML = ''; setStatus(e.message, true); }
 }
 async function submitRun() {
-  const selection = selectedSubmissionInput();
-  const source = selection.source;
-  const mode = $('#mode').value;
-  const localPath = selection.localPath;
-  const cloudPrefixes = selection.cloudPrefixes;
-  if (source === 'local' && !localPath) return setStatus('Select a local folder.', true);
-  if (source === 'cloud' && !cloudPrefixes.length) return setStatus('Select one or more cloud folders.', true);
+  const source = 'cloud';
+  const mode = 'cloud_batch';
+  const localPath = '';
+  const cloudPrefixes = state.submissionPopulation?.cloud_prefixes || [];
+  if (!cloudPrefixes.length) return setStatus('Configure a cloud pages prefix in Cloud settings.', true);
+  const submissionType = $('#submissionType')?.value || 'complete';
+  const samplePercent = Number($('#samplePercent')?.value || 0);
+  const sampleSeed = ($('#sampleSeed')?.value || '').trim();
+  if (submissionType === 'sample' && (!(samplePercent > 0) || samplePercent > 100)) return setStatus('Sample size must be greater than 0% and at most 100%.', true);
+  if (submissionType === 'sample' && !sampleSeed) return setStatus('Enter a sample seed.', true);
   const schemaSelect = $('#schema');
   const schemaOption = schemaSelect?.selectedOptions?.[0];
   const body = {
@@ -1297,12 +1379,16 @@ async function submitRun() {
     cloud_prefixes: cloudPrefixes,
     schema_name: schemaOption?.dataset?.name || '',
     schema_version_id: schemaSelect?.value || '',
-    model_name: $('#model').value,
+    model_name: $('#mainModel').value,
+    thinking_level: verificationThinkingLevel('mainThinking'),
     output_format: 'jsonl',
     num_batches: $('#chunks')?.value ? Number($('#chunks').value) : null,
+    submission_type: submissionType,
+    sample_percent: submissionType === 'sample' ? samplePercent : null,
+    sample_seed: submissionType === 'sample' ? sampleSeed : '',
     ocr_enabled: Boolean($('#ocrUsage')?.checked),
-    subagents: Boolean($('#subagentUsage')?.checked),
-    model_validation_enabled: mode === 'cloud_batch' && Boolean($('#modelValidationEnabled')?.checked),
+    subagents: ($('#jobType')?.value || 'single') === 'subagentic',
+    model_validation_enabled: Boolean($('#modelValidationEnabled')?.checked),
     verification_model: $('#verificationModel')?.value || state.validationDefaults.verification_model || 'gemini-3.1-pro-preview',
     verification_thinking_level: verificationThinkingLevel('verificationThinking'),
     verification_scope: $('#verificationScope')?.value || state.validationDefaults.verification_scope || 'flagged',
@@ -1345,6 +1431,9 @@ async function cloud() {
           <label><input id="cloudUploadValidations" type="checkbox" ${settings.upload_validation_to_gcs ? 'checked' : ''}> Upload validations to shared bucket</label>
         </details>
         <details><summary>Optional pipeline defaults</summary>
+          <div class="option-group"><h3>Main model</h3>
+            <label>Thinking</label>${verificationThinkingSlider('cloudMainThinking', settings.thinking_level || 'high', 'Default main model thinking level')}
+          </div>
           <div class="option-group"><h3>OCR context</h3>
             <label class="inline-control"><input id="cloudOcrEnabled" type="checkbox" ${settings.ocr_enabled ? 'checked' : ''}> Enable for new jobs</label>
           </div>
@@ -1378,6 +1467,7 @@ async function cloud() {
       </section>
     </div>`;
     $('#cloudAuthMode').value = settings.auth_mode || 'adc';
+    setVerificationThinking('cloudMainThinking', settings.thinking_level || 'high');
     setVerificationThinking('cloudVerificationThinking', settings.verification_thinking_level || 'high');
     setStatus('Cloud settings loaded.');
   } catch (e) { setStatus(e.message, true); }
@@ -1397,6 +1487,7 @@ function cloudPayload() {
     validations_gcs_prefix: $('#cloudValidationsPrefix')?.value || '',
     schemas_gcs_prefix: $('#cloudSchemasPrefix')?.value || '',
     upload_validation_to_gcs: $('#cloudUploadValidations')?.checked ?? true,
+    thinking_level: verificationThinkingLevel('cloudMainThinking'),
     ocr_enabled: $('#cloudOcrEnabled')?.checked ?? true,
     subagents: $('#cloudSubagents')?.checked ?? false,
     model_validation_enabled: $('#cloudModelValidationEnabled')?.checked ?? false,
@@ -1525,8 +1616,10 @@ class AppHandler(BaseHTTPRequestHandler):
                         ],
                         "models": serializable(list_google_model_options()),
                         "default_model": str(config.model or ""),
+                        "default_cloud_prefix": self.service.settings.gcs_pages_prefix,
                         "validation_models": serializable(list_batch_model_options()),
                         "optional_defaults": {
+                            "thinking_level": self.service.settings.thinking_level,
                             "ocr_enabled": self.service.settings.ocr_enabled,
                             "subagents": self.service.settings.subagents,
                             "model_validation_enabled": (
@@ -1565,6 +1658,8 @@ class AppHandler(BaseHTTPRequestHandler):
                 self._send_json(self.service.local_input_choices())
             elif parsed.path == "/api/cloud-inputs":
                 self._send_json(self.service.cloud_input_choices())
+            elif parsed.path == "/api/submit/population":
+                self._send_json(self.service.submission_population())
             elif parsed.path == "/api/dashboard":
                 self._send_json(self.service.dashboard())
             elif parsed.path == "/api/dataset/analyze":
@@ -1627,6 +1722,10 @@ class AppHandler(BaseHTTPRequestHandler):
                     run_mode=payload.get("run_mode", "local_api"),
                     schema_name=str(payload.get("schema_name") or ""),
                     model_name=str(payload.get("model_name") or ""),
+                    thinking_level=str(
+                        payload.get("thinking_level")
+                        or self.service.settings.thinking_level
+                    ),
                     schema_version_id=str(payload.get("schema_version_id") or ""),
                     output_format=str(payload.get("output_format") or "jsonl"),
                     local_path=str(payload.get("local_path") or ""),
@@ -1636,6 +1735,13 @@ class AppHandler(BaseHTTPRequestHandler):
                     num_batches=int(num_batches)
                     if num_batches not in {None, ""}
                     else None,
+                    submission_type=str(payload.get("submission_type") or "complete"),
+                    sample_percent=(
+                        float(payload["sample_percent"])
+                        if payload.get("sample_percent") is not None
+                        else None
+                    ),
+                    sample_seed=str(payload.get("sample_seed") or ""),
                     ocr_enabled=bool(
                         payload.get("ocr_enabled", self.service.settings.ocr_enabled)
                     ),
@@ -1679,7 +1785,12 @@ class AppHandler(BaseHTTPRequestHandler):
                         ),
                     ),
                 )
-                self._task("submit", lambda: self.service.submit_batch(draft), payload)
+                task_kind = "ocr_then_submit" if draft.ocr_enabled else "submit"
+                self._task(
+                    task_kind,
+                    lambda: self.service.submit_batch(draft),
+                    payload,
+                )
             elif parsed.path == "/api/cloud/settings":
                 self._send_json(self.service.save_cloud_settings(payload))
             elif parsed.path == "/api/cloud/check":

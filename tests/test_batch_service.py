@@ -1,4 +1,5 @@
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -16,12 +17,66 @@ def test_batch_submit_request_namespace() -> None:
         num_batches=3,
         continue_dataset="newest",
         downscale=0.5,
+        sample_seed="experiment-7",
     ).to_namespace()
 
     assert namespace.num_batches == 3
     assert namespace.continue_dataset == "newest"
     assert namespace.downscale == 0.5
+    assert namespace.sample_seed == "experiment-7"
     assert namespace.rerun is False
+
+
+def test_input_sample_is_exact_deterministic_and_order_independent() -> None:
+    blobs = [SimpleNamespace(name=f"pages/{index:03d}.png") for index in range(21)]
+
+    selected = submit._sample_blobs_deterministically(
+        blobs,
+        downscale=0.1,
+        seed="cohort-a",
+    )
+    reversed_selected = submit._sample_blobs_deterministically(
+        list(reversed(blobs)),
+        downscale=0.1,
+        seed="cohort-a",
+    )
+
+    assert len(selected) == 3
+    assert [blob.name for blob in selected] == [
+        blob.name for blob in reversed_selected
+    ]
+    assert [blob.name for blob in selected] == sorted(blob.name for blob in selected)
+
+
+def test_input_sample_seed_changes_the_selected_cohort() -> None:
+    blobs = [SimpleNamespace(name=f"pages/{index:03d}.png") for index in range(100)]
+
+    first = submit._sample_blobs_deterministically(
+        blobs, downscale=0.1, seed="cohort-a"
+    )
+    second = submit._sample_blobs_deterministically(
+        blobs, downscale=0.1, seed="cohort-b"
+    )
+
+    assert {blob.name for blob in first} != {blob.name for blob in second}
+
+
+def test_complete_submission_ignores_stale_sample_values(monkeypatch) -> None:
+    monkeypatch.setattr(config, "batch_submission_type", "complete")
+    monkeypatch.setattr(config, "batch_sample_percent", 10.0)
+
+    request = BatchSubmitRequest()
+
+    assert submit._resolve_downscale(request.to_namespace()) is None
+
+
+def test_sample_submission_resolves_configured_percentage(monkeypatch) -> None:
+    monkeypatch.setattr(config, "batch_submission_type", "sample")
+    monkeypatch.setattr(config, "batch_sample_percent", 12.5)
+
+    request = BatchSubmitRequest(sample_seed="experiment-7")
+
+    assert submit._resolve_downscale(request.to_namespace()) == 0.125
 
 
 def test_batch_retrieve_request_namespace() -> None:

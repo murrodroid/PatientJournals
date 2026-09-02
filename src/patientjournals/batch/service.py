@@ -11,10 +11,11 @@ from patientjournals.batch.collect_outputs import collect_outputs
 from patientjournals.batch.results import CollectOutputsResult, RetrieveBatchResult
 from patientjournals.batch.retrieve import retrieve_batch
 from patientjournals.batch.submit import (
-    _downscale_blobs_randomly,
     _filter_blobs_missing_from_dataset,
     _resolve_downscale,
     _resolve_num_batches,
+    _resolve_sample_seed,
+    _sample_blobs_deterministically,
     _split_blobs_evenly,
 )
 from patientjournals.batch.submit_inputs import _list_input_blobs
@@ -29,6 +30,7 @@ class BatchSubmitRequest:
     run_dir: str | None = None
     continue_dataset: str | None = None
     downscale: float | None = None
+    sample_seed: str | None = None
 
     def to_namespace(self) -> argparse.Namespace:
         return argparse.Namespace(
@@ -37,6 +39,7 @@ class BatchSubmitRequest:
             run_dir=self.run_dir,
             continue_dataset=self.continue_dataset,
             downscale=self.downscale,
+            sample_seed=self.sample_seed,
         )
 
 
@@ -72,6 +75,14 @@ class BatchSubmitService:
         dataset_rows = 0
         continue_dataset_path: Path | None = None
 
+        downscale = _resolve_downscale(request.to_namespace())
+        if downscale is not None:
+            blobs = _sample_blobs_deterministically(
+                blobs,
+                downscale=downscale,
+                seed=_resolve_sample_seed(request.to_namespace()),
+            )
+
         if request.continue_dataset:
             continue_dataset_path = resolve_continue_dataset_path(
                 request.continue_dataset,
@@ -84,10 +95,6 @@ class BatchSubmitService:
                 bucket_name=config.gcs_bucket_name,
                 log=self.log,
             )
-
-        downscale = _resolve_downscale(request.to_namespace())
-        if downscale is not None:
-            blobs = _downscale_blobs_randomly(blobs, downscale=downscale)
 
         num_batches = _resolve_num_batches(request.to_namespace())
         chunks = _split_blobs_evenly(blobs, num_batches)

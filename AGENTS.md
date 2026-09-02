@@ -3,7 +3,9 @@
 Cloud batch jobs are the primary production path for this project. Design and implement features against the batch workflow first:
 
 1. `uv run invoke batch.upload`
-2. When `ocr_enabled=True`, `uv run invoke batch.ocr`
+2. When `ocr_enabled=True`, optionally prepare the full population eagerly with
+   `uv run invoke batch.ocr`; `batch.submit` must automatically prepare any
+   missing or stale OCR sidecars in its exact selected cohort before submission
 3. `uv run invoke batch.submit`
 4. `uv run invoke batch.status --watch`
 5. `uv run invoke batch.retrieve --wait`
@@ -15,17 +17,25 @@ Cloud batch jobs are the primary production path for this project. Design and im
 
 Rules:
 - A feature is not complete if it only works through `patientjournals.local`. Local generation is a secondary development and recovery path.
-- Durable preprocessing output needed by a batch request must live in cloud storage. Batch request construction should retrieve prepared artifacts; it must not perform expensive preprocessing, OCR, or full image downloads.
+- Durable preprocessing output needed by a batch request must live in cloud
+  storage. The automatic OCR preflight is an orchestration stage before request
+  construction: it may fetch exact selected image generations only for missing
+  or stale sidecars, must persist the resulting sidecars and run-scoped
+  preflight manifest in cloud storage, and must complete before provider request
+  files are built.
 - Treat OCR, schema-specialist subagents, and second-pass model verification as
   independent per-job options. The app must expose all three during submission,
   persist their defaults separately, and snapshot the selected values in the
   job's immutable run metadata. Do not infer that enabling one enables another.
-- When `ocr_enabled=True`, OCR must be prepared before submission with
-  `batch.ocr`. Sidecars must be bound to the exact GCS object generation, and
-  missing or stale metadata must block batch submission by default. When it is
-  false, submission must not require an OCR sidecar.
+- When `ocr_enabled=True`, submission must resolve its final cohort first and
+  automatically prepare missing or stale OCR metadata for exactly those pages.
+  Valid cached sidecars must be reused, sidecars must be bound to the exact GCS
+  object generation, and required-sidecar failures must block extraction before
+  any provider batch is submitted. `batch.ocr` remains the eager bulk-preparation
+  command. When OCR is false, submission must not require or prepare a sidecar.
 - Cloud preprocessing should use bounded provider-native batches and parallelism rather than one remote call per input. Keep batch sizes and concurrency configurable so production runs can stay within provider quotas.
-- New operational commands and tests should preserve the sequence upload -> cloud preprocessing -> submit -> retrieve.
+- New operational commands and tests should preserve the sequence upload ->
+  cloud preprocessing/preflight -> submit -> retrieve.
 - `model_validation_enabled=False` must preserve the original extraction and
   dataset-publication path. When it is enabled, extraction retrieval must not
   create `v001` or place a candidate in the canonical cloud dataset library.

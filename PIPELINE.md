@@ -23,7 +23,8 @@ Tags used throughout:
 ```text
 [REQUIRED] upload final processed page bytes to GCS
     |
-    +-- [OPTIONAL: ocr_enabled] prepare generation-bound OCR sidecars
+    +-- [OPTIONAL: ocr_enabled] prepare/reuse generation-bound OCR sidecars
+    |       [FIXED POLICY] batch submission fills missing/stale selected pages
     |
 [REQUIRED] submit first-pass extraction batch
     |
@@ -88,7 +89,10 @@ Important selections and transformations are:
 | `[OPTIONAL: batch_year_filter]` | empty | Select years using `batch_date_mapping_file`. |
 | `[OPTIONAL: batch_date_mapping_file]` | `date_mapping.csv` | Map page identities to years for `batch_year_filter`. |
 | `[OPTIONAL: continue_dataset]` | empty | Skip `image_name` values already represented in a prior dataset. |
-| `[OPTIONAL: downscale]` | empty | Randomly sample a fraction at CLI submission. This is exploratory only: no seed is currently persisted. |
+| `[OPTIONAL: batch_submission_type]` | `complete` | Choose every page in the resolved range (`complete`) or a deterministic experimental subset (`sample`). |
+| `[OPTIONAL: batch_sample_percent]` | none (Complete) | Submit an exact deterministic percentage of the selected range. Positive percentages use `ceil(range_count × percent / 100)` with a minimum of one page. |
+| `[OPTIONAL: batch_sample_seed]` | `42` | Select the reproducible sample cohort; changing the seed changes the cohort. |
+| `[OPTIONAL: batch.submit --downscale]` | empty | CLI fraction alias for `batch_sample_percent`; `--sample-seed` supplies the same recorded seed. |
 | `[OPTIONAL: image_settings.max_dim]` | `3000` | Bound the longest processed-image dimension. |
 | `[OPTIONAL: image_settings.margins]` | left `150`, others `0` | Crop pixel margins before serialization. |
 | `[OPTIONAL: image_settings.contrast_factor]` | `1.1` | Adjust contrast before serialization. |
@@ -96,8 +100,20 @@ Important selections and transformations are:
 | `[OPTIONAL: pdf_render_dpi]` | `300` | Set PDF rasterization resolution. |
 | `[OPTIONAL: page_number_digits]` | `4` | Set deterministic rendered-page numbering width. |
 
-`[ARTIFACT]` Duplicate-object JSONL/CSV records and the image processing
-manifest preserve excluded objects and preprocessing outcomes.
+`[FIXED POLICY]` Until the masterlist is connected, the range resolver is
+`all_images`; the visible year-boundary controls are inactive and do not alter
+the population. Sampling ranks the selected GCS object names by SHA-256 of the
+recorded seed and object name, takes the exact target count, and only then
+applies continuation-dataset coverage. It is independent of provider listing
+order.
+
+`[ARTIFACT]` `input_selection.json` records range mode, whether the masterlist
+was applied, range and sampled/submitted counts, seed, percentage, algorithm
+version, continuation coverage, and separate range/cohort/submission
+object-name digests. It is
+uploaded with the batch request artifacts and bound into `batch_job.json`.
+Duplicate-object JSONL/CSV records and the image processing manifest preserve
+excluded objects and preprocessing outcomes.
 
 ## 2. Positional OCR
 
@@ -115,6 +131,20 @@ x1,y1,x2,y2|text
 
 This minimizes input tokens while retaining page position. Prompts identify OCR
 as fallible context; the image remains primary evidence.
+
+`[FIXED POLICY]` A submission resolves its exact page cohort after range
+selection, deterministic sampling, and continuation filtering. It then checks
+that cohort for generation-matched OCR sidecars. Valid sidecars are reused;
+missing, invalid, or stale sidecars are prepared in bounded parallel Vision
+batches. This automatic preflight finishes before request JSONL construction or
+any extraction-provider batch submission. Running `batch.ocr` beforehand is an
+eager throughput optimization, not a correctness prerequisite.
+
+`[GATE]` When `[OPTIONAL: batch_ocr_metadata_required]` is on—or model validation
+is enabled because its evidence binding requires exact OCR—any automatic OCR
+failure stops the workflow and no extraction batch is submitted. With both
+policies off, failures are retained in metadata and affected pages proceed
+without OCR context.
 
 Each sidecar is bound to the exact source bucket, object name, GCS generation,
 size, checksums, ETag, decoded dimensions, image SHA-256, OCR backend, and OCR
@@ -139,7 +169,11 @@ matches.
 
 `[ARTIFACT]` `<image-name>.ocr.json` and
 `batch/ocr/metadata_manifest.json` make OCR reusable by later batch workers
-without local downloads or repeated OCR calls.
+without repeated OCR calls. Each submission with OCR enabled also writes
+`ocr_preflight.json` beside its batch request artifacts. It records the frozen
+cohort digest, per-page cached/prepared/failed state, exact source identity, and
+the provider-manifest reference; `batch_job.json` carries only its compact
+summary and artifact binding.
 
 ## 3. First-pass extraction batch
 
@@ -185,6 +219,37 @@ URL.
 | `[OPERATIONAL: batch_num_chunks / num_batches]` | `1` | Split requests into provider jobs. |
 | `[OPERATIONAL: batch_input_max_bytes]` | unlimited (`0`) | Reject an oversized request artifact when nonzero. |
 | `[OPERATIONAL: anthropic_signed_url_ttl_hours]` | `48` | Set signed-image URL lifetime for Anthropic batches. |
+
+### Submission interface mapping
+
+The application groups cloud-batch choices by scientific role. `[FIXED POLICY]`
+Application submissions use `dataset_source=cloud`, `run_mode=cloud_batch`, and
+the configured `gcs_pages_prefix`; the deprecated local/cloud source and folder
+selectors are not part of submission. Local generation remains a secondary CLI
+development and recovery path. **Page population** shows the deduplicated cloud
+population count, the resolved range, `[OPTIONAL: batch_sample_percent]`, its
+seed, and the resulting submission page count; Complete means every page in the
+resolved range. `[DERIVED]` The displayed population count is resolved directly
+from the configured cloud prefix and deduplicated by `image_name`, rather than
+summed from a folder catalog. The masterlist boundary skeleton currently remains
+fixed to all images. **General setup** contains the schema version,
+`[OPTIONAL: subagents]`
+as the explicit Single/Subagentic job type,
+`[OPTIONAL: model_validation_enabled]`, and `[OPTIONAL: ocr_enabled]`. **Model
+setup** contains the first-pass model with `[OPTIONAL: thinking_level]` and the
+validation model with
+`[OPTIONAL: verification_thinking_level]`. These choices are independent and
+are snapshotted per job; choosing Subagentic changes only `subagents` and does
+not select a different model or add a merge-model wave. The interface displays
+the resulting stage sequence before submission.
+
+Throughput controls and detailed validation routing remain under Advanced:
+`[OPERATIONAL: batch_num_chunks / num_batches]`,
+`[OPTIONAL: verification_scope]`,
+`[OPTIONAL: verification_control_sample_percent]`,
+`[OPTIONAL: verification_max_output_tokens]`, and
+`[OPERATIONAL: verification_num_chunks]`. `[GATE]` Validation-model and policy
+controls are inactive unless model validation is enabled for a cloud batch.
 
 Prompt ownership is intentional: non-schema model prose lives in
 `src/patientjournals/config/prompts.py`; field-level schema descriptions remain
@@ -619,7 +684,7 @@ credential secrets are not.
 
 ```bash
 uv run invoke batch.upload
-uv run invoke batch.ocr                         # only if ocr_enabled=true
+uv run invoke batch.ocr                         # optional eager population preparation
 uv run invoke batch.submit
 uv run invoke batch.status --watch
 uv run invoke batch.retrieve --wait
@@ -632,8 +697,9 @@ uv run invoke batch.verify --retrieve --run-dir runs/verifications/<run> --wait
 
 The application submits/retrieves the same extraction and verification jobs and
 stores the three independent stage choices—OCR, schema specialists, and final
-model validation—with each job. It currently preflights prepared OCR sidecars
-but does not run `batch.ocr`; cloud OCR preparation remains a separate command.
+model validation—with each job. With OCR enabled, its background task is shown
+as `ocr_then_submit`: the same core submission path prepares missing/stale
+sidecars for the selected pages and starts extraction only after the OCR gate.
 Persistent app settings only provide defaults. The extraction snapshot is
 authoritative for first-pass semantics and deterministic routing; when a second
 model wave is submitted, its immutable final-validation policy is authoritative

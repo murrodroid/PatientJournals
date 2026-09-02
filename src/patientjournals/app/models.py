@@ -12,6 +12,7 @@ AuthMode = Literal["service_account", "adc", "api_key"]
 DatasetSource = Literal["local", "cloud"]
 RunMode = Literal["local_api", "cloud_batch"]
 OutputFormat = Literal["jsonl", "csv"]
+SubmissionType = Literal["complete", "sample"]
 DuplicateStrategy = Literal["first_successful", "provide_all"]
 VerificationThinkingLevel = Literal["low", "medium", "high"]
 VerificationScope = Literal["all", "flagged"]
@@ -47,6 +48,7 @@ class AppSettings:
     api_recovery_threshold: int = 20
     # Optional pipeline stages. These are durable app defaults; each submitted
     # job snapshots its own values through SubmitJobDraft.
+    thinking_level: VerificationThinkingLevel = "high"
     ocr_enabled: bool = True
     subagents: bool = False
     model_validation_enabled: bool = False
@@ -81,6 +83,9 @@ class AppSettings:
             ),
             batch_duplicate_strategy=str(
                 config.batch_duplicate_strategy or "first_successful"
+            ),  # type: ignore[arg-type]
+            thinking_level=str(
+                getattr(config, "thinking_level", "high") or "high"
             ),  # type: ignore[arg-type]
             ocr_enabled=bool(getattr(config, "ocr_enabled", True)),
             subagents=bool(getattr(config, "subagents", False)),
@@ -221,12 +226,16 @@ class SubmitJobDraft:
     model_name: str
     schema_version_id: str = ""
     schema_payload: dict[str, object] = field(default_factory=dict)
+    thinking_level: VerificationThinkingLevel = "high"
     output_format: OutputFormat = "jsonl"
     local_path: str = ""
     cloud_prefix: str = ""
     cloud_prefixes: tuple[str, ...] = ()
     continue_dataset: str = ""
     num_batches: int | None = None
+    submission_type: SubmissionType = "complete"
+    sample_percent: float | None = None
+    sample_seed: str = "42"
     ocr_enabled: bool = True
     subagents: bool = False
     model_validation_enabled: bool = False

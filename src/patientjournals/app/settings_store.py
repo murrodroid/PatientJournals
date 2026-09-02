@@ -14,6 +14,18 @@ def _coerce_settings(payload: dict[str, object]) -> AppSettings:
         key: payload.get(key, defaults.get(key))
         for key in allowed
     }
+    thinking = str(values.get("thinking_level") or "high")
+    values["thinking_level"] = (
+        thinking if thinking in {"low", "medium", "high"} else "high"
+    )
+    verification_thinking = str(
+        values.get("verification_thinking_level") or "high"
+    )
+    values["verification_thinking_level"] = (
+        verification_thinking
+        if verification_thinking in {"low", "medium", "high"}
+        else "high"
+    )
     scope = str(values.get("verification_scope") or "flagged")
     values["verification_scope"] = scope if scope in {"all", "flagged"} else "flagged"
     values["verification_control_sample_percent"] = max(
@@ -56,6 +68,7 @@ def command_override_payload(
     settings: AppSettings,
     *,
     model_name: str = "",
+    thinking_level: str = "",
     schema_name: str = "",
     schema_version_id: str = "",
     schema_payload: dict[str, object] | None = None,
@@ -63,6 +76,9 @@ def command_override_payload(
     local_path: str = "",
     cloud_prefix: str = "",
     cloud_prefixes: tuple[str, ...] = (),
+    submission_type: str = "complete",
+    sample_percent: float | None = None,
+    sample_seed: str = "",
     duplicate_strategy: str = "",
     ocr_enabled: bool | None = None,
     subagents: bool | None = None,
@@ -78,6 +94,8 @@ def command_override_payload(
     payload = settings.to_json_dict()
     if model_name:
         payload["model"] = model_name
+    if thinking_level:
+        payload["thinking_level"] = thinking_level
     if schema_name:
         payload["schema_name"] = schema_name
         payload["output_schema_name"] = schema_name
@@ -99,6 +117,10 @@ def command_override_payload(
     elif cloud_prefix:
         payload["batch_input_prefix"] = cloud_prefix
         payload["batch_input_prefixes"] = (cloud_prefix,)
+    payload["batch_submission_type"] = submission_type
+    if submission_type == "sample" and sample_percent is not None:
+        payload["batch_sample_percent"] = float(sample_percent)
+        payload["batch_sample_seed"] = str(sample_seed)
     if duplicate_strategy:
         payload["batch_duplicate_strategy"] = duplicate_strategy
     if ocr_enabled is not None:

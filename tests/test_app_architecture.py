@@ -88,6 +88,7 @@ def test_submit_command_carries_job_overrides() -> None:
     assert command.config_overrides["schema_name"] == "TextPage"
     assert command.config_overrides["model"] == "gemini-2.5-flash"
     assert command.config_overrides["output_format"] == "csv"
+    assert command.config_overrides["batch_submission_type"] == "complete"
 
 
 def test_submit_command_carries_selected_cloud_prefixes() -> None:
@@ -101,6 +102,10 @@ def test_submit_command_carries_selected_cloud_prefixes() -> None:
         cloud_prefix="pages/folder-a",
         cloud_prefixes=("pages/folder-a", "pages/folder-b"),
         num_batches=2,
+        thinking_level="medium",
+        submission_type="sample",
+        sample_percent=12.5,
+        sample_seed="experiment-7",
         ocr_enabled=False,
         subagents=True,
         model_validation_enabled=True,
@@ -120,6 +125,10 @@ def test_submit_command_carries_selected_cloud_prefixes() -> None:
         "pages/folder-a",
         "pages/folder-b",
     )
+    assert command.config_overrides["thinking_level"] == "medium"
+    assert command.config_overrides["batch_submission_type"] == "sample"
+    assert command.config_overrides["batch_sample_percent"] == 12.5
+    assert command.config_overrides["batch_sample_seed"] == "experiment-7"
     assert command.config_overrides["ocr_enabled"] is False
     assert command.config_overrides["subagents"] is True
     assert command.config_overrides["model_validation_enabled"] is True

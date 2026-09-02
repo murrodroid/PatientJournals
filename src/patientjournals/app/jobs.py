@@ -117,6 +117,7 @@ def build_submit_command(
     overrides = command_override_payload(
         settings,
         model_name=draft.model_name,
+        thinking_level=draft.thinking_level,
         schema_name=draft.schema_name,
         schema_version_id=draft.schema_version_id,
         schema_payload=draft.schema_payload,
@@ -124,6 +125,11 @@ def build_submit_command(
         local_path=draft.local_path,
         cloud_prefix=draft.cloud_prefix,
         cloud_prefixes=draft.cloud_prefixes,
+        submission_type=draft.submission_type,
+        sample_percent=draft.sample_percent
+        if draft.submission_type == "sample"
+        else None,
+        sample_seed=draft.sample_seed,
         ocr_enabled=draft.ocr_enabled,
         subagents=draft.subagents,
         model_validation_enabled=draft.model_validation_enabled,
@@ -184,6 +190,7 @@ def _apply_runtime_overrides(payload: dict[str, object]) -> dict[str, object]:
         "target_folder",
         "upload_images_folder",
         "model",
+        "thinking_level",
         "output_format",
         "output_root",
         "output_model",
@@ -195,6 +202,9 @@ def _apply_runtime_overrides(payload: dict[str, object]) -> dict[str, object]:
         "provider_api_keys",
         "batch_duplicate_strategy",
         "batch_restrict_image_names",
+        "batch_submission_type",
+        "batch_sample_percent",
+        "batch_sample_seed",
         "api_recovery_enabled",
         "ocr_enabled",
         "subagents",
@@ -273,6 +283,7 @@ async def run_local_draft_direct(
     overrides = command_override_payload(
         settings,
         model_name=draft.model_name,
+        thinking_level=draft.thinking_level,
         schema_name=draft.schema_name,
         schema_version_id=draft.schema_version_id,
         schema_payload=draft.schema_payload,
@@ -280,6 +291,11 @@ async def run_local_draft_direct(
         local_path=draft.local_path,
         cloud_prefix=draft.cloud_prefix,
         cloud_prefixes=draft.cloud_prefixes,
+        submission_type=draft.submission_type,
+        sample_percent=draft.sample_percent
+        if draft.submission_type == "sample"
+        else None,
+        sample_seed=draft.sample_seed,
         ocr_enabled=draft.ocr_enabled,
         subagents=draft.subagents,
         model_validation_enabled=draft.model_validation_enabled,
@@ -395,6 +411,7 @@ def run_batch_draft_direct(
     overrides = command_override_payload(
         settings,
         model_name=draft.model_name,
+        thinking_level=draft.thinking_level,
         schema_name=draft.schema_name,
         schema_version_id=draft.schema_version_id,
         schema_payload=draft.schema_payload,
@@ -402,6 +419,11 @@ def run_batch_draft_direct(
         local_path=draft.local_path,
         cloud_prefix=draft.cloud_prefix,
         cloud_prefixes=draft.cloud_prefixes,
+        submission_type=draft.submission_type,
+        sample_percent=draft.sample_percent
+        if draft.submission_type == "sample"
+        else None,
+        sample_seed=draft.sample_seed,
         ocr_enabled=draft.ocr_enabled,
         subagents=draft.subagents,
         model_validation_enabled=draft.model_validation_enabled,

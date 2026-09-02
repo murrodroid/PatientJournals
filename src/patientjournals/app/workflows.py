@@ -113,6 +113,7 @@ class WorkflowService:
             "validations_gcs_prefix",
             "schemas_gcs_prefix",
             "upload_validation_to_gcs",
+            "thinking_level",
             "ocr_enabled",
             "subagents",
             "model_validation_enabled",
@@ -124,6 +125,12 @@ class WorkflowService:
             "verification_num_chunks",
         }
         updates = {key: payload[key] for key in allowed if key in payload}
+        if "thinking_level" in updates and updates["thinking_level"] not in {
+            "low",
+            "medium",
+            "high",
+        }:
+            raise ValueError("Main-model thinking must be low, medium, or high.")
         if "verification_thinking_level" in updates and updates[
             "verification_thinking_level"
         ] not in {"low", "medium", "high"}:
@@ -184,7 +191,9 @@ class WorkflowService:
                 self.schema_service.create_version(
                     name=str(payload.get("name") or ""),
                     fields=[item for item in raw_fields if isinstance(item, dict)],
-                    created_by=identity.get("account") or identity.get("username") or "unknown",
+                    created_by=identity.get("account")
+                    or identity.get("username")
+                    or "unknown",
                     parent_version_id=str(payload.get("parent_version_id") or ""),
                     make_active=bool(payload.get("make_active")),
                 )
@@ -199,7 +208,9 @@ class WorkflowService:
         finally:
             _restore_runtime_overrides(previous)
 
-    def cloud_access_report(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    def cloud_access_report(
+        self, payload: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         if payload:
             self.save_cloud_settings(payload)
         report = run_access_checks(self.settings)
@@ -218,7 +229,14 @@ class WorkflowService:
         payload: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         if payload:
-            self.save_cloud_settings({**payload, "auth_mode": "adc" if mode == "adc" else payload.get("auth_mode", "adc")})
+            self.save_cloud_settings(
+                {
+                    **payload,
+                    "auth_mode": "adc"
+                    if mode == "adc"
+                    else payload.get("auth_mode", "adc"),
+                }
+            )
         commands = {
             "adc": ("gcloud", "auth", "application-default", "login"),
             "gcloud": ("gcloud", "auth", "login"),
@@ -235,6 +253,19 @@ class WorkflowService:
         }
 
     def submit_batch(self, draft: SubmitJobDraft) -> dict[str, Any]:
+        if draft.thinking_level not in {"low", "medium", "high"}:
+            raise ValueError("Main-model thinking must be low, medium, or high.")
+        if draft.submission_type not in {"complete", "sample"}:
+            raise ValueError("Submission type must be Complete or Sample.")
+        if draft.submission_type == "sample":
+            if draft.run_mode != "cloud_batch":
+                raise ValueError("Sample submissions require Cloud batch.")
+            if draft.sample_percent is None or not 0.0 < draft.sample_percent <= 100.0:
+                raise ValueError(
+                    "Sample size must be greater than 0% and at most 100%."
+                )
+            if not draft.sample_seed.strip():
+                raise ValueError("Sample seed must not be empty.")
         if draft.model_validation_enabled:
             draft = replace(draft, verification_apply_mode="apply_patches")
             if draft.run_mode != "cloud_batch":
@@ -389,7 +420,9 @@ class WorkflowService:
         duplicate_strategy: str = "",
         force: bool = False,
     ) -> dict[str, Any]:
-        selected = [item for item in dict.fromkeys(str(path) for path in run_dirs) if item]
+        selected = [
+            item for item in dict.fromkeys(str(path) for path in run_dirs) if item
+        ]
         if not selected:
             raise ValueError("Select at least one job to retrieve.")
         max_workers = min(max(1, len(selected)), 4)
@@ -474,10 +507,7 @@ class WorkflowService:
         )
         selected_tokens = max(
             1,
-            int(
-                max_output_tokens
-                or self.settings.verification_max_output_tokens
-            ),
+            int(max_output_tokens or self.settings.verification_max_output_tokens),
         )
         verifier = resolve_model_spec(selected_model)
         if not verifier.supports_batch:
@@ -569,11 +599,11 @@ class WorkflowService:
             if isinstance(record.get("model_validation"), dict)
             else {}
         )
-        verification_run_dir = str(
-            validation.get("verification_run_dir") or ""
-        )
+        verification_run_dir = str(validation.get("verification_run_dir") or "")
         if not verification_run_dir:
-            raise ValueError(f"No verifier batch is linked to extraction job: {run_dir}")
+            raise ValueError(
+                f"No verifier batch is linked to extraction job: {run_dir}"
+            )
         overrides = command_overrides_for_run(self.settings, run_dir)
         with _RUNTIME_CONFIG_LOCK:
             previous = _apply_runtime_overrides(overrides)
@@ -704,9 +734,7 @@ class WorkflowService:
             sources = prepare_dataset_sources(
                 dataset_items,
                 download_root=(
-                    Path(self.settings.local_runs_root)
-                    / "datasets"
-                    / "_cloud_cache"
+                    Path(self.settings.local_runs_root) / "datasets" / "_cloud_cache"
                 ),
             )
             return serializable(
@@ -741,7 +769,10 @@ class WorkflowService:
             children = [path for path in root.iterdir() if path.is_dir()]
         except OSError:
             children = []
-        candidates = [root, *sorted(children, key=lambda path: _mtime(path), reverse=True)]
+        candidates = [
+            root,
+            *sorted(children, key=lambda path: _mtime(path), reverse=True),
+        ]
         items: list[dict[str, Any]] = []
         for path in candidates[: max(1, limit)]:
             count = _count_images(path)
@@ -832,6 +863,19 @@ class WorkflowService:
                     local_path=str(payload.get("local_path") or ""),
                     cloud_prefixes=tuple(str(item) for item in prefixes if item),
                     sample_size=int(payload.get("sample_size") or 6),
+                )
+            )
+        finally:
+            _restore_runtime_overrides(previous)
+
+    def submission_population(self) -> dict[str, Any]:
+        """Resolve the fixed cloud population used by application submissions."""
+
+        previous = _apply_runtime_overrides(command_override_payload(self.settings))
+        try:
+            return serializable(
+                self.image_access.submission_population(
+                    cloud_prefixes=(self.settings.gcs_pages_prefix,)
                 )
             )
         finally:
@@ -939,7 +983,9 @@ class WorkflowService:
         dataset = Path(results).expanduser()
         if not dataset.is_file():
             raise FileNotFoundError(f"Dataset not found: {results}")
-        image_root = images or self.settings.validation_images_root or str(config.target_folder)
+        image_root = (
+            images or self.settings.validation_images_root or str(config.target_folder)
+        )
         if not Path(image_root).expanduser().is_dir():
             raise FileNotFoundError(f"Image folder not found: {image_root}")
         command = build_validation_command(
@@ -981,9 +1027,15 @@ def _count_images(path: Path, *, cap: int = 10000) -> int:
     extensions = _image_extensions()
     count = 0
     try:
-        iterator = path.rglob("*") if getattr(config, "recursive", True) else path.glob("*")
+        iterator = (
+            path.rglob("*") if getattr(config, "recursive", True) else path.glob("*")
+        )
         for item in iterator:
-            if item.is_file() and item.suffix.lower() in extensions and not item.name.startswith("._"):
+            if (
+                item.is_file()
+                and item.suffix.lower() in extensions
+                and not item.name.startswith("._")
+            ):
                 count += 1
                 if count >= cap:
                     return count

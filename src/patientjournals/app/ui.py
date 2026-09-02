@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import asyncio
+import math
 import subprocess
 import sys
 import threading
@@ -23,9 +23,7 @@ from patientjournals.app.dashboard import (
 )
 from patientjournals.app.datasets import (
     download_cloud_dataset,
-    inspect_local_dataset,
     list_cloud_dataset_library,
-    list_cloud_dataset_choices,
     list_local_dataset_library,
 )
 from patientjournals.app.jobs import (
@@ -39,7 +37,6 @@ from patientjournals.app.jobs import (
     recover_dataset_gaps,
     list_batch_chunks,
     list_submit_jobs,
-    local_image_names,
     poll_local_batch_states,
     read_dataset_preview,
     read_run_error,
@@ -49,7 +46,6 @@ from patientjournals.app.jobs import (
     reusable_recorded_results,
     run_batch_draft_direct,
     run_batch_rerun_direct,
-    run_local_draft_direct,
     run_retrieve_direct,
     start_command,
 )
@@ -153,6 +149,48 @@ def _verification_thinking_slider(
     variable.trace_add("write", update_label)
     update_label()
     return frame
+
+
+def _on_off_button(
+    parent: tk.Misc,
+    variable: tk.BooleanVar,
+    *,
+    command=None,
+) -> tk.Button:
+    """Build a compact button whose visible state is explicitly On or Off."""
+
+    button = tk.Button(
+        parent,
+        relief="flat",
+        bd=0,
+        highlightthickness=1,
+        padx=16,
+        pady=8,
+        font=("Helvetica", 12, "bold"),
+        cursor="hand2",
+    )
+
+    def refresh(*_args) -> None:
+        enabled = variable.get()
+        button.configure(
+            text="On" if enabled else "Off",
+            bg=ACCENT if enabled else BG,
+            fg=INK,
+            activebackground=INK if enabled else ACCENT,
+            activeforeground=BG if enabled else INK,
+            highlightbackground=ACCENT if enabled else SOFT_BORDER,
+        )
+
+    def toggle() -> None:
+        if str(button.cget("state")) != "disabled":
+            variable.set(not variable.get())
+            if command is not None:
+                command()
+
+    button.configure(command=toggle)
+    variable.trace_add("write", refresh)
+    refresh()
+    return button
 
 
 def _truncate_cell(value: object, limit: int = 60) -> str:
@@ -1435,6 +1473,9 @@ class PatientJournalsApp:
         api_threshold_var = tk.StringVar(
             value=str(self.settings.api_recovery_threshold)
         )
+        main_thinking_var = tk.IntVar(
+            value=_verification_thinking_index(self.settings.thinking_level)
+        )
         ocr_enabled_var = tk.BooleanVar(value=self.settings.ocr_enabled)
         subagents_var = tk.BooleanVar(value=self.settings.subagents)
         validation_enabled_var = tk.BooleanVar(
@@ -1525,14 +1566,20 @@ class PatientJournalsApp:
 
         validation = self._section(page, "Optional pipeline defaults")
         validation.columnconfigure(1, weight=1)
+        ttk.Label(validation, text="Main model thinking", style="App.TLabel").grid(
+            row=0, column=0, sticky="w", pady=8
+        )
+        _verification_thinking_slider(validation, main_thinking_var).grid(
+            row=0, column=1, sticky="ew", pady=8, padx=(14, 0)
+        )
         ttk.Checkbutton(
             validation,
             text="Include positional OCR for new jobs",
             variable=ocr_enabled_var,
-        ).grid(row=0, column=0, columnspan=2, sticky="w", pady=8)
+        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=8)
         self._grid_help(
             validation,
-            0,
+            1,
             2,
             "Each job can override this. Cloud OCR sidecars are required only when enabled.",
         )
@@ -1540,10 +1587,10 @@ class PatientJournalsApp:
             validation,
             text="Use schema subagents for new jobs",
             variable=subagents_var,
-        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=8)
+        ).grid(row=2, column=0, columnspan=2, sticky="w", pady=8)
         self._grid_help(
             validation,
-            1,
+            2,
             2,
             "Each top-level schema field is handled by its own specialist request.",
         )
@@ -1551,10 +1598,10 @@ class PatientJournalsApp:
             validation,
             text="Enable second-pass model validation for new jobs",
             variable=validation_enabled_var,
-        ).grid(row=2, column=0, columnspan=2, sticky="w", pady=8)
+        ).grid(row=3, column=0, columnspan=2, sticky="w", pady=8)
         self._grid_help(
             validation,
-            2,
+            3,
             2,
             "Verification is independent of OCR and subagents and is available for Cloud batch jobs.",
         )
@@ -1564,38 +1611,38 @@ class PatientJournalsApp:
         if self.settings.verification_model not in validation_model_names:
             validation_model_names.insert(0, self.settings.verification_model)
         ttk.Label(validation, text="Verifier model", style="App.TLabel").grid(
-            row=3, column=0, sticky="w", pady=8
+            row=4, column=0, sticky="w", pady=8
         )
         ttk.Combobox(
             validation,
             textvariable=validation_model_var,
             values=validation_model_names,
             state="readonly",
-        ).grid(row=3, column=1, sticky="ew", pady=8, padx=(14, 0))
+        ).grid(row=4, column=1, sticky="ew", pady=8, padx=(14, 0))
         ttk.Label(validation, text="Thinking", style="App.TLabel").grid(
-            row=4, column=0, sticky="w", pady=8
+            row=5, column=0, sticky="w", pady=8
         )
         _verification_thinking_slider(validation, validation_thinking_var).grid(
-            row=4, column=1, sticky="ew", pady=8, padx=(14, 0)
+            row=5, column=1, sticky="ew", pady=8, padx=(14, 0)
         )
         ttk.Label(validation, text="Verification scope", style="App.TLabel").grid(
-            row=5, column=0, sticky="w", pady=8
+            row=6, column=0, sticky="w", pady=8
         )
         ttk.Combobox(
             validation,
             textvariable=validation_scope_var,
             values=tuple(VERIFICATION_SCOPE_LABELS.values()),
             state="readonly",
-        ).grid(row=5, column=1, sticky="ew", pady=8, padx=(14, 0))
+        ).grid(row=6, column=1, sticky="ew", pady=8, padx=(14, 0))
         self._field(
             validation,
             "Routine-page control sample (%)",
             validation_control_sample_var,
-            6,
+            7,
         )
         self._grid_help(
             validation,
-            6,
+            7,
             2,
             "Used only for risk-routed verification; all flagged pages plus this deterministic routine-page sample are checked.",
         )
@@ -1607,9 +1654,9 @@ class PatientJournalsApp:
             ),
             style="Muted.TLabel",
             wraplength=780,
-        ).grid(row=7, column=0, columnspan=3, sticky="w", pady=8)
-        self._field(validation, "Max output tokens", validation_tokens_var, 8)
-        self._field(validation, "Validation batch chunks", validation_chunks_var, 9)
+        ).grid(row=8, column=0, columnspan=3, sticky="w", pady=8)
+        self._field(validation, "Max output tokens", validation_tokens_var, 9)
+        self._field(validation, "Validation batch chunks", validation_chunks_var, 10)
 
         advanced, _advanced_open = self._advanced_section(page)
         advanced.columnconfigure(1, weight=1)
@@ -1701,8 +1748,7 @@ class PatientJournalsApp:
                 return
             if (
                 validation_enabled_var.get()
-                and _verification_scope_value(validation_scope_var.get())
-                == "flagged"
+                and _verification_scope_value(validation_scope_var.get()) == "flagged"
                 and validation_control_sample <= 0.0
             ):
                 messagebox.showerror(
@@ -1730,6 +1776,7 @@ class PatientJournalsApp:
                 batch_duplicate_strategy=duplicate_strategy_var.get(),  # type: ignore[arg-type]
                 estimated_cost_per_1k_images=cost_rate,
                 api_recovery_threshold=api_threshold,
+                thinking_level=_verification_thinking_level(main_thinking_var.get()),  # type: ignore[arg-type]
                 ocr_enabled=ocr_enabled_var.get(),
                 subagents=subagents_var.get(),
                 model_validation_enabled=validation_enabled_var.get(),
@@ -1760,16 +1807,9 @@ class PatientJournalsApp:
     def show_submit(self) -> None:
         self._clear_content()
         self._heading("Submit")
-        self._subheading("Choose the input and model, then start the run.")
+        self._subheading("Configure a cloud batch run for the page population.")
         page = self._scrollable_frame(self.content)
 
-        frame = self._section(page, "Run")
-        frame.columnconfigure(1, weight=1)
-
-        source_var = tk.StringVar(value="local")
-        mode_var = tk.StringVar(value="local_api")
-        local_path_var = tk.StringVar(value="")
-        cloud_prefix_var = tk.StringVar(value=self.settings.gcs_pages_prefix)
         schema_names = [option.name for option in self.schema_options]
         model_names = [option.name for option in self.model_options]
         schema_var = tk.StringVar(value=schema_names[0] if schema_names else "")
@@ -1782,8 +1822,19 @@ class PatientJournalsApp:
         output_format_var = tk.StringVar(value="jsonl")
         continue_var = tk.StringVar(value="")
         num_batches_var = tk.StringVar(value="")
+        submission_type_var = tk.StringVar(value="Complete")
+        sample_seed_var = tk.StringVar(value="42")
+        sample_percent_var = tk.StringVar(value="10")
+        range_image_count_var = tk.StringVar(value="0")
+        submission_image_count_var = tk.StringVar(value="0")
+        selection_count_note_var = tk.StringVar(value="")
         ocr_enabled_var = tk.BooleanVar(value=self.settings.ocr_enabled)
-        subagents_var = tk.BooleanVar(value=self.settings.subagents)
+        job_type_var = tk.StringVar(
+            value="Subagentic" if self.settings.subagents else "Single"
+        )
+        main_thinking_var = tk.IntVar(
+            value=_verification_thinking_index(self.settings.thinking_level)
+        )
         model_validation_var = tk.BooleanVar(
             value=self.settings.model_validation_enabled
         )
@@ -1807,231 +1858,336 @@ class PatientJournalsApp:
         )
         status_var = tk.StringVar(value="")
         command_var = tk.StringVar(value="")
+        pipeline_summary_var = tk.StringVar(value="")
 
-        ttk.Label(frame, text="Dataset source", style="App.TLabel").grid(
-            row=0, column=0, sticky="w", pady=8
-        )
-        ttk.Combobox(
-            frame,
-            textvariable=source_var,
-            values=("local", "cloud"),
-            state="readonly",
-            width=18,
-        ).grid(row=0, column=1, sticky="w", pady=8, padx=(14, 0))
-        self._grid_help(
-            frame,
-            0,
-            2,
-            "Local uses a folder on this computer. Cloud uses image folders already uploaded to GCS.",
-        )
-
-        ttk.Label(frame, text="Run mode", style="App.TLabel").grid(
+        page_selection = self._section(page, "Page population")
+        page_selection.columnconfigure(1, weight=1)
+        ttk.Label(
+            page_selection,
+            text=(
+                "The current range includes all images under the configured cloud "
+                "pages prefix. "
+                "Date boundaries will activate when the masterlist is connected."
+            ),
+            style="Muted.TLabel",
+            wraplength=780,
+        ).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 8))
+        ttk.Label(page_selection, text="Page range", style="App.TLabel").grid(
             row=1, column=0, sticky="w", pady=8
         )
         ttk.Combobox(
-            frame,
-            textvariable=mode_var,
-            values=("local_api", "cloud_batch"),
+            page_selection,
+            values=("All images",),
+            state="disabled",
+            width=22,
+        ).grid(row=1, column=1, sticky="w", pady=8, padx=(14, 0))
+        boundary_frame = ttk.Frame(page_selection, style="App.TFrame")
+        boundary_frame.grid(
+            row=2, column=1, columnspan=2, sticky="ew", pady=8, padx=(14, 0)
+        )
+        boundary_frame.columnconfigure((1, 3), weight=1)
+        ttk.Label(boundary_frame, text="From year", style="App.TLabel").grid(
+            row=0, column=0, sticky="w"
+        )
+        ttk.Entry(boundary_frame, state="disabled").grid(
+            row=0, column=1, sticky="ew", padx=(8, 18)
+        )
+        ttk.Label(boundary_frame, text="To year", style="App.TLabel").grid(
+            row=0, column=2, sticky="w"
+        )
+        ttk.Entry(boundary_frame, state="disabled").grid(
+            row=0, column=3, sticky="ew", padx=(8, 0)
+        )
+        ttk.Label(
+            page_selection,
+            text="Masterlist status: not connected. No date filter is applied.",
+            style="Muted.TLabel",
+        ).grid(row=3, column=0, columnspan=3, sticky="w", pady=(0, 8))
+        ttk.Label(page_selection, text="Submission Type", style="App.TLabel").grid(
+            row=4, column=0, sticky="w", pady=8
+        )
+        submission_type_buttons = ttk.Frame(page_selection, style="App.TFrame")
+        submission_type_buttons.grid(row=4, column=1, sticky="w", pady=8, padx=(14, 0))
+        complete_button = tk.Button(
+            submission_type_buttons,
+            text="Complete",
+            relief="flat",
+            bd=0,
+            padx=16,
+            pady=8,
+            font=("Helvetica", 12, "bold"),
+            cursor="hand2",
+        )
+        sample_button = tk.Button(
+            submission_type_buttons,
+            text="Sample",
+            relief="flat",
+            bd=0,
+            padx=16,
+            pady=8,
+            font=("Helvetica", 12, "bold"),
+            cursor="hand2",
+        )
+        complete_button.pack(side="left")
+        sample_button.pack(side="left")
+
+        sample_settings = ttk.Frame(page_selection, style="App.TFrame")
+        sample_settings.grid(
+            row=5, column=1, columnspan=2, sticky="ew", pady=8, padx=(14, 0)
+        )
+        sample_settings.columnconfigure((1, 3), weight=1)
+        ttk.Label(sample_settings, text="Sample seed", style="App.TLabel").grid(
+            row=0, column=0, sticky="w"
+        )
+        ttk.Entry(sample_settings, textvariable=sample_seed_var).grid(
+            row=0, column=1, sticky="ew", padx=(8, 18)
+        )
+        ttk.Label(
+            sample_settings,
+            text="Sample size (%)",
+            style="App.TLabel",
+        ).grid(row=0, column=2, sticky="w")
+        ttk.Entry(sample_settings, textvariable=sample_percent_var).grid(
+            row=0, column=3, sticky="ew", padx=(8, 0)
+        )
+
+        counts_frame = ttk.Frame(page_selection, style="App.TFrame")
+        counts_frame.grid(row=6, column=0, columnspan=3, sticky="ew", pady=(10, 0))
+        counts_frame.columnconfigure((0, 1), weight=1)
+        range_count_frame = ttk.LabelFrame(
+            counts_frame, text="Images in current range", padding=10
+        )
+        range_count_frame.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        ttk.Label(
+            range_count_frame,
+            textvariable=range_image_count_var,
+            style="App.TLabel",
+            font=("Helvetica", 18, "bold"),
+        ).pack(anchor="w")
+        submission_count_frame = ttk.LabelFrame(
+            counts_frame, text="Pages in this submission", padding=10
+        )
+        submission_count_frame.grid(row=0, column=1, sticky="ew", padx=(6, 0))
+        ttk.Label(
+            submission_count_frame,
+            textvariable=submission_image_count_var,
+            style="App.TLabel",
+            font=("Helvetica", 18, "bold"),
+        ).pack(anchor="w")
+        ttk.Label(
+            page_selection,
+            textvariable=selection_count_note_var,
+            style="Muted.TLabel",
+            wraplength=780,
+        ).grid(row=7, column=0, columnspan=3, sticky="w", pady=(6, 0))
+
+        cloud_population_count: dict[str, int | None] = {"count": None}
+
+        def current_range_count() -> int | None:
+            return cloud_population_count["count"]
+
+        def update_page_selection_summary(*_args) -> None:
+            is_sample = submission_type_var.get() == "Sample"
+            complete_button.configure(
+                bg=BG if is_sample else ACCENT,
+                fg=INK,
+                activebackground=ACCENT,
+            )
+            sample_button.configure(
+                bg=ACCENT if is_sample else BG,
+                fg=INK,
+                activebackground=ACCENT,
+            )
+            if is_sample:
+                sample_settings.grid()
+            else:
+                sample_settings.grid_remove()
+            range_count = current_range_count()
+            if range_count is None:
+                range_image_count_var.set("Unknown")
+                submission_image_count_var.set("Unknown")
+                selection_count_note_var.set(
+                    "Refresh the configured cloud population to resolve its exact "
+                    "image count."
+                )
+                return
+            range_image_count_var.set(f"{range_count:,}")
+            submission_count = range_count
+            if is_sample:
+                try:
+                    percent = float(sample_percent_var.get().strip())
+                except ValueError:
+                    percent = 0.0
+                if percent > 0:
+                    submission_count = min(
+                        range_count,
+                        max(
+                            1 if range_count else 0,
+                            math.ceil(range_count * percent / 100),
+                        ),
+                    )
+                else:
+                    submission_image_count_var.set("—")
+                    return
+            submission_image_count_var.set(f"{submission_count:,}")
+            selection_count_note_var.set(
+                "The count covers the configured cloud pages prefix and removes "
+                "duplicate image names. The immutable request population is "
+                "recorded at submission."
+            )
+
+        def set_submission_type(value: str) -> None:
+            if value == "Sample" and str(sample_button.cget("state")) == "disabled":
+                return
+            submission_type_var.set(value)
+
+        complete_button.configure(command=lambda: set_submission_type("Complete"))
+        sample_button.configure(command=lambda: set_submission_type("Sample"))
+        submission_type_var.trace_add("write", update_page_selection_summary)
+        sample_percent_var.trace_add("write", update_page_selection_summary)
+        sample_seed_var.trace_add("write", update_page_selection_summary)
+        update_page_selection_summary()
+
+        def load_page_population() -> None:
+            status_var.set("Counting the configured cloud page population...")
+
+            def worker() -> None:
+                try:
+                    population = WorkflowService(
+                        self.settings,
+                        settings_path=self.settings_path,
+                    ).submission_population()
+                    count = int(population.get("selection_count") or 0)
+                except Exception as exc:  # noqa: BLE001
+                    message = str(exc)
+
+                    def report_error() -> None:
+                        if page.winfo_exists():
+                            status_var.set(
+                                f"Could not count the cloud page population: {message}"
+                            )
+
+                    self.root.after(0, report_error)
+                    return
+
+                def apply_count() -> None:
+                    if not page.winfo_exists():
+                        return
+                    cloud_population_count["count"] = count
+                    update_page_selection_summary()
+                    status_var.set(f"Cloud page population ready: {count:,} image(s).")
+
+                self.root.after(0, apply_count)
+
+            threading.Thread(target=worker, daemon=True).start()
+
+        self._button(
+            page_selection,
+            "Refresh page count",
+            load_page_population,
+            kind="secondary",
+        ).grid(row=8, column=0, sticky="w", pady=(10, 0))
+        load_page_population()
+
+        general = self._section(page, "General setup")
+        general.columnconfigure(1, weight=1)
+        ttk.Label(general, text="Schema Version", style="App.TLabel").grid(
+            row=0, column=0, sticky="w", pady=8
+        )
+        ttk.Combobox(
+            general, textvariable=schema_var, values=schema_names, state="readonly"
+        ).grid(row=0, column=1, sticky="ew", pady=8, padx=(14, 0))
+        ttk.Label(general, text="Job type", style="App.TLabel").grid(
+            row=1, column=0, sticky="w", pady=8
+        )
+        ttk.Combobox(
+            general,
+            textvariable=job_type_var,
+            values=("Single", "Subagentic"),
             state="readonly",
             width=18,
         ).grid(row=1, column=1, sticky="w", pady=8, padx=(14, 0))
         self._grid_help(
-            frame,
+            general,
             1,
             2,
-            "Local API runs immediately on this machine. Cloud batch is for larger paid jobs and is tracked in Jobs.",
+            "Single sends the full schema once per page. Subagentic runs parallel top-level field specialists, then joins and validates the page.",
         )
-
-        local_label = ttk.Label(frame, text="Local folder", style="App.TLabel")
-        local_entry = ttk.Entry(frame, textvariable=local_path_var, width=64)
-        local_button = self._button(
-            frame,
-            "Browse",
-            lambda: self._select_folder(local_path_var),
-            kind="secondary",
+        ttk.Label(general, text="Validation", style="App.TLabel").grid(
+            row=2, column=0, sticky="w", pady=8
         )
-
-        cloud_label = ttk.Label(frame, text="Cloud dataset", style="App.TLabel")
-        cloud_panel = ttk.Frame(frame, style="App.TFrame")
-        cloud_panel.columnconfigure(0, weight=1)
-        cloud_tree = ttk.Treeview(
-            cloud_panel,
-            columns=("prefix", "images", "updated"),
-            show="headings",
-            height=7,
-            selectmode="extended",
+        model_validation_button = _on_off_button(
+            general,
+            model_validation_var,
         )
-        cloud_tree.heading("prefix", text="Folder")
-        cloud_tree.heading("images", text="Images")
-        cloud_tree.heading("updated", text="Updated")
-        cloud_tree.column("prefix", anchor="w", width=520)
-        cloud_tree.column("images", anchor="e", width=100)
-        cloud_tree.column("updated", anchor="w", width=140)
-        cloud_tree.grid(row=0, column=0, sticky="ew")
-        cloud_scroll = ttk.Scrollbar(
-            cloud_panel, orient="vertical", command=cloud_tree.yview
+        model_validation_button.grid(row=2, column=1, sticky="w", pady=8, padx=(14, 0))
+        self._grid_help(
+            general,
+            2,
+            2,
+            "Cloud batch only. Routes selected complete pages to the final-authority model for correction.",
         )
-        cloud_tree.configure(yscrollcommand=cloud_scroll.set)
-        cloud_scroll.grid(row=0, column=1, sticky="ns")
-        cloud_actions = ttk.Frame(cloud_panel, style="App.TFrame")
-        cloud_actions.grid(row=1, column=0, columnspan=2, sticky="w", pady=(8, 0))
-        cloud_prefix_by_iid: dict[str, str] = {}
-        cloud_count_by_iid: dict[str, int] = {}
-        cloud_select_all_var = tk.BooleanVar(value=False)
-
-        def selected_cloud_prefixes() -> tuple[str, ...]:
-            selected = tuple(cloud_tree.selection())
-            prefixes = [
-                cloud_prefix_by_iid[item_id]
-                for item_id in selected
-                if item_id in cloud_prefix_by_iid
-            ]
-            return tuple(dict.fromkeys(prefixes))
-
-        def set_cloud_select_all() -> None:
-            rows = cloud_tree.get_children("")
-            if cloud_select_all_var.get():
-                cloud_tree.selection_set(rows)
-                if rows:
-                    cloud_tree.focus(rows[0])
-                status_var.set(f"Selected {len(rows)} cloud folder(s).")
-            else:
-                cloud_tree.selection_remove(rows)
-                status_var.set("Cleared cloud folder selection.")
-            update_cloud_prefix_var()
-
-        def load_cloud_data() -> None:
-            try:
-                choices = list_cloud_dataset_choices(
-                    bucket_name=self.settings.gcs_bucket_name,
-                    pages_prefix=self.settings.gcs_pages_prefix,
-                    limit=200,
-                )
-            except Exception as exc:  # noqa: BLE001
-                messagebox.showerror("Cloud list failed", str(exc))
-                return
-            for item_id in cloud_tree.get_children(""):
-                cloud_tree.delete(item_id)
-            cloud_prefix_by_iid.clear()
-            cloud_count_by_iid.clear()
-            cloud_select_all_var.set(False)
-            cloud_prefix_var.set("")
-            if not choices:
-                status_var.set(
-                    f"No datasets found in bucket {self.settings.gcs_bucket_name}."
-                )
-                return
-            for index, choice in enumerate(choices, start=1):
-                iid = f"cloud_{index}"
-                cloud_prefix_by_iid[iid] = choice.prefix
-                cloud_count_by_iid[iid] = choice.image_count
-                cloud_tree.insert(
-                    "",
-                    "end",
-                    iid=iid,
-                    values=(choice.prefix, choice.image_count, choice.updated_at),
-                )
-            cloud_select_all_var.set(False)
-            cloud_tree.selection_remove(cloud_tree.get_children(""))
-            status_var.set(
-                f"Loaded {len(choices)} cloud folder(s) "
-                f"from {self.settings.gcs_bucket_name}."
-            )
-
-        def inspect_selected_cloud_data() -> None:
-            selected = tuple(cloud_tree.selection())
-            if not selected:
-                status_var.set("Select one or more cloud folders first.")
-                return
-            image_count = sum(
-                cloud_count_by_iid.get(item_id, 0) for item_id in selected
-            )
-            prefixes = selected_cloud_prefixes()
-            if len(prefixes) == 1:
-                label = prefixes[0]
-            else:
-                label = f"{len(prefixes)} folders"
-            status_var.set(f"Cloud images: {image_count}; selection={label}")
-
-        cloud_inspect_button = self._button(
-            cloud_actions,
-            "Inspect",
-            inspect_selected_cloud_data,
-            kind="secondary",
-        )
-        cloud_select_all_check = ttk.Checkbutton(
-            cloud_actions,
-            text="Select all",
-            variable=cloud_select_all_var,
-            command=set_cloud_select_all,
-        )
-        cloud_load_button = self._button(
-            cloud_actions,
-            "Load bucket",
-            load_cloud_data,
-            kind="secondary",
-        )
-        cloud_load_button.pack(side="left")
-        cloud_select_all_check.pack(side="left", padx=(12, 0))
-        cloud_inspect_button.pack(side="left", padx=(8, 0))
-
-        def update_cloud_prefix_var(*_args) -> None:
-            prefixes = selected_cloud_prefixes()
-            if prefixes:
-                cloud_prefix_var.set(prefixes[0])
-            else:
-                cloud_prefix_var.set("")
-            selected_count = len(cloud_tree.selection())
-            total_count = len(cloud_tree.get_children(""))
-            cloud_select_all_var.set(
-                bool(total_count and selected_count == total_count)
-            )
-
-        cloud_tree.bind("<<TreeviewSelect>>", update_cloud_prefix_var)
-
-        def show_local_source() -> None:
-            cloud_label.grid_remove()
-            cloud_panel.grid_remove()
-            local_label.grid(row=2, column=0, sticky="w", pady=8)
-            local_entry.grid(row=2, column=1, sticky="ew", pady=8, padx=(14, 0))
-            local_button.grid(row=2, column=2, sticky="w", padx=(10, 0), pady=8)
-
-        def show_cloud_source() -> None:
-            local_label.grid_remove()
-            local_entry.grid_remove()
-            local_button.grid_remove()
-            cloud_label.grid(row=2, column=0, sticky="w", pady=8)
-            cloud_panel.grid(
-                row=2, column=1, columnspan=3, sticky="ew", pady=8, padx=(14, 0)
-            )
-
-        def update_source_view(*_args) -> None:
-            if source_var.get() == "cloud":
-                mode_var.set("cloud_batch")
-                show_cloud_source()
-            else:
-                show_local_source()
-
-        source_var.trace_add("write", update_source_view)
-        update_source_view()
-
-        ttk.Label(frame, text="Schema", style="App.TLabel").grid(
+        ttk.Label(general, text="OCR", style="App.TLabel").grid(
             row=3, column=0, sticky="w", pady=8
         )
-        ttk.Combobox(
-            frame, textvariable=schema_var, values=schema_names, state="readonly"
-        ).grid(row=3, column=1, sticky="ew", pady=8, padx=(14, 0))
-        ttk.Label(frame, text="Model", style="App.TLabel").grid(
-            row=4, column=0, sticky="w", pady=8
+        ocr_button = _on_off_button(general, ocr_enabled_var)
+        ocr_button.grid(row=3, column=1, sticky="w", pady=8, padx=(14, 0))
+        self._grid_help(
+            general,
+            3,
+            2,
+            "Adds generation-bound positional text prepared for the exact image bytes.",
+        )
+        ttk.Label(
+            general,
+            textvariable=pipeline_summary_var,
+            style="Muted.TLabel",
+            wraplength=780,
+        ).grid(row=4, column=0, columnspan=3, sticky="w", pady=(10, 0))
+
+        model_setup = self._section(page, "Model setup")
+        model_setup.columnconfigure(1, weight=1)
+        ttk.Label(model_setup, text="Main Model", style="App.TLabel").grid(
+            row=0, column=0, sticky="w", pady=8
         )
         ttk.Combobox(
-            frame, textvariable=model_var, values=model_names, state="readonly"
-        ).grid(row=4, column=1, sticky="ew", pady=8, padx=(14, 0))
+            model_setup, textvariable=model_var, values=model_names, state="readonly"
+        ).grid(row=0, column=1, sticky="ew", pady=8, padx=(14, 0))
         self._grid_help(
-            frame,
-            4,
+            model_setup,
+            0,
             2,
-            "The standard model is selected by default. Change it only when comparing model behavior.",
+            "The same extraction model and effort are used by every specialist in a Subagentic job.",
+        )
+        ttk.Label(model_setup, text="Main Model thinking", style="App.TLabel").grid(
+            row=1, column=0, sticky="w", pady=8
+        )
+        _verification_thinking_slider(model_setup, main_thinking_var).grid(
+            row=1, column=1, sticky="ew", pady=8, padx=(14, 0)
+        )
+        validation_model_names = [
+            option.name for option in self.validation_model_options
+        ]
+        if self.settings.verification_model not in validation_model_names:
+            validation_model_names.insert(0, self.settings.verification_model)
+        ttk.Label(model_setup, text="Validation Model", style="App.TLabel").grid(
+            row=2, column=0, sticky="w", pady=8
+        )
+        validation_model_combo = ttk.Combobox(
+            model_setup,
+            textvariable=verification_model_var,
+            values=validation_model_names,
+            state="readonly",
+        )
+        validation_model_combo.grid(row=2, column=1, sticky="ew", pady=8, padx=(14, 0))
+        ttk.Label(
+            model_setup, text="Validation Model thinking", style="App.TLabel"
+        ).grid(row=3, column=0, sticky="w", pady=8)
+        validation_thinking_control = _verification_thinking_slider(
+            model_setup, verification_thinking_var
+        )
+        validation_thinking_control.grid(
+            row=3, column=1, sticky="ew", pady=8, padx=(14, 0)
         )
 
         advanced, _advanced_open = self._advanced_section(page)
@@ -2048,102 +2204,39 @@ class PatientJournalsApp:
         ).grid(row=0, column=1, sticky="w", pady=8, padx=(14, 0))
         self._field(advanced, "Continue dataset", continue_var, 1)
         self._field(advanced, "Batch chunks", num_batches_var, 2)
-        ocr_options = ttk.LabelFrame(advanced, text="OCR context", padding=10)
-        ocr_options.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(10, 4))
-        ttk.Checkbutton(
-            ocr_options,
-            text="Include positional OCR",
-            variable=ocr_enabled_var,
-        ).pack(anchor="w")
-        ttk.Label(
-            ocr_options,
-            text=(
-                "Adds generation-bound OCR text and coordinates. Cloud jobs require "
-                "prepared OCR sidecars only when enabled."
-            ),
-            style="Muted.TLabel",
-            wraplength=780,
-        ).pack(anchor="w", pady=(4, 0))
-
-        specialist_options = ttk.LabelFrame(
-            advanced, text="Schema specialists", padding=10
-        )
-        specialist_options.grid(row=4, column=0, columnspan=3, sticky="ew", pady=4)
-        ttk.Checkbutton(
-            specialist_options,
-            text="Use schema subagents",
-            variable=subagents_var,
-        ).pack(anchor="w")
-        ttk.Label(
-            specialist_options,
-            text=(
-                "Runs one parallel model request per top-level schema field, then "
-                "joins and validates the page before writing the dataset."
-            ),
-            style="Muted.TLabel",
-            wraplength=780,
-        ).pack(anchor="w", pady=(4, 0))
-
         validation_options = ttk.LabelFrame(
-            advanced, text="Second-pass verification", padding=10
+            advanced, text="Validation policy", padding=10
         )
-        validation_options.grid(row=5, column=0, columnspan=3, sticky="ew", pady=4)
+        validation_options.grid(row=3, column=0, columnspan=3, sticky="ew", pady=4)
         validation_options.columnconfigure(1, weight=1)
-        model_validation_check = ttk.Checkbutton(
-            validation_options,
-            text="Enable model verification (Cloud batch only)",
-            variable=model_validation_var,
-        )
-        model_validation_check.grid(
-            row=0, column=0, columnspan=2, sticky="w", pady=(0, 8)
-        )
         ttk.Label(
             validation_options,
             text=(
-                "Checks the exact image and candidate, optionally using OCR. Every "
-                "run writes field-correction metadata."
+                "The final model checks the exact image and candidate, optionally "
+                "using OCR. Every run writes field-correction metadata."
             ),
             style="Muted.TLabel",
             wraplength=780,
-        ).grid(row=1, column=0, columnspan=3, sticky="w", pady=(0, 8))
-        validation_model_names = [
-            option.name for option in self.validation_model_options
-        ]
-        if self.settings.verification_model not in validation_model_names:
-            validation_model_names.insert(0, self.settings.verification_model)
-        ttk.Label(validation_options, text="Verifier model", style="App.TLabel").grid(
-            row=2, column=0, sticky="w", pady=8
-        )
-        ttk.Combobox(
-            validation_options,
-            textvariable=verification_model_var,
-            values=validation_model_names,
-            state="readonly",
-        ).grid(row=2, column=1, sticky="ew", pady=8, padx=(14, 0))
-        ttk.Label(
-            validation_options, text="Verifier thinking", style="App.TLabel"
-        ).grid(row=3, column=0, sticky="w", pady=8)
-        _verification_thinking_slider(
-            validation_options, verification_thinking_var
-        ).grid(row=3, column=1, sticky="ew", pady=8, padx=(14, 0))
+        ).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 8))
         ttk.Label(
             validation_options, text="Verification scope", style="App.TLabel"
-        ).grid(row=4, column=0, sticky="w", pady=8)
-        ttk.Combobox(
+        ).grid(row=1, column=0, sticky="w", pady=8)
+        validation_scope_combo = ttk.Combobox(
             validation_options,
             textvariable=verification_scope_var,
             values=tuple(VERIFICATION_SCOPE_LABELS.values()),
             state="readonly",
-        ).grid(row=4, column=1, sticky="ew", pady=8, padx=(14, 0))
-        self._field(
+        )
+        validation_scope_combo.grid(row=1, column=1, sticky="ew", pady=8, padx=(14, 0))
+        validation_control_sample_entry = self._field(
             validation_options,
             "Routine-page control sample (%)",
             verification_control_sample_var,
-            5,
+            2,
         )
         self._grid_help(
             validation_options,
-            5,
+            2,
             2,
             "Risk-routed mode verifies all flagged pages and this deterministic percentage of routine pages.",
         )
@@ -2155,18 +2248,18 @@ class PatientJournalsApp:
             ),
             style="Muted.TLabel",
             wraplength=780,
-        ).grid(row=6, column=0, columnspan=3, sticky="w", pady=8)
-        self._field(
+        ).grid(row=3, column=0, columnspan=3, sticky="w", pady=8)
+        validation_tokens_entry = self._field(
             validation_options,
             "Verifier max output tokens",
             verification_tokens_var,
-            7,
+            4,
         )
-        self._field(
+        validation_chunks_entry = self._field(
             validation_options,
             "Validation batch chunks",
             verification_chunks_var,
-            8,
+            5,
         )
         ttk.Label(
             validation_options,
@@ -2176,19 +2269,54 @@ class PatientJournalsApp:
             ),
             style="Muted.TLabel",
             wraplength=780,
-        ).grid(row=9, column=0, columnspan=3, sticky="w", pady=(4, 0))
+        ).grid(row=6, column=0, columnspan=3, sticky="w", pady=(4, 0))
 
         def update_model_validation_state(*_args) -> None:
-            state = "normal" if mode_var.get() == "cloud_batch" else "disabled"
-            model_validation_check.configure(state=state)
+            enabled = model_validation_var.get()
+            sample_button.configure(state="normal")
+            model_validation_button.configure(state="normal")
+            validation_model_combo.configure(
+                state="readonly" if enabled else "disabled"
+            )
+            validation_scope_combo.configure(
+                state="readonly" if enabled else "disabled"
+            )
+            for widget in (
+                validation_control_sample_entry,
+                validation_tokens_entry,
+                validation_chunks_entry,
+            ):
+                widget.configure(state="normal" if enabled else "disabled")
+            for widget in validation_thinking_control.winfo_children():
+                try:
+                    widget.configure(state="normal" if enabled else "disabled")
+                except tk.TclError:
+                    pass
+            stages = [
+                "parallel schema specialists + deterministic join"
+                if job_type_var.get() == "Subagentic"
+                else "single full-schema extraction",
+                "deterministic checks",
+            ]
+            if enabled:
+                stages.append("final-model validation and correction")
+            ocr_suffix = (
+                " · positional OCR context enabled" if ocr_enabled_var.get() else ""
+            )
+            pipeline_summary_var.set(
+                "Selected flow: " + " → ".join(stages) + ocr_suffix
+            )
+            update_page_selection_summary()
 
-        mode_var.trace_add("write", update_model_validation_state)
+        model_validation_var.trace_add("write", update_model_validation_state)
+        job_type_var.trace_add("write", update_model_validation_state)
+        ocr_enabled_var.trace_add("write", update_model_validation_state)
         update_model_validation_state()
 
         preview = ttk.Label(
             advanced, textvariable=command_var, wraplength=850, style="Muted.TLabel"
         )
-        preview.grid(row=6, column=0, columnspan=3, sticky="ew", pady=(12, 0))
+        preview.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(12, 0))
         ttk.Label(page, textvariable=status_var, style="Muted.TLabel").pack(
             anchor="w", pady=(8, 0)
         )
@@ -2197,13 +2325,11 @@ class PatientJournalsApp:
             num_batches = None
             if num_batches_var.get().strip():
                 num_batches = max(1, int(num_batches_var.get().strip()))
-            cloud_prefixes = (
-                selected_cloud_prefixes() if source_var.get() == "cloud" else ()
+            cloud_prefixes = tuple(
+                prefix for prefix in (self.settings.gcs_pages_prefix.strip(),) if prefix
             )
-            if source_var.get() == "cloud" and not cloud_prefixes:
-                raise ValueError(
-                    "Load the bucket and select one or more cloud folders."
-                )
+            if not cloud_prefixes:
+                raise ValueError("Configure a cloud pages prefix in Cloud settings.")
             try:
                 verification_tokens = max(
                     1, int(verification_tokens_var.get().strip() or 4096)
@@ -2220,24 +2346,40 @@ class PatientJournalsApp:
                 raise ValueError(
                     "Verifier tokens/chunks must be whole numbers and the control sample must be between 0 and 100 percent."
                 ) from exc
+            sample_percent = None
+            sample_seed = ""
+            if submission_type_var.get() == "Sample":
+                try:
+                    sample_percent = float(sample_percent_var.get().strip())
+                except ValueError as exc:
+                    raise ValueError("Sample size must be a percentage.") from exc
+                if not 0.0 < sample_percent <= 100.0:
+                    raise ValueError(
+                        "Sample size must be greater than 0% and at most 100%."
+                    )
+                sample_seed = sample_seed_var.get().strip()
+                if not sample_seed:
+                    raise ValueError("Sample seed must not be empty.")
             return SubmitJobDraft(
-                dataset_source=source_var.get(),  # type: ignore[arg-type]
-                run_mode=mode_var.get(),  # type: ignore[arg-type]
+                dataset_source="cloud",
+                run_mode="cloud_batch",
                 schema_name=schema_var.get(),
                 model_name=model_var.get(),
+                thinking_level=_verification_thinking_level(main_thinking_var.get()),  # type: ignore[arg-type]
                 output_format=output_format_var.get(),  # type: ignore[arg-type]
-                local_path=local_path_var.get(),
-                cloud_prefix=cloud_prefixes[0]
-                if cloud_prefixes
-                else cloud_prefix_var.get(),
+                local_path="",
+                cloud_prefix=cloud_prefixes[0],
                 cloud_prefixes=cloud_prefixes,
                 continue_dataset=continue_var.get(),
                 num_batches=num_batches,
+                submission_type=(
+                    "sample" if submission_type_var.get() == "Sample" else "complete"
+                ),  # type: ignore[arg-type]
+                sample_percent=sample_percent,
+                sample_seed=sample_seed,
                 ocr_enabled=ocr_enabled_var.get(),
-                subagents=subagents_var.get(),
-                model_validation_enabled=(
-                    model_validation_var.get() and mode_var.get() == "cloud_batch"
-                ),
+                subagents=job_type_var.get() == "Subagentic",
+                model_validation_enabled=model_validation_var.get(),
                 verification_model=verification_model_var.get(),
                 verification_thinking_level=_verification_thinking_level(
                     verification_thinking_var.get()
@@ -2254,11 +2396,6 @@ class PatientJournalsApp:
         def preview_command() -> None:
             try:
                 current = draft()
-                if current.local_path:
-                    summary = inspect_local_dataset(current.local_path)
-                    status_var.set(
-                        f"Local images: {summary.image_count}; status={summary.status}"
-                    )
                 command = build_submit_command(current, self.settings)
                 command_var.set(command.display())
             except Exception as exc:  # noqa: BLE001
@@ -2267,72 +2404,24 @@ class PatientJournalsApp:
         def run_job() -> None:
             try:
                 current = draft()
-                if current.run_mode == "local_api":
-                    if not self._ensure_gemini_api_key(
-                        reason="A Gemini API key is required for local API runs."
-                    ):
-                        status_var.set("Local run cancelled; no Gemini API key saved.")
-                        return
-                    status_var.set("Starting local run...")
-
-                    def progress(progress_event) -> None:
-                        if progress_event.event == "image_processed":
-                            self.root.after(
-                                0,
-                                lambda: status_var.set(
-                                    "Processed "
-                                    f"{progress_event.processed_images}/"
-                                    f"{progress_event.total_images} image(s)."
-                                ),
-                            )
-
-                    def worker() -> None:
-                        try:
-                            result = asyncio.run(
-                                run_local_draft_direct(
-                                    current,
-                                    self.settings,
-                                    progress_callback=progress,
-                                )
-                            )
-                            self.root.after(
-                                0,
-                                lambda: status_var.set(
-                                    f"Local run {result.status}: {result.dataset_path}"
-                                ),
-                            )
-                        except Exception as exc:  # noqa: BLE001
-                            message = str(exc)
-                            self.root.after(
-                                0,
-                                lambda message=message: messagebox.showerror(
-                                    "Submit failed", message
-                                ),
-                            )
-
-                    threading.Thread(target=worker, daemon=True).start()
-                    return
-
-                # cloud_batch: confirm the exact scope before spending money.
-                if current.dataset_source == "local":
-                    names = local_image_names(current.local_path)
-                    expected = len(names)
-                    if not expected:
-                        messagebox.showerror(
-                            "Submit failed",
-                            "No batch input images were found in the selected folder.",
-                        )
-                        return
-                    scope_text = (
-                        f"{expected} image(s) from the local folder:\n"
-                        f"{current.local_path}"
+                expected = current_range_count()
+                if expected is not None and current.submission_type == "sample":
+                    expected = min(
+                        expected,
+                        max(
+                            1 if expected else 0,
+                            math.ceil(
+                                expected * float(current.sample_percent or 0.0) / 100
+                            ),
+                        ),
                     )
-                else:
-                    expected = None
-                    folders = current.cloud_prefixes or (
-                        (current.cloud_prefix,) if current.cloud_prefix else ()
-                    )
-                    scope_text = "the selected cloud folder(s):\n" + "\n".join(folders)
+                count_text = (
+                    f"{expected:,} image(s) from " if expected is not None else ""
+                )
+                scope_text = (
+                    f"{count_text}the configured cloud page population under:\n"
+                    f"{current.cloud_prefix}"
+                )
 
                 cost_line = ""
                 rate = self.settings.estimated_cost_per_1k_images or 0.0
@@ -2381,18 +2470,6 @@ class PatientJournalsApp:
                             ),
                         )
                         return
-                    if expected is not None and outcome.request_count > expected:
-                        # Scope guard failed: submitted more than the folder held.
-                        self.root.after(
-                            0,
-                            lambda: messagebox.showwarning(
-                                "Unexpected submission size",
-                                f"Submitted {outcome.request_count} requests but the "
-                                f"selected folder only had {expected} image(s). "
-                                f"Review run {Path(outcome.run_dir).name} before "
-                                "retrieving.",
-                            ),
-                        )
                     self.root.after(
                         0,
                         lambda: status_var.set(
@@ -3056,6 +3133,7 @@ class PatientJournalsApp:
                     f"Resubmitting {state['failed']} failed page(s) as up to "
                     f"{retry_num_batches} retry chunk(s)…"
                 )
+
                 def action():
                     return resubmit_failed_requests(
                         job.run_dir,

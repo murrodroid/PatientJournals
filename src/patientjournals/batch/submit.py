@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
-import random
+import math
 import re
 from datetime import datetime
 from pathlib import Path
@@ -12,6 +13,7 @@ from google.cloud import storage
 
 from patientjournals.batch.client import get_batch_client, resolve_service_account_path
 from patientjournals.batch.ocr_context import validate_ocr_metadata_for_blobs
+from patientjournals.batch.prepare_ocr import prepare_cloud_ocr_metadata
 from patientjournals.config import config
 from patientjournals.config.models import resolve_model_spec
 from patientjournals.batch.submit_requests import (
@@ -47,6 +49,17 @@ from patientjournals.validation.input_manifest import (
     write_input_image_manifest,
     write_input_manifest_metadata,
 )
+
+
+INPUT_SELECTION_FILE_NAME = "input_selection.json"
+OCR_PREFLIGHT_FILE_NAME = "ocr_preflight.json"
+SAMPLE_ALGORITHM = "sha256-seed-object-name-v1"
+
+
+def _blob_names_sha256(blobs: list[storage.Blob]) -> str:
+    return hashlib.sha256(
+        "\n".join(sorted(str(blob.name) for blob in blobs)).encode("utf-8")
+    ).hexdigest()
 
 
 def _parse_args() -> argparse.Namespace:
@@ -92,9 +105,14 @@ def _parse_args() -> argparse.Namespace:
         dest="downscale",
         type=float,
         help=(
-            "Randomly sample this fraction of GCS inputs before batching. "
+            "Deterministically sample this fraction of GCS inputs before batching. "
             "Must be > 0 and <= 1. Example: --downscale 0.1"
         ),
+    )
+    parser.add_argument(
+        "--sample-seed",
+        dest="sample_seed",
+        help="Seed used for deterministic --downscale selection (default: 42).",
     )
     return parser.parse_args()
 
@@ -137,12 +155,27 @@ def _get_anthropic_client():
 
 
 def _resolve_downscale(args: argparse.Namespace) -> float | None:
-    value = args.downscale
+    value = getattr(args, "downscale", None)
+    if (
+        value is None
+        and config.batch_submission_type == "sample"
+        and config.batch_sample_percent is not None
+    ):
+        value = float(config.batch_sample_percent) / 100.0
     if value is None:
         return None
     if value <= 0.0 or value > 1.0:
         raise ValueError(f"downscale must be > 0 and <= 1 (received {value}).")
     return float(value)
+
+
+def _resolve_sample_seed(args: argparse.Namespace) -> str:
+    seed = str(
+        getattr(args, "sample_seed", None) or config.batch_sample_seed or ""
+    ).strip()
+    if not seed:
+        raise ValueError("sample seed must not be empty.")
+    return seed
 
 
 def _warn_if_confidence_scores_unsupported(*, provider: str, log) -> None:
@@ -156,21 +189,32 @@ def _warn_if_confidence_scores_unsupported(*, provider: str, log) -> None:
         )
 
 
-def _downscale_blobs_randomly(
+def _sample_blobs_deterministically(
     blobs: list[storage.Blob],
     *,
     downscale: float,
+    seed: str,
 ) -> list[storage.Blob]:
     if not blobs or downscale >= 1.0:
         return blobs
 
     total = len(blobs)
-    target = int(round(total * downscale))
+    target = int(math.ceil(total * downscale))
     target = max(1, min(total, target))
     if target >= total:
         return blobs
 
-    sampled = random.sample(blobs, k=target)
+    seed_bytes = seed.encode("utf-8")
+    ranked = sorted(
+        blobs,
+        key=lambda item: (
+            hashlib.sha256(
+                seed_bytes + b"\0" + str(item.name).encode("utf-8")
+            ).digest(),
+            str(item.name),
+        ),
+    )
+    sampled = ranked[:target]
     return sorted(sampled, key=lambda item: item.name)
 
 
@@ -394,6 +438,9 @@ def _restore_rerun_semantics(
         "batch_year_filter",
         "batch_date_mapping_file",
         "batch_restrict_image_names",
+        "batch_submission_type",
+        "batch_sample_percent",
+        "batch_sample_seed",
         "fp_mode",
         "fp_suffix",
         "batch_requests_file_name",
@@ -493,7 +540,10 @@ def _extract_downscale_from_run_log(run_dir: Path) -> float | None:
     path = run_dir / "run.log"
     if not path.exists() or not path.is_file():
         return None
-    pattern = re.compile(r"Downscaled input set with fraction=(?P<value>[0-9eE+\-.]+)")
+    pattern = re.compile(
+        r"(?:Downscaled|sampled input set with)\s+fraction=(?P<value>[0-9eE+\-.]+)",
+        re.IGNORECASE,
+    )
     with open(path, "r", encoding="utf-8") as handle:
         for line in handle:
             match = pattern.search(line)
@@ -798,6 +848,63 @@ def _write_batch_job_meta(
         if bool(config.model_validation_enabled) and extraction_metadata_path.is_file()
         else ""
     )
+    input_selection: dict[str, object] = {}
+    input_selection_path = run_dir / INPUT_SELECTION_FILE_NAME
+    if input_selection_path.is_file():
+        try:
+            loaded_selection = json.loads(
+                input_selection_path.read_text(encoding="utf-8")
+            )
+        except (OSError, json.JSONDecodeError):
+            loaded_selection = None
+        if isinstance(loaded_selection, dict):
+            input_selection = dict(loaded_selection)
+            artifact_prefix = _normalize_prefix(
+                config.batch_requests_gcs_prefix or ""
+            )
+            input_selection["artifact"] = {
+                "path": INPUT_SELECTION_FILE_NAME,
+                "gcs_uri": (
+                    f"gs://{config.gcs_bucket_name}/{artifact_prefix}"
+                    f"{run_dir.name}/{INPUT_SELECTION_FILE_NAME}"
+                ),
+                "sha256": file_sha256(input_selection_path),
+            }
+    ocr_preflight: dict[str, object] = {}
+    ocr_preflight_path = run_dir / OCR_PREFLIGHT_FILE_NAME
+    if ocr_preflight_path.is_file():
+        try:
+            loaded_ocr_preflight = json.loads(
+                ocr_preflight_path.read_text(encoding="utf-8")
+            )
+        except (OSError, json.JSONDecodeError):
+            loaded_ocr_preflight = None
+        if isinstance(loaded_ocr_preflight, dict):
+            ocr_preflight = {
+                key: loaded_ocr_preflight.get(key)
+                for key in (
+                    "schema_version",
+                    "mode",
+                    "submitted_page_count",
+                    "submitted_object_names_sha256",
+                    "selected",
+                    "prepared",
+                    "cached",
+                    "failed",
+                    "provider_manifest",
+                )
+            }
+            artifact_prefix = _normalize_prefix(
+                config.batch_requests_gcs_prefix or ""
+            )
+            ocr_preflight["artifact"] = {
+                "path": OCR_PREFLIGHT_FILE_NAME,
+                "gcs_uri": (
+                    f"gs://{config.gcs_bucket_name}/{artifact_prefix}"
+                    f"{run_dir.name}/{OCR_PREFLIGHT_FILE_NAME}"
+                ),
+                "sha256": file_sha256(ocr_preflight_path),
+            }
 
     meta = {
         "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
@@ -825,8 +932,10 @@ def _write_batch_job_meta(
         "num_batches_requested": int(num_batches_requested),
         "num_batches_submitted": len(jobs),
         "ocr_enabled": bool(config.ocr_enabled),
+        "ocr_preflight": ocr_preflight,
         "subagents": bool(config.subagents),
         "specialist_fields": specialist_names,
+        "input_selection": input_selection,
         "input_image_manifest": input_manifest,
         "extraction_image_bindings": extraction_image_bindings,
         "extraction_metadata_gcs_uri": extraction_metadata_gcs_uri,
@@ -875,6 +984,99 @@ def _upload_submit_artifact(
         str(path), content_type=content_type
     )
     return f"gs://{bucket.name}/{object_name}"
+
+
+def _prepare_submission_ocr(
+    *,
+    bucket: storage.Bucket,
+    blobs: list[storage.Blob],
+    run_dir: Path,
+    submitted_object_names_sha256: str,
+    log,
+) -> dict[str, object]:
+    """Prepare only absent/stale sidecars for the frozen submission cohort."""
+
+    if not bool(config.ocr_enabled):
+        return {}
+
+    log(
+        "Starting automatic OCR preflight for the exact selected submission "
+        f"cohort ({len(blobs)} page(s)). Existing generation-matched sidecars "
+        "will be reused."
+    )
+    summary = prepare_cloud_ocr_metadata(
+        bucket=bucket,
+        blobs=blobs,
+        workers=int(config.batch_ocr_workers or 1),
+        api_batch_size=int(config.batch_ocr_api_batch_size or 1),
+        force=False,
+        log=log,
+    )
+    manifest_uri = (
+        f"gs://{bucket.name}/{summary.manifest_object}"
+        if summary.manifest_object
+        else ""
+    )
+    payload: dict[str, object] = {
+        "schema_version": 1,
+        "mode": "automatic_missing_or_stale_only",
+        "submitted_page_count": len(blobs),
+        "submitted_object_names_sha256": submitted_object_names_sha256,
+        "selected": summary.selected,
+        "prepared": summary.prepared,
+        "cached": summary.cached,
+        "failed": summary.failed,
+        "provider_manifest": {
+            "object": summary.manifest_object,
+            "gcs_uri": manifest_uri,
+        },
+        "records": [record.manifest_record() for record in summary.records],
+    }
+    preflight_path = run_dir / OCR_PREFLIGHT_FILE_NAME
+    preflight_path.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    preflight_uri = _upload_submit_artifact(
+        bucket=bucket,
+        run_dir=run_dir,
+        path=preflight_path,
+    )
+    payload["artifact"] = {
+        "path": OCR_PREFLIGHT_FILE_NAME,
+        "gcs_uri": preflight_uri,
+        "sha256": file_sha256(preflight_path),
+    }
+
+    failures_block_submission = bool(config.batch_ocr_metadata_required) or bool(
+        config.model_validation_enabled
+    )
+    if summary.failed and failures_block_submission:
+        failed_names = [
+            record.blob_name for record in summary.records if record.status == "failed"
+        ]
+        preview = ", ".join(failed_names[:5])
+        remainder = len(failed_names) - min(len(failed_names), 5)
+        suffix = f" and {remainder} more" if remainder else ""
+        raise RuntimeError(
+            "Automatic OCR preflight failed for "
+            f"{summary.failed}/{summary.selected} selected image(s): "
+            f"{preview}{suffix}. No extraction batch was submitted. "
+            f"See {preflight_uri}."
+        )
+    if summary.failed:
+        log(
+            "Automatic OCR preflight retained "
+            f"{summary.failed} failure(s) because "
+            "batch_ocr_metadata_required=False; submission will continue without "
+            "OCR context for those pages."
+        )
+    else:
+        log(
+            "Automatic OCR preflight complete: "
+            f"prepared={summary.prepared}, cached={summary.cached}, failed=0."
+        )
+    return payload
 
 
 def _submit_chunk_job(
@@ -1320,6 +1522,34 @@ def submit_batch(args: argparse.Namespace | None = None) -> Path | None:
             f"No input images found in bucket {config.gcs_bucket_name} "
             f"with prefix '{prefix_display}'."
         )
+    range_count = len(blobs)
+    range_names_digest = _blob_names_sha256(blobs)
+    downscale = _resolve_downscale(args)
+    sample_seed = _resolve_sample_seed(args) if downscale is not None else ""
+    if downscale is not None:
+        config.batch_submission_type = "sample"
+        config.batch_sample_percent = downscale * 100.0
+        config.batch_sample_seed = sample_seed
+        blobs = _sample_blobs_deterministically(
+            blobs,
+            downscale=downscale,
+            seed=sample_seed,
+        )
+        sampled_count = len(blobs)
+        log(
+            "Deterministically sampled input set with "
+            f"fraction={downscale:.6g}, seed={sample_seed!r}, "
+            f"algorithm={SAMPLE_ALGORITHM}. "
+            f"Selected {sampled_count}/{range_count} input blob(s)."
+        )
+        print(
+            f"Sample applied ({downscale:.6g}, seed={sample_seed!r}): "
+            f"{sampled_count}/{range_count} blob(s) selected."
+        )
+    selected_population_count = len(blobs)
+    selected_population_names_digest = _blob_names_sha256(blobs)
+
+    covered_inputs = 0
     if args.continue_dataset:
         continue_dataset_path = resolve_continue_dataset_path(
             args.continue_dataset,
@@ -1346,20 +1576,54 @@ def submit_batch(args: argparse.Namespace | None = None) -> Path | None:
             print("No missing pages to submit; dataset already covers selected inputs.")
             return run_dir
 
-    downscale = _resolve_downscale(args)
-    if downscale is not None:
-        original_count = len(blobs)
-        blobs = _downscale_blobs_randomly(blobs, downscale=downscale)
-        sampled_count = len(blobs)
-        log(
-            f"Downscaled input set with fraction={downscale:.6g}. "
-            f"Selected {sampled_count}/{original_count} input blob(s)."
-        )
-        print(
-            f"Downscale applied ({downscale:.6g}): "
-            f"{sampled_count}/{original_count} blob(s) selected."
-        )
+    selected_names_digest = _blob_names_sha256(blobs)
+    input_selection_path = run_dir / INPUT_SELECTION_FILE_NAME
+    input_selection_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "range": {
+                    "mode": "all_images",
+                    "masterlist_applied": False,
+                    "start_year": None,
+                    "end_year": None,
+                },
+                "submission_type": "sample" if downscale is not None else "complete",
+                "range_image_count": range_count,
+                "range_object_names_sha256": range_names_digest,
+                "sampled_population_count": selected_population_count,
+                "sampled_population_object_names_sha256": (
+                    selected_population_names_digest
+                ),
+                "continued_dataset_covered_count": covered_inputs,
+                "submitted_page_count": len(blobs),
+                "sample_percent": downscale * 100.0 if downscale is not None else None,
+                "sample_seed": sample_seed,
+                "sample_algorithm": SAMPLE_ALGORITHM if downscale is not None else None,
+                "submitted_object_names_sha256": selected_names_digest,
+            },
+            indent=2,
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    input_selection_gcs_uri = _upload_submit_artifact(
+        bucket=bucket,
+        run_dir=run_dir,
+        path=input_selection_path,
+    )
+    log(
+        "Persisted input-selection contract: "
+        f"{input_selection_path.name} -> {input_selection_gcs_uri}."
+    )
 
+    _prepare_submission_ocr(
+        bucket=bucket,
+        blobs=blobs,
+        run_dir=run_dir,
+        submitted_object_names_sha256=selected_names_digest,
+        log=log,
+    )
     validated_ocr_count = validate_ocr_metadata_for_blobs(blobs)
     if validated_ocr_count:
         log(

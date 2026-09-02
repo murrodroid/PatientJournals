@@ -1054,6 +1054,9 @@ def _restore_submit_semantics(
         "csv_sep",
         "input_prompt_name",
         "ocr_enabled",
+        "batch_submission_type",
+        "batch_sample_percent",
+        "batch_sample_seed",
     ):
         if field_name in config_values and config_values[field_name] is not None:
             setattr(config, field_name, config_values[field_name])

@@ -257,6 +257,7 @@ def test_cloud_settings_persist_model_validation_defaults(tmp_path) -> None:
 
     updated = service.save_cloud_settings(
         {
+            "thinking_level": "medium",
             "ocr_enabled": False,
             "subagents": True,
             "model_validation_enabled": True,
@@ -269,6 +270,7 @@ def test_cloud_settings_persist_model_validation_defaults(tmp_path) -> None:
         }
     )
 
+    assert updated["thinking_level"] == "medium"
     assert updated["ocr_enabled"] is False
     assert updated["subagents"] is True
     assert updated["model_validation_enabled"] is True
@@ -312,6 +314,57 @@ def test_model_validation_rejects_local_api_before_submission(tmp_path) -> None:
         assert "requires Cloud batch" in str(exc)
     else:
         raise AssertionError("local model validation should have been rejected")
+
+
+def test_sample_submission_rejects_local_api_before_submission(tmp_path) -> None:
+    service = WorkflowService(
+        AppSettings(local_runs_root=str(tmp_path / "runs")),
+        settings_path=tmp_path / "app_config.json",
+    )
+    draft = SubmitJobDraft(
+        dataset_source="local",
+        run_mode="local_api",
+        schema_name="TextPage",
+        model_name="gemini-3.1-pro",
+        submission_type="sample",
+        sample_percent=10,
+        sample_seed="experiment-7",
+    )
+
+    with pytest.raises(ValueError, match="require Cloud batch"):
+        service.submit_batch(draft)
+
+
+@pytest.mark.parametrize(
+    ("sample_percent", "sample_seed", "message"),
+    [
+        (0, "experiment-7", "greater than 0%"),
+        (101, "experiment-7", "at most 100%"),
+        (10, "", "seed must not be empty"),
+    ],
+)
+def test_sample_submission_rejects_invalid_contract_before_cloud_access(
+    tmp_path,
+    sample_percent,
+    sample_seed,
+    message,
+) -> None:
+    service = WorkflowService(
+        AppSettings(local_runs_root=str(tmp_path / "runs")),
+        settings_path=tmp_path / "app_config.json",
+    )
+    draft = SubmitJobDraft(
+        dataset_source="cloud",
+        run_mode="cloud_batch",
+        schema_name="TextPage",
+        model_name="gemini-3.1-pro",
+        submission_type="sample",
+        sample_percent=sample_percent,
+        sample_seed=sample_seed,
+    )
+
+    with pytest.raises(ValueError, match=message):
+        service.submit_batch(draft)
 
 
 def test_apply_mode_does_not_publish_non_publishable_validation(

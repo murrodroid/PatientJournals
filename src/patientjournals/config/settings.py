@@ -137,6 +137,11 @@ class Config:
     # names (basenames). Used to scope a submission to a specific local folder
     # so it cannot accidentally fan out to the entire bucket prefix.
     batch_restrict_image_names: tuple[str, ...] = ()
+    # Deterministic experimental subset of the selected input population.
+    # None submits the complete population; a percentage requires a seed.
+    batch_submission_type: Literal["complete", "sample"] = "complete"
+    batch_sample_percent: float | None = None
+    batch_sample_seed: str = "42"
     batch_input_extensions: tuple[str, ...] = ("png", "jpg", "jpeg", "webp", "tiff")
     batch_date_mapping_file: str = "date_mapping.csv"
     batch_year_filter: tuple[int | str, ...] = ()
@@ -238,6 +243,23 @@ class Config:
             for name in raw_restrict
             if str(name).strip()
         )
+        if self.batch_submission_type not in {"complete", "sample"}:
+            raise ValueError("batch_submission_type must be complete or sample.")
+        if self.batch_submission_type == "sample":
+            if self.batch_sample_percent is None:
+                raise ValueError(
+                    "batch_sample_percent is required when sampling is enabled."
+                )
+            self.batch_sample_percent = float(self.batch_sample_percent)
+            if not 0.0 < self.batch_sample_percent <= 100.0:
+                raise ValueError(
+                    "batch_sample_percent must be greater than 0 and at most 100."
+                )
+            self.batch_sample_seed = str(self.batch_sample_seed or "").strip()
+            if not self.batch_sample_seed:
+                raise ValueError(
+                    "batch_sample_seed must not be empty when sampling is enabled."
+                )
         raw_ocr_hints = self.ocr_language_hints or ()
         if isinstance(raw_ocr_hints, str):
             raw_ocr_hints = (raw_ocr_hints,)
@@ -337,6 +359,9 @@ def _apply_external_json_config(cfg: Config) -> None:
         "thinking_level",
         "output_format",
         "batch_duplicate_strategy",
+        "batch_submission_type",
+        "batch_sample_percent",
+        "batch_sample_seed",
         "output_schema_name",
         "output_schema_version_id",
         "output_schema_override",

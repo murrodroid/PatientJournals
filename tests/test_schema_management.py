@@ -52,7 +52,10 @@ def test_schema_edits_create_immutable_versions_and_can_be_active(tmp_path) -> N
     assert "research_note" not in dataset_schema_field_paths(
         service.store.schema_version(parent["version_id"])
     )
-    assert service.list_versions(sync_cloud=False)["active_version_id"] == version["version_id"]
+    assert (
+        service.list_versions(sync_cloud=False)["active_version_id"]
+        == version["version_id"]
+    )
 
 
 def test_removing_all_nested_leafs_prunes_the_parent_object(tmp_path) -> None:
@@ -134,7 +137,10 @@ def test_schema_versions_round_trip_through_cloud(tmp_path, monkeypatch) -> None
 
     assert synced["cloud_sync"]["status"] == "synced"
     assert synced["active_version_id"] == created["version_id"]
-    assert second.resolve_version(created["version_id"])["created_by"] == "first@example.com"
+    assert (
+        second.resolve_version(created["version_id"])["created_by"]
+        == "first@example.com"
+    )
     assert f"schemas/versions/{created['version_id']}.json" in objects
 
 
@@ -298,9 +304,7 @@ def test_dashboard_completeness_reports_leafs_not_parent_objects(tmp_path) -> No
         json.dumps(
             {
                 "image_name": "a.png",
-                "diagnoses": {
-                    "sektion": {"number": 12, "diagnoses": ["Diagnosis"]}
-                },
+                "diagnoses": {"sektion": {"number": 12, "diagnoses": ["Diagnosis"]}},
                 "crossed_out": "support metadata",
             }
         )
@@ -317,9 +321,7 @@ def test_dashboard_completeness_reports_leafs_not_parent_objects(tmp_path) -> No
         },
     )
     schema_columns = {item.column for item in analysis.schema_field_completeness}
-    metadata_columns = {
-        item.column for item in analysis.metadata_field_completeness
-    }
+    metadata_columns = {item.column for item in analysis.metadata_field_completeness}
 
     assert "diagnoses.sektion" not in schema_columns
     assert "diagnoses.sektion" not in metadata_columns
@@ -328,7 +330,9 @@ def test_dashboard_completeness_reports_leafs_not_parent_objects(tmp_path) -> No
     assert "crossed_out" not in schema_columns
 
 
-def test_dashboard_infers_legacy_schema_and_includes_fully_missing_leafs(tmp_path) -> None:
+def test_dashboard_infers_legacy_schema_and_includes_fully_missing_leafs(
+    tmp_path,
+) -> None:
     dataset = tmp_path / "legacy.jsonl"
     dataset.write_text(
         json.dumps({"image_name": "a.png", "first_column": "value"}) + "\n",
@@ -346,9 +350,7 @@ def test_dashboard_infers_legacy_schema_and_includes_fully_missing_leafs(tmp_pat
             "sv_unrelated": "Unrelated",
         },
     )
-    completeness = {
-        item.column: item for item in analysis.schema_field_completeness
-    }
+    completeness = {item.column: item for item in analysis.schema_field_completeness}
 
     assert completeness["first_column"].completeness == 100.0
     assert completeness["entirely_missing"].completeness == 0.0
@@ -376,7 +378,9 @@ def test_dataset_inspection_handles_lists_and_prioritizes_provenance(tmp_path) -
     assert page["columns"][:3] == ["image_name", "model", "schema_version_id"]
 
 
-def test_absolute_local_image_hint_does_not_become_a_cloud_object(tmp_path, monkeypatch) -> None:
+def test_absolute_local_image_hint_does_not_become_a_cloud_object(
+    tmp_path, monkeypatch
+) -> None:
     images = tmp_path / "images"
     images.mkdir()
     image = images / "a.png"
@@ -410,6 +414,41 @@ def test_absolute_local_image_hint_does_not_become_a_cloud_object(tmp_path, monk
     assert result["uri"] == str(image)
 
 
+def test_submission_population_counts_configured_cloud_images_by_unique_name(
+    monkeypatch,
+) -> None:
+    class Blob:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+    class Bucket:
+        name = "bucket"
+
+    blobs_by_prefix = {
+        "pages/a/": [Blob("pages/a/one.png"), Blob("pages/a/shared.png")],
+        "pages/b/": [Blob("pages/b/two.png"), Blob("pages/b/shared.png")],
+    }
+    monkeypatch.setattr(
+        "patientjournals.app.image_access.build_storage_bucket",
+        lambda _name=None: Bucket(),
+    )
+    monkeypatch.setattr(
+        "patientjournals.app.image_access.list_bucket_blobs",
+        lambda _bucket, prefix: blobs_by_prefix[prefix],
+    )
+
+    result = ImageAccessService(
+        AppSettings(gcs_bucket_name="bucket", gcs_pages_prefix="pages")
+    ).submission_population(cloud_prefixes=("pages/a", "pages/b"))
+
+    assert result == {
+        "source": "cloud",
+        "bucket": "bucket",
+        "cloud_prefixes": ["pages/a", "pages/b"],
+        "selection_count": 3,
+    }
+
+
 def test_cloud_dataset_cache_uses_full_object_path(tmp_path, monkeypatch) -> None:
     downloads: list[str] = []
 
@@ -426,7 +465,9 @@ def test_cloud_dataset_cache_uses_full_object_path(tmp_path, monkeypatch) -> Non
         def blob(self, name: str) -> Blob:
             return Blob(name)
 
-    monkeypatch.setattr(dataset_module, "build_storage_bucket", lambda _name=None: Bucket())
+    monkeypatch.setattr(
+        dataset_module, "build_storage_bucket", lambda _name=None: Bucket()
+    )
 
     first = dataset_module.download_cloud_dataset(
         "gs://bucket/datasets/run-a/current.jsonl",

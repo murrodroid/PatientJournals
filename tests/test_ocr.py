@@ -10,6 +10,7 @@ from PIL import Image
 
 from patientjournals.batch import ocr_context as batch_ocr
 from patientjournals.batch import prepare_ocr as cloud_ocr
+from patientjournals.batch import submit as batch_submit
 from patientjournals.batch import submit_requests
 from patientjournals.batch import upload as batch_upload
 from patientjournals.config import config
@@ -410,6 +411,125 @@ def test_cloud_ocr_prepares_all_images_and_writes_manifest(monkeypatch) -> None:
         "pages/1.png",
         "pages/2.png",
     }
+
+
+def test_submission_ocr_preflight_scans_only_missing_selected_pages(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setattr(config, "ocr_enabled", True)
+    monkeypatch.setattr(config, "batch_ocr_metadata_required", True)
+    monkeypatch.setattr(config, "batch_ocr_workers", 2)
+    monkeypatch.setattr(config, "batch_ocr_api_batch_size", 16)
+    monkeypatch.setattr(
+        config,
+        "batch_ocr_manifest_object",
+        "batch/ocr/test-submission-manifest.json",
+    )
+    batch_ocr._METADATA_CACHE.clear()
+    bucket = FakeBucket()
+    first = bucket.blob("pages/1.png")
+    second = bucket.blob("pages/2.png")
+    first.payload = _png_bytes(color="white")
+    second.payload = _png_bytes(color="black")
+    batch_sizes: list[int] = []
+
+    def fake_detect_batch(image_payloads) -> tuple[OcrAttempt, ...]:
+        batch_sizes.append(len(image_payloads))
+        return tuple(
+            OcrAttempt(
+                OcrDocument(
+                    image_sha256=sha256(image_bytes).hexdigest(),
+                    width=200,
+                    height=100,
+                    lines=(OcrLine("journal", (1, 2, 3, 4)),),
+                    backend="fake-batch",
+                )
+            )
+            for image_bytes in image_payloads
+        )
+
+    monkeypatch.setattr(batch_ocr, "detect_configured_ocr_batch", fake_detect_batch)
+    monkeypatch.setattr(
+        batch_submit,
+        "_upload_submit_artifact",
+        lambda *, bucket, run_dir, path: (
+            f"gs://{bucket.name}/batch/requests/{run_dir.name}/{path.name}"
+        ),
+    )
+
+    cloud_ocr.prepare_cloud_ocr_metadata(
+        bucket=bucket,
+        blobs=[first],
+        log=lambda _message: None,
+    )
+    result = batch_submit._prepare_submission_ocr(
+        bucket=bucket,
+        blobs=[first, second],
+        run_dir=tmp_path,
+        submitted_object_names_sha256="cohort-digest",
+        log=lambda _message: None,
+    )
+
+    assert batch_sizes == [1, 1]
+    assert result["prepared"] == 1
+    assert result["cached"] == 1
+    assert result["failed"] == 0
+    artifact = json.loads(
+        (tmp_path / batch_submit.OCR_PREFLIGHT_FILE_NAME).read_text(encoding="utf-8")
+    )
+    assert artifact["submitted_object_names_sha256"] == "cohort-digest"
+    assert {record["blob_name"] for record in artifact["records"]} == {
+        "pages/1.png",
+        "pages/2.png",
+    }
+
+
+def test_submission_ocr_preflight_blocks_batch_after_ocr_failure(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setattr(config, "ocr_enabled", True)
+    monkeypatch.setattr(config, "batch_ocr_metadata_required", True)
+    monkeypatch.setattr(config, "batch_ocr_workers", 1)
+    monkeypatch.setattr(config, "batch_ocr_api_batch_size", 16)
+    monkeypatch.setattr(
+        config,
+        "batch_ocr_manifest_object",
+        "batch/ocr/test-failed-submission-manifest.json",
+    )
+    batch_ocr._METADATA_CACHE.clear()
+    bucket = FakeBucket()
+    image_blob = bucket.blob("pages/failed.png")
+    image_blob.payload = _png_bytes()
+    monkeypatch.setattr(
+        batch_ocr,
+        "detect_configured_ocr_batch",
+        lambda image_payloads: tuple(
+            OcrAttempt(document=None, error="quota exhausted")
+            for _ in image_payloads
+        ),
+    )
+    monkeypatch.setattr(
+        batch_submit,
+        "_upload_submit_artifact",
+        lambda *, bucket, run_dir, path: (
+            f"gs://{bucket.name}/batch/requests/{run_dir.name}/{path.name}"
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="No extraction batch was submitted"):
+        batch_submit._prepare_submission_ocr(
+            bucket=bucket,
+            blobs=[image_blob],
+            run_dir=tmp_path,
+            submitted_object_names_sha256="failed-cohort",
+            log=lambda _message: None,
+        )
+
+    artifact = json.loads(
+        (tmp_path / batch_submit.OCR_PREFLIGHT_FILE_NAME).read_text(encoding="utf-8")
+    )
+    assert artifact["failed"] == 1
+    assert artifact["records"][0]["error"] == "quota exhausted"
 
 
 def test_cloud_ocr_splits_provider_calls_at_sixteen_images() -> None:

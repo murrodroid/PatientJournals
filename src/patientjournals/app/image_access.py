@@ -62,10 +62,9 @@ class ImageAccessService:
             _bucket, _separator, hint = hint[5:].partition("/")
         pages_prefix = normalize_prefix(self.settings.gcs_pages_prefix)
         is_bucket_object = bool(pages_prefix and hint.startswith(pages_prefix))
-        if (
-            (is_gcs_uri or is_bucket_object)
-            and image_name_from_reference(hint) == clean_name
-        ):
+        if (is_gcs_uri or is_bucket_object) and image_name_from_reference(
+            hint
+        ) == clean_name:
             return hint.lstrip("/")
         cached = self._cloud_objects.get(clean_name)
         if cached:
@@ -77,7 +76,9 @@ class ImageAccessService:
             if image_name_from_reference(object_name) == clean_name:
                 self._cloud_objects[clean_name] = object_name
                 return object_name
-        raise FileNotFoundError(f"Image not found in the configured bucket: {clean_name}")
+        raise FileNotFoundError(
+            f"Image not found in the configured bucket: {clean_name}"
+        )
 
     def dataset_image_link(
         self,
@@ -156,23 +157,11 @@ class ImageAccessService:
                 ],
             }
 
-        prefixes = tuple(dict.fromkeys(str(item).strip() for item in cloud_prefixes if str(item).strip()))
-        if not prefixes:
-            raise ValueError("Select one or more cloud folders before previewing.")
-        bucket = build_storage_bucket(self.settings.gcs_bucket_name or None)
-        candidates_by_name: dict[str, Any] = {}
-        for prefix in prefixes:
-            blobs = select_bucket_image_blobs(
-                list_bucket_blobs(bucket, prefix=normalize_prefix(prefix))
-            )
-            for blob in blobs:
-                object_name = str(getattr(blob, "name", "") or "")
-                image_name = image_name_from_reference(object_name)
-                if image_name:
-                    candidates_by_name.setdefault(image_name, blob)
-        candidates = list(candidates_by_name.items())
+        bucket, candidates = self._cloud_submission_candidates(cloud_prefixes)
         if not candidates:
-            raise FileNotFoundError("No images found in the selected cloud folders.")
+            raise FileNotFoundError(
+                "No images found in the configured cloud population."
+            )
         chosen = rng.sample(candidates, min(count, len(candidates)))
         return {
             "source": "cloud",
@@ -186,3 +175,47 @@ class ImageAccessService:
                 for image_name, blob in chosen
             ],
         }
+
+    def submission_population(
+        self,
+        *,
+        cloud_prefixes: Iterable[str],
+    ) -> dict[str, Any]:
+        """Count the deduplicated cloud population without signing preview URLs."""
+
+        prefixes = tuple(
+            dict.fromkeys(
+                str(item).strip() for item in cloud_prefixes if str(item).strip()
+            )
+        )
+        bucket, candidates = self._cloud_submission_candidates(prefixes)
+        return {
+            "source": "cloud",
+            "bucket": str(getattr(bucket, "name", self.settings.gcs_bucket_name)),
+            "cloud_prefixes": list(prefixes),
+            "selection_count": len(candidates),
+        }
+
+    def _cloud_submission_candidates(
+        self,
+        cloud_prefixes: Iterable[str],
+    ) -> tuple[Any, list[tuple[str, Any]]]:
+        prefixes = tuple(
+            dict.fromkeys(
+                str(item).strip() for item in cloud_prefixes if str(item).strip()
+            )
+        )
+        if not prefixes:
+            raise ValueError("The configured cloud pages prefix is empty.")
+        bucket = build_storage_bucket(self.settings.gcs_bucket_name or None)
+        candidates_by_name: dict[str, Any] = {}
+        for prefix in prefixes:
+            blobs = select_bucket_image_blobs(
+                list_bucket_blobs(bucket, prefix=normalize_prefix(prefix))
+            )
+            for blob in blobs:
+                object_name = str(getattr(blob, "name", "") or "")
+                image_name = image_name_from_reference(object_name)
+                if image_name:
+                    candidates_by_name.setdefault(image_name, blob)
+        return bucket, list(candidates_by_name.items())
